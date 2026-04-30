@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiKeysTab, WebhooksTab, DocumentationTab } from "@/app/settings/developer/DeveloperSettingsClient";
 import IntegrationsClient from "@/app/settings/integrations/IntegrationsClient";
+import PermissionTemplatesTab from "./PermissionTemplatesTab";
 
 type Member = {
   id: string;
@@ -65,7 +66,9 @@ export default function CompanyClient({
   isSuperAdmin: boolean;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"team" | "projects" | "integrations" | "developer">("team");
+  const [activeTab, setActiveTab] = useState<
+    "team" | "projects" | "permission-templates" | "integrations" | "developer"
+  >("team");
   const [members, setMembers] = useState<Member[]>(initialMembers);
   const [invites, setInvites] = useState<Invite[]>(initialInvites);
 
@@ -190,20 +193,32 @@ const seatCount = members.length;
 
         {/* Tabs */}
         <div className="flex border-b border-gray-200 mb-6">
-          {(["team", "projects", "integrations", "developer"] as const).map((tab) => (
+          {(["team", "projects", "permission-templates", "integrations", "developer"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors mr-1 capitalize ${
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors mr-1 ${
                 activeTab === tab
                   ? "border-orange-500 text-gray-900"
                   : "border-transparent text-gray-400 hover:text-gray-700"
               }`}
             >
-              {tab === "team" ? "Company" : tab === "projects" ? "Projects" : tab === "integrations" ? "Integrations" : "Developer"}
+              {tab === "team"
+                ? "Company"
+                : tab === "projects"
+                  ? "Projects"
+                  : tab === "permission-templates"
+                    ? "Permission Templates"
+                    : tab === "integrations"
+                      ? "Integrations"
+                      : "Developer"}
             </button>
           ))}
         </div>
+
+        {activeTab === "permission-templates" && (
+          <PermissionTemplatesTab canEdit={isSuperAdmin} />
+        )}
 
         {activeTab === "integrations" && (
           <div className="space-y-6">

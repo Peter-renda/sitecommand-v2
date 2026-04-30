@@ -1,5 +1,102 @@
 export type PermissionLevel = "none" | "read_only" | "standard" | "admin";
 
+export const PERMISSION_LEVELS: PermissionLevel[] = ["none", "read_only", "standard", "admin"];
+
+export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
+  none: "None",
+  read_only: "Read Only",
+  standard: "Standard",
+  admin: "Admin",
+};
+
+export type TemplateCategory = "company" | "invitee";
+
+export type CompanyUserType = "super_admin" | "admin" | "member";
+export type InviteeUserType = "subcontractor" | "architect_engineer" | "owner_client";
+export type TemplateUserType = CompanyUserType | InviteeUserType;
+
+export const COMPANY_USER_TYPES: { value: CompanyUserType; label: string }[] = [
+  { value: "super_admin", label: "Super Admin" },
+  { value: "admin", label: "Admin" },
+  { value: "member", label: "User" },
+];
+
+export const INVITEE_USER_TYPES: { value: InviteeUserType; label: string }[] = [
+  { value: "subcontractor", label: "Subcontractor" },
+  { value: "architect_engineer", label: "Architect / Engineer" },
+  { value: "owner_client", label: "Owner / Client" },
+];
+
+export function isTemplateCategory(v: unknown): v is TemplateCategory {
+  return v === "company" || v === "invitee";
+}
+
+export function isTemplateUserType(category: TemplateCategory, v: unknown): v is TemplateUserType {
+  if (category === "company") return v === "super_admin" || v === "admin" || v === "member";
+  return v === "subcontractor" || v === "architect_engineer" || v === "owner_client";
+}
+
+export function isPermissionLevel(v: unknown): v is PermissionLevel {
+  return v === "none" || v === "read_only" || v === "standard" || v === "admin";
+}
+
+/** Canonical, ordered list of tools that appear in the permission template matrix. */
+export const TEMPLATE_TOOLS: string[] = [
+  "Home",
+  "Emails",
+  "Prime Contracts",
+  "Budget",
+  "Commitments",
+  "Change Orders",
+  "Change Events",
+  "RFIs",
+  "Submittals",
+  "Transmittals",
+  "Punch List",
+  "Meetings",
+  "Schedule",
+  "Daily Log",
+  "360 Reporting",
+  "Photos",
+  "Drawings",
+  "Specifications",
+  "Documents",
+  "Directory",
+  "Cover Letters",
+  "Tasks",
+  "Admin",
+  "Connection Manager",
+  "Scheduling",
+  "Webhooks API",
+  "Agent Builder",
+];
+
+/** Built-in defaults for company user types when no override is stored yet. */
+const COMPANY_DEFAULTS: Record<CompanyUserType, PermissionLevel> = {
+  super_admin: "admin",
+  admin: "admin",
+  member: "standard",
+};
+
+/** Returns the built-in default level for a (category, type, tool). */
+export function defaultLevelFor(
+  category: TemplateCategory,
+  userType: TemplateUserType,
+  tool: string
+): PermissionLevel {
+  if (category === "company") {
+    return COMPANY_DEFAULTS[userType as CompanyUserType] ?? "none";
+  }
+  const key =
+    userType === "subcontractor"
+      ? "Subcontractor"
+      : userType === "architect_engineer"
+        ? "Architect/Engineer"
+        : "Owner/Client";
+  const rows = PERMISSION_TEMPLATES[key as PermissionTemplateName] ?? [];
+  return rows.find((r) => r.tool === tool)?.level ?? "none";
+}
+
 export type PermissionTemplateName =
   | "Subcontractor"
   | "Architect/Engineer"
