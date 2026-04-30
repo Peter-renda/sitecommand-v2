@@ -21,5 +21,5 @@ export default async function ChangeEventsPage({
     redirect("/login");
   }
 
-  return <ChangeEventsClient projectId={id} canWrite={canWrite} />;
+  return <ChangeEventsClient projectId={id} canWrite={canWrite} username={session.username} />;
 }

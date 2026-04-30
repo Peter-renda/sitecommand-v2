@@ -7,5 +7,5 @@ export default async function ScopeOfWorkPage({ params }: { params: Promise<{ id
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <ScopeOfWorkClient projectId={id} />;
+  return <ScopeOfWorkClient projectId={id} username={session.username} />;
 }

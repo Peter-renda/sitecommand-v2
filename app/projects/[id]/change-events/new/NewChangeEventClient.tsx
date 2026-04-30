@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 import {
   ChevronRight,
   X,
@@ -812,10 +813,12 @@ export default function NewChangeEventClient({
   projectId,
   sourceType,
   sourceId,
+  username,
 }: {
   projectId: string;
   sourceType?: string;
   sourceId?: string;
+  username?: string;
 }) {
   const router = useRouter();
   const editorRef = useRef<HTMLDivElement>(null);
@@ -1065,10 +1068,11 @@ export default function NewChangeEventClient({
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* ── Breadcrumb + Title ────────────────────────────────────────────────── */}
-      <div className="px-6 pt-5 pb-2 bg-gray-50">
+      <div className="px-6 pt-8 pb-4 bg-gray-50">
         <nav className="flex items-center gap-1 text-xs text-gray-500 mb-2">
           <button
             onClick={() => router.push(`/projects/${projectId}/change-events`)}
@@ -1079,7 +1083,8 @@ export default function NewChangeEventClient({
           <ChevronRight className="w-3 h-3" />
           <span className="text-gray-700">New Change Event</span>
         </nav>
-        <h1 className="font-display text-[24px] leading-tight text-[color:var(--ink)]">Create New Change Event</h1>
+        <p className="eyebrow mb-2">Project · Cost</p>
+        <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Create New Change Event</h1>
       </div>
 
       {/* ── Scrollable content ────────────────────────────────────────────────── */}

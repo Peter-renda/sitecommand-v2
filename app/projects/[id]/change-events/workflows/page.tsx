@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 import { getSession } from "@/lib/auth";
 import { checkProjectAccess } from "@/lib/permissions";
 
@@ -511,13 +512,12 @@ export default async function ChangeEventWorkflowsPage({
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <AppHeader username={session.username} />
       <ProjectNav projectId={projectId} />
-      <main className="mx-auto max-w-5xl px-6 py-8 space-y-6">
+      <main className="mx-auto max-w-7xl px-6 py-8 space-y-6">
         <div>
-          <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
-            Change Management
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-900">Workflow Guides</h1>
+          <p className="eyebrow mb-2">Change Management</p>
+          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Workflow Guides</h1>
           <p className="mt-2 text-sm text-gray-600">
             Reference workflows aligned to SiteCommand&apos;s change-event process.
           </p>

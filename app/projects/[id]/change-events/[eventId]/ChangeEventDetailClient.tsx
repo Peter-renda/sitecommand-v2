@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 import { ChevronDown, ChevronRight, EllipsisVertical, Paperclip, Pencil, Search, X } from "lucide-react";
 import RelatedItemsTab from "./RelatedItemsTab";
 
@@ -122,10 +123,12 @@ export default function ChangeEventDetailClient({
   projectId,
   eventId,
   canWrite,
+  username,
 }: {
   projectId: string;
   eventId: string;
   canWrite: boolean;
+  username?: string;
 }) {
   const router = useRouter();
   const [event, setEvent] = useState<ChangeEvent | null>(null);
@@ -238,7 +241,8 @@ export default function ChangeEventDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex flex-col">
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Loading…</div>
       </div>
@@ -247,7 +251,8 @@ export default function ChangeEventDetailClient({
 
   if (error || !event) {
     return (
-      <div className="min-h-screen bg-white flex flex-col">
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-red-500">{error ?? "Change event not found."}</div>
       </div>
@@ -542,7 +547,8 @@ export default function ChangeEventDetailClient({
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white">

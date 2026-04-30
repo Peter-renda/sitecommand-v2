@@ -17,6 +17,7 @@ export default async function PrimeContractDetailPage({
       projectId={id}
       contractId={contractId}
       role={(session as any).role ?? "member"}
+      username={session.username}
     />
   );
 }

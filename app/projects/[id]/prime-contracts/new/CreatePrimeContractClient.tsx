@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 import {
   Bold, Italic, Underline, Strikethrough,
   AlignLeft, AlignCenter, AlignRight,
@@ -268,7 +269,7 @@ function Select({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectEle
   );
 }
 
-export default function CreatePrimeContractClient({ projectId }: { projectId: string }) {
+export default function CreatePrimeContractClient({ projectId, username }: { projectId: string; username?: string }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
@@ -368,14 +369,16 @@ export default function CreatePrimeContractClient({ projectId }: { projectId: st
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       <form onSubmit={handleSubmit} className="flex-1 flex flex-col">
         <div className="flex-1 space-y-3 py-3">
 
-          <div className="bg-white px-8 py-4">
-            <h1 className="font-display text-[24px] leading-tight text-[color:var(--ink)]">Create Prime Contract</h1>
+          <div className="bg-white px-8 pt-6 pb-4">
+            <p className="eyebrow mb-2">Project · Cost</p>
+            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Create Prime Contract</h1>
           </div>
 
           {error && (

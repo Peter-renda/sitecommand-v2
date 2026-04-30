@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ function Th({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function BuyoutSummaryReport({ projectId }: { projectId: string }) {
+export default function BuyoutSummaryReport({ projectId, username }: { projectId: string; username?: string }) {
   const [rows, setRows] = useState<BuyoutRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showExport, setShowExport] = useState(false);
@@ -151,7 +152,8 @@ export default function BuyoutSummaryReport({ projectId }: { projectId: string }
   );
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       <div className="px-6 py-6">
@@ -177,7 +179,10 @@ export default function BuyoutSummaryReport({ projectId }: { projectId: string }
 
         {/* Title + Export */}
         <div className="flex items-start justify-between mb-4">
-          <h1 className="text-2xl font-normal text-gray-800">Buyout Summary Report</h1>
+          <div>
+            <p className="eyebrow mb-2">Reporting · Cost</p>
+            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Buyout Summary Report</h1>
+          </div>
 
           <div className="relative">
             <button

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 import { Plus, Mail, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Maximize2, HelpCircle } from "lucide-react";
 
 type SovItem = {
@@ -209,10 +210,12 @@ export default function PrimeContractDetailClient({
   projectId,
   contractId,
   role,
+  username,
 }: {
   projectId: string;
   contractId: string;
   role: string;
+  username?: string;
 }) {
   const router = useRouter();
   const [contract, setContract] = useState<Contract | null>(null);
@@ -321,7 +324,8 @@ export default function PrimeContractDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading…</div>
       </div>
@@ -330,7 +334,8 @@ export default function PrimeContractDetailClient({
 
   if (error || !contract) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-red-500 text-sm">{error ?? "Contract not found."}</div>
       </div>
@@ -441,7 +446,8 @@ export default function PrimeContractDetailClient({
   ];
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* Header */}
@@ -462,7 +468,7 @@ export default function PrimeContractDetailClient({
           <div className="relative">
             <button
               onClick={() => setCreateMenuOpen((open) => !open)}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-gray-900 text-white rounded hover:bg-gray-700 transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-[color:var(--ink)] text-white rounded hover:bg-black transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
               Create

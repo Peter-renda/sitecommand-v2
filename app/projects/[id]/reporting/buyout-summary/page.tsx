@@ -11,5 +11,5 @@ export default async function BuyoutSummaryReportPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <BuyoutSummaryReport projectId={id} />;
+  return <BuyoutSummaryReport projectId={id} username={session.username} />;
 }

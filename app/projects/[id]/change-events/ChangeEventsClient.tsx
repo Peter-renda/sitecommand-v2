@@ -3,6 +3,7 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 import {
   ChevronDown,
   ChevronRight,
@@ -124,9 +125,11 @@ function fmtQty(val: number | null | undefined) {
 export default function ChangeEventsClient({
   projectId,
   canWrite,
+  username,
 }: {
   projectId: string;
   canWrite: boolean;
+  username?: string;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("detail");
@@ -480,36 +483,36 @@ export default function ChangeEventsClient({
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* ── Page Header ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white shrink-0">
-        {/* Left: title + tabs */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Settings className="w-4 h-4 text-orange-500" />
-            <h1 className="font-display text-[18px] leading-tight text-[color:var(--ink)]">Change Events</h1>
-          </div>
-          <div className="flex items-center ml-2">
-            {(["detail", "summary", "rfqs", "recycle_bin"] as Tab[]).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === tab
-                    ? "border-gray-900 text-gray-900"
-                    : "border-transparent text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {tab === "recycle_bin"
-                  ? "Recycle Bin"
-                  : tab === "rfqs"
-                  ? "RFQs"
-                  : tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
-          </div>
+      <div className="px-6 pt-8 pb-4 bg-gray-50">
+        <p className="eyebrow mb-2">Project · Cost</p>
+        <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Change Events</h1>
+      </div>
+
+      <div className="flex items-center justify-between px-6 py-2 border-b border-gray-200 bg-white shrink-0">
+        {/* Left: tabs */}
+        <div className="flex items-center">
+          {(["detail", "summary", "rfqs", "recycle_bin"] as Tab[]).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab
+                  ? "border-gray-900 text-gray-900"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {tab === "recycle_bin"
+                ? "Recycle Bin"
+                : tab === "rfqs"
+                ? "RFQs"
+                : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
         </div>
 
         {/* Right: Export + Create */}
@@ -538,9 +541,9 @@ export default function ChangeEventsClient({
           {canWrite && (
             <button
               onClick={() => router.push(`/projects/${projectId}/change-events/new`)}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-gray-900 text-white rounded hover:bg-gray-700 transition-colors font-medium"
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
             >
-              <Plus className="w-3.5 h-3.5" /> Create
+              <Plus className="w-4 h-4" /> Create
             </button>
           )}
           <button

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 import { ChevronDown, FileText, Lock, XCircle, Search, SlidersHorizontal, X, Settings2 } from "lucide-react";
 
 type ChangeOrder = {
@@ -304,15 +305,19 @@ export default function ChangeOrdersClient({
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* Page header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white shrink-0">
-        <h1 className="font-display text-[18px] leading-tight text-[color:var(--ink)]">Change Orders</h1>
+      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-gray-50 gap-4 flex-wrap">
+        <div>
+          <p className="eyebrow mb-2">Project · Cost</p>
+          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Change Orders</h1>
+        </div>
         <button
           onClick={exportListAsCsv}
-          className="px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors"
+          className="px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors"
         >
           Export CO Log
         </button>

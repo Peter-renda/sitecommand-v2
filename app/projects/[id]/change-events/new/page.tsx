@@ -28,6 +28,7 @@ export default async function NewChangeEventPage({
       projectId={id}
       sourceType={sourceType ?? ""}
       sourceId={sourceId ?? ""}
+      username={session.username}
     />
   );
 }

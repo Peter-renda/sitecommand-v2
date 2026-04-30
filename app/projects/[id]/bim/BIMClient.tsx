@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 
 type TranslationStatus = "pending" | "inprogress" | "success" | "failed" | "timeout";
 
@@ -297,9 +298,10 @@ export default function BIMClient({
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
-      <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 48px)" }}>
+      <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 104px)" }}>
         {/* Sidebar */}
         <aside className="w-72 bg-white border-r border-gray-100 flex flex-col shrink-0">
           {/* Sidebar header */}
@@ -321,7 +323,7 @@ export default function BIMClient({
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[color:var(--ink)] text-white text-xs font-medium rounded-md hover:bg-black transition-colors disabled:opacity-50"
               >
                 {uploading ? (
                   <>

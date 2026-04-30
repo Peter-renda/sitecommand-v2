@@ -11,5 +11,5 @@ export default async function CreatePrimeContractPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <CreatePrimeContractClient projectId={id} />;
+  return <CreatePrimeContractClient projectId={id} username={session.username} />;
 }

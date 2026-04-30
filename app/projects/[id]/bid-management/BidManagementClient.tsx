@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -253,10 +254,12 @@ export default function BidManagementClient({
   projectId,
   role,
   userId,
+  username,
 }: {
   projectId: string;
   role: string;
   userId: string;
+  username?: string;
 }) {
   const [packages, setPackages] = useState<BidPackage[]>([]);
   const [selectedPackage, setSelectedPackage] = useState<BidPackage | null>(null);
@@ -446,16 +449,22 @@ export default function BidManagementClient({
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
-      <div className="flex h-[calc(100vh-56px)]">
+      <div className="px-6 pt-8 pb-4 bg-gray-50">
+        <p className="eyebrow mb-2">Project · Preconstruction</p>
+        <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Bid Management</h1>
+      </div>
+
+      <div className="flex h-[calc(100vh-56px-56px-96px)] min-h-[480px]">
         {/* ── Left Sidebar: Package List ── */}
         <aside className="w-72 bg-white border-r border-gray-100 flex flex-col shrink-0">
           <div className="px-4 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">Bid Packages</h2>
             <button
               onClick={() => setShowNewPackage(true)}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -545,7 +554,7 @@ export default function BidManagementClient({
               <div className="bg-white rounded-xl border border-gray-100 px-6 py-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <h1 className="font-display text-[18px] leading-tight text-[color:var(--ink)] truncate">{selectedPackage.name}</h1>
+                    <h2 className="font-display text-[20px] leading-tight text-[color:var(--ink)] truncate">{selectedPackage.name}</h2>
                     {selectedPackage.description && (
                       <p className="text-sm text-gray-500 mt-0.5">{selectedPackage.description}</p>
                     )}

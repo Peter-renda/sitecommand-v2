@@ -3,6 +3,7 @@
 import { Fragment, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 import { Settings, Plus, ChevronDown, ChevronRight, Search, SlidersHorizontal, Columns3, Upload, X, Loader2 } from "lucide-react";
 
 type PrimeContract = {
@@ -506,20 +507,24 @@ export default function PrimeContractsClient({
 
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white shrink-0">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={openSettingsModal}
-            className="text-gray-500 hover:text-gray-700 transition-colors"
-            title="Prime Contract Settings"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
-          <h1 className="font-display text-[18px] leading-tight text-[color:var(--ink)]">Prime Contracts</h1>
+      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-gray-50 gap-4 flex-wrap">
+        <div>
+          <p className="eyebrow mb-2">Project · Cost</p>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Prime Contracts</h1>
+            <button
+              onClick={openSettingsModal}
+              className="text-gray-400 hover:text-gray-700 transition-colors"
+              title="Prime Contract Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <div ref={exportRef} className="relative">
@@ -568,9 +573,9 @@ export default function PrimeContractsClient({
           />
           <button
             onClick={() => router.push(`/projects/${projectId}/prime-contracts/new`)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-gray-900 hover:bg-gray-700 text-white rounded font-medium transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
           >
-            <Plus className="w-3 h-3" />
+            <Plus className="w-4 h-4" />
             Create
           </button>
         </div>

@@ -11,5 +11,5 @@ export default async function BudgetModificationsReportPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <BudgetModificationsReport projectId={id} />;
+  return <BudgetModificationsReport projectId={id} username={session.username} />;
 }

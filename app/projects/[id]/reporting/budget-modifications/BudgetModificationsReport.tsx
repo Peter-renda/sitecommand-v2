@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -41,7 +42,7 @@ function fmtDate(iso: string): string {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function BudgetModificationsReport({ projectId }: { projectId: string }) {
+export default function BudgetModificationsReport({ projectId, username }: { projectId: string; username?: string }) {
   const [records, setRecords] = useState<ModificationRecord[]>([]);
   const [lineItems, setLineItems] = useState<BudgetLineItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,7 +128,8 @@ export default function BudgetModificationsReport({ projectId }: { projectId: st
     "w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400";
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       <div className="flex">
@@ -149,7 +151,10 @@ export default function BudgetModificationsReport({ projectId }: { projectId: st
 
           {/* Title + Export */}
           <div className="flex items-start justify-between mb-6">
-            <h1 className="text-2xl font-normal text-gray-800">Budget Modifications</h1>
+            <div>
+              <p className="eyebrow mb-2">Reporting · Cost</p>
+              <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Budget Modifications</h1>
+            </div>
 
             {/* Export dropdown */}
             <div className="relative">

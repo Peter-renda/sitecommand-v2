@@ -7,5 +7,5 @@ export default async function SpecificationsPage({ params }: { params: Promise<{
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <SpecificationsClient projectId={id} />;
+  return <SpecificationsClient projectId={id} username={session.username} />;
 }

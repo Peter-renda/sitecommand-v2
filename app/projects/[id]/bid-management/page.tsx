@@ -7,5 +7,5 @@ export default async function BidManagementPage({ params }: { params: Promise<{ 
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <BidManagementClient projectId={id} role={session.role} userId={session.id} />;
+  return <BidManagementClient projectId={id} role={session.role} userId={session.id} username={session.username} />;
 }

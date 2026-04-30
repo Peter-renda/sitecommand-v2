@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Upload, ChevronDown, X, Plus, Settings, Info } from "lucide-react";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 
 type Specification = {
   id: string;
@@ -19,7 +20,7 @@ type Division = {
 
 type TopTab = "specifications" | "all-revisions" | "recycle-bin";
 
-export default function SpecificationsClient({ projectId }: { projectId: string }) {
+export default function SpecificationsClient({ projectId, username }: { projectId: string; username?: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [specifications, setSpecifications] = useState<Specification[]>([]);
@@ -235,29 +236,29 @@ export default function SpecificationsClient({ projectId }: { projectId: string 
   ];
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] text-gray-900">
+    <div className="min-h-screen bg-gray-50 text-gray-900">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
-      <div className="border-b border-gray-200 bg-white">
-        <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-2 text-[30px] font-bold text-gray-800">
-            <Settings className="h-6 w-6" />
+      <div className="px-6 pt-8 pb-4 bg-gray-50">
+        <div className="flex items-end justify-between gap-4 flex-wrap">
+          <div>
             <p className="eyebrow mb-2">Project · Coordination</p>
-            <h1 className="font-display text-[34px] leading-tight text-[color:var(--ink)]">Specifications</h1>
+            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Specifications</h1>
           </div>
 
           <div className="flex items-center gap-2 text-sm">
             <button
               type="button"
               onClick={() => setShowUploadModal(true)}
-              className="rounded bg-gray-900 px-4 py-2 font-medium text-white hover:bg-gray-700"
+              className="rounded-md bg-[color:var(--ink)] px-4 py-2 text-sm font-semibold text-white hover:bg-black transition-colors"
             >
               Upload
             </button>
             <button
               type="button"
               onClick={handleOpenSpecBook}
-              className="rounded border border-gray-300 bg-white px-4 py-2 font-medium text-gray-800 hover:bg-gray-50"
+              className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Open Specification Book
             </button>
@@ -312,7 +313,7 @@ export default function SpecificationsClient({ projectId }: { projectId: string 
         </div>
       </div>
 
-      <div className="border-y border-gray-200 bg-[#ececec] px-4 py-4">
+      <div className="border-y border-gray-200 bg-gray-100 px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="relative min-w-[280px] flex-1 max-w-xl">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />

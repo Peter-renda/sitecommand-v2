@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import ProjectNav from "@/components/ProjectNav";
+import AppHeader from "@/app/components/AppHeader";
 import { FileText, Plus, Pencil, Trash2, Sparkles, Download, ChevronDown, ChevronUp } from "lucide-react";
 
 // ─── CSI MasterFormat Divisions ───────────────────────────────────────────────
@@ -78,7 +79,7 @@ interface EditFormState {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export default function ScopeOfWorkClient({ projectId }: { projectId: string }) {
+export default function ScopeOfWorkClient({ projectId, username }: { projectId: string; username?: string }) {
   const [items, setItems] = useState<ScopeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeDivisions, setActiveDivisions] = useState<Set<string>>(new Set(["01"]));
@@ -396,6 +397,7 @@ export default function ScopeOfWorkClient({ projectId }: { projectId: string }) 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
+        <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex items-center justify-center h-64">
           <div className="w-6 h-6 border-2 border-gray-300 border-t-orange-500 rounded-full animate-spin" />
@@ -406,25 +408,26 @@ export default function ScopeOfWorkClient({ projectId }: { projectId: string }) 
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
-      {/* Top toolbar */}
-      <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <FileText className="w-5 h-5 text-orange-500" />
-          <h1 className="font-display text-[18px] leading-tight text-[color:var(--ink)]">Scope of Work</h1>
+      {/* Page header */}
+      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-gray-50 gap-4 flex-wrap">
+        <div>
+          <p className="eyebrow mb-2">Project · Preconstruction</p>
+          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Scope of Work</h1>
         </div>
         <button
           onClick={handleExportPDF}
           disabled={exportLoading || items.length === 0}
-          className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-4 py-2 bg-[color:var(--ink)] text-white text-sm font-semibold rounded-md hover:bg-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Download className="w-4 h-4" />
           {exportLoading ? "Exporting..." : "Export PDF"}
         </button>
       </div>
 
-      <div className="flex h-[calc(100vh-105px)]">
+      <div className="flex h-[calc(100vh-56px-56px-104px)] min-h-[480px]">
         {/* ── Sidebar ────────────────────────────────────────────────────── */}
         <aside className="w-64 shrink-0 bg-white border-r border-gray-200 overflow-y-auto">
           <div className="px-4 py-3 border-b border-gray-100">
