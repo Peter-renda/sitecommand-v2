@@ -177,7 +177,7 @@ export default function MemberToolAccessClient({
           onClick={() => router.push("/company")}
           className="text-sm text-gray-400 hover:text-gray-900 transition-colors"
         >
-          ← Team
+          ← Company
         </button>
       </header>
 
