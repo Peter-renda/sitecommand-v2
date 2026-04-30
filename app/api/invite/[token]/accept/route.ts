@@ -1,8 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import { createToken } from "@/lib/auth";
 import { addUserToDirectory } from "@/lib/directory";
+import { templateNameToCategoryAndType } from "@/lib/permission-templates";
+import { applyPermissionTemplate } from "@/lib/apply-permission-template";
+
+/**
+ * Looks up the directory contact for (project, email) and applies its
+ * permission template (if set) to the newly granted user. Silently no-ops
+ * when no matching contact, no template, or no owning company.
+ */
+async function applyDirectoryTemplateForInvite(
+  supabase: SupabaseClient,
+  projectId: string,
+  companyId: string,
+  email: string,
+  userId: string
+) {
+  const { data: contact } = await supabase
+    .from("directory_contacts")
+    .select("permission")
+    .eq("project_id", projectId)
+    .eq("type", "user")
+    .ilike("email", email)
+    .maybeSingle();
+
+  const mapped = templateNameToCategoryAndType(contact?.permission);
+  if (!mapped) return;
+
+  await applyPermissionTemplate(supabase, {
+    companyId,
+    projectId,
+    userId,
+    category: mapped.category,
+    userType: mapped.userType,
+  });
+}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -94,6 +129,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
         { onConflict: "project_id,user_id" }
       );
       await addUserToDirectory(supabase, invite.project_id, user.id);
+      await applyDirectoryTemplateForInvite(
+        supabase,
+        invite.project_id,
+        invite.company_id,
+        invite.email,
+        user.id
+      );
     }
 
     // For internal invites: ensure the user is in org_members for the invited company
@@ -193,6 +235,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
         // allowed_sections defaults to NULL = access to all sections
       });
       await addUserToDirectory(supabase, invite.project_id, newUser.id);
+      await applyDirectoryTemplateForInvite(
+        supabase,
+        invite.project_id,
+        invite.company_id,
+        invite.email,
+        newUser.id
+      );
     }
 
     await supabase
@@ -278,6 +327,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       { onConflict: "project_id,user_id" }
     );
     await addUserToDirectory(supabase, invite.project_id, newUser.id);
+    // Internal members get the company.member template applied so the
+    // Super Admin's Permission Templates configuration drives their access.
+    await applyPermissionTemplate(supabase, {
+      companyId: invite.company_id,
+      projectId: invite.project_id,
+      userId: newUser.id,
+      category: "company",
+      userType: "member",
+    });
   }
 
   const jwtToken = await createToken({

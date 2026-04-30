@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
+import { templateNameToCategoryAndType } from "@/lib/permission-templates";
+import {
+  applyPermissionTemplate,
+  clearProjectToolPermissions,
+} from "@/lib/apply-permission-template";
 
 export async function GET(
   _req: NextRequest,
@@ -49,6 +54,42 @@ export async function PATCH(
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // If the permission template changed and we can resolve a user account
+  // for this contact (matched by email on this project), translate the
+  // template into concrete project_tool_permissions rows. Templates only
+  // apply to user-type contacts (companies/groups have no user account).
+  if ("permission" in body && data?.type === "user" && data?.email) {
+    const { data: project } = await supabase
+      .from("projects")
+      .select("company_id")
+      .eq("id", projectId)
+      .single();
+
+    const { data: user } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", data.email)
+      .maybeSingle();
+
+    if (project?.company_id && user?.id) {
+      const mapped = templateNameToCategoryAndType(data.permission);
+      if (mapped) {
+        await applyPermissionTemplate(supabase, {
+          companyId: project.company_id,
+          projectId,
+          userId: user.id,
+          category: mapped.category,
+          userType: mapped.userType,
+          updatedBy: session.id,
+        });
+      } else {
+        // Template was cleared — drop any per-tool overrides for this user.
+        await clearProjectToolPermissions(supabase, projectId, user.id);
+      }
+    }
+  }
+
   return NextResponse.json(data);
 }
 

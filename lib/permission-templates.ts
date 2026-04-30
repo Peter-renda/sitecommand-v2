@@ -97,6 +97,56 @@ export function defaultLevelFor(
   return rows.find((r) => r.tool === tool)?.level ?? "none";
 }
 
+/** Maps the canonical template tool display name to the slug stored in
+ *  project_tool_permissions.tool. Tools that don't yet have a project-level
+ *  permission slug map to themselves so the matrix can still capture intent. */
+export const TOOL_NAME_TO_SLUG: Record<string, string> = {
+  "Home": "home",
+  "Emails": "emails",
+  "Prime Contracts": "prime-contracts",
+  "Budget": "budget",
+  "Commitments": "commitments",
+  "Change Orders": "change-orders",
+  "Change Events": "change-events",
+  "RFIs": "rfis",
+  "Submittals": "submittals",
+  "Transmittals": "transmittals",
+  "Punch List": "punch-list",
+  "Meetings": "meetings",
+  "Schedule": "schedule",
+  "Daily Log": "daily-log",
+  "360 Reporting": "reporting",
+  "Photos": "photos",
+  "Drawings": "drawings",
+  "Specifications": "specifications",
+  "Documents": "documents",
+  "Directory": "directory",
+  "Cover Letters": "cover-letters",
+  "Tasks": "tasks",
+  "Admin": "admin",
+  "Connection Manager": "connection-manager",
+  "Scheduling": "scheduling",
+  "Webhooks API": "webhooks-api",
+  "Agent Builder": "agent-builder",
+};
+
+/** Maps a directory_contacts.permission template-name string to the
+ *  (category, user_type) tuple used by company_permission_templates. */
+export function templateNameToCategoryAndType(
+  name: string | null | undefined
+): { category: TemplateCategory; userType: TemplateUserType } | null {
+  switch (name) {
+    case "Subcontractor":
+      return { category: "invitee", userType: "subcontractor" };
+    case "Architect/Engineer":
+      return { category: "invitee", userType: "architect_engineer" };
+    case "Owner/Client":
+      return { category: "invitee", userType: "owner_client" };
+    default:
+      return null;
+  }
+}
+
 export type PermissionTemplateName =
   | "Subcontractor"
   | "Architect/Engineer"

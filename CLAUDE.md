@@ -1247,6 +1247,30 @@ Change event line items cannot be added to a commitment when:
 - Migration: `101_commitment_ssov_approved_at.sql` adds `commitments.ssov_approved_at` TIMESTAMPTZ.
 - SiteCommand uses a single **invoice contact** on the commitment (`subcontractor_contact`) rather than a distribution list; notifications are sent to that contact only.
 
+## Permission Templates – Company-Level Defaults
+
+### Overview
+The Super Admin defines per-company permission templates under **Company → Permission Templates**. Templates are keyed by `(category, user_type)`:
+
+- **Company**: `super_admin`, `admin`, `member`
+- **Invitee**: `subcontractor`, `architect_engineer`, `owner_client`
+
+Each template stores a level (`none` / `read_only` / `standard` / `admin`) per tool. Stored overrides live in `company_permission_templates` (migration `112_company_permission_templates.sql`); built-in defaults from `lib/permission-templates.ts` apply when no override is set.
+
+### Level Semantics
+- **None** — user cannot access the tool/page. `getToolLevel` returns `none`, gating endpoints reject, and the tool is hidden from navigation.
+- **Read Only** — user can view but cannot edit, comment, or otherwise mutate state.
+- **Standard** — user can view and interact with records, but cannot manage tool configuration or perform admin actions.
+- **Admin** — full access to the tool, including configuration and admin-only actions.
+
+### How Templates Become Real Permissions
+- Templates are translated into rows in `project_tool_permissions` (one per tool slug) when:
+  1. **Invite acceptance** (`POST /api/invite/[token]/accept`) — for both new and existing accounts. External invitees pull from the directory contact's `permission` field; internal `member` invitees get the `company.member` template.
+  2. **Directory contact PATCH** (`PATCH /api/projects/[id]/directory/[contactId]`) — when `permission` changes on a `type='user'` contact whose email matches an existing user, the template is re-applied for that user/project. Clearing the template removes their per-tool overrides.
+- `lib/apply-permission-template.ts` exposes `applyPermissionTemplate({ companyId, projectId, userId, category, userType })` and `clearProjectToolPermissions(projectId, userId)`.
+- The directory contact's `permission` string is mapped to `(category, user_type)` via `templateNameToCategoryAndType()` in `lib/permission-templates.ts`. Tool display names are mapped to project-tool slugs via `TOOL_NAME_TO_SLUG`.
+- Resolution still follows `getToolLevel`: explicit `project_tool_permissions` row > role default > none. Company admins (super_admin / admin) on the owning company always evaluate to `admin` regardless of any template row, to prevent self-lockout.
+
 ## RFI Tool – Admin-Only Mutations
 
 ### Overview
