@@ -40,6 +40,16 @@ export default function ChangeOrders() {
   const [orders, setOrders] = useState<ChangeOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState({
+    syncBudgetCodes: true,
+    displayRomColumns: true,
+    displayUomColumns: true,
+    autoPopulateLineItems: true,
+    copyToPrimePcos: true,
+    copyToCommitmentCos: true,
+    commitmentDataSource: "latest-price" as "latest-price" | "latest-cost",
+  });
 
   useEffect(() => {
     setLoading(true);
@@ -63,8 +73,15 @@ export default function ChangeOrders() {
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <Settings className="w-4 h-4 text-orange-500" />
-            <h1 className="text-sm font-semibold text-gray-900">Change Orders</h1>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="text-orange-500 hover:text-orange-600 transition-colors"
+              title="Change Event Settings"
+              aria-label="Open Change Event Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            <h1 className="text-sm font-semibold text-gray-900">Change Events</h1>
           </div>
           {/* Tabs */}
           <div className="flex items-center ml-2">
@@ -101,6 +118,94 @@ export default function ChangeOrders() {
           </button>
         </div>
       </div>
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-40 bg-black/30 flex items-start justify-center p-6 overflow-y-auto">
+          <div className="w-full max-w-5xl bg-white border border-gray-200 rounded shadow-lg">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-2xl text-gray-800">Change Event Settings</h2>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="text-sm px-3 py-1 border border-gray-300 rounded hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+            <div className="px-6 py-4 space-y-6 text-sm text-gray-800">
+              <section>
+                <h3 className="font-semibold text-gray-900 mb-2">SYNCING OBJECTS</h3>
+                <label className="flex items-center justify-between py-2 border-y border-gray-200">
+                  <span>Maintain Budget Codes across all Line Items in sync:</span>
+                  <input type="checkbox" checked={settings.syncBudgetCodes} onChange={(e) => setSettings((prev) => ({ ...prev, syncBudgetCodes: e.target.checked }))} />
+                </label>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-gray-900 mb-2">COLUMN DISPLAY</h3>
+                <label className="flex items-center justify-between py-2 border-y border-gray-200">
+                  <span>Display Revenue ROM, Latest Price, Latest Cost, and Over / Under columns:</span>
+                  <input type="checkbox" checked={settings.displayRomColumns} onChange={(e) => setSettings((prev) => ({ ...prev, displayRomColumns: e.target.checked }))} />
+                </label>
+                <label className="flex items-center justify-between py-2 border-b border-gray-200">
+                  <span>Display UOM, Revenue Qty, Revenue Unit Cost, ROM Unit Qty, and ROM Unit Cost Columns:</span>
+                  <input type="checkbox" checked={settings.displayUomColumns} onChange={(e) => setSettings((prev) => ({ ...prev, displayUomColumns: e.target.checked }))} />
+                </label>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-gray-900 mb-2">LINE ITEMS</h3>
+                <label className="flex items-center justify-between py-2 border-y border-gray-200">
+                  <span>Allow Line Item auto-population of Budget Code, Vendor, and Contracts:</span>
+                  <input type="checkbox" checked={settings.autoPopulateLineItems} onChange={(e) => setSettings((prev) => ({ ...prev, autoPopulateLineItems: e.target.checked }))} />
+                </label>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-gray-900 mb-1">CHANGE ORDER</h3>
+                <p className="text-xs text-gray-500 mb-2">This setting will determine which source is used to create or update Commitment Change Orders.</p>
+                <div className="py-2 border-y border-gray-200">
+                  <p className="font-medium mb-2">Commitment Change Order Data Source</p>
+                  <label className="flex items-center gap-2 py-1">
+                    <input
+                      type="radio"
+                      name="commitmentDataSource"
+                      checked={settings.commitmentDataSource === "latest-price"}
+                      onChange={() => setSettings((prev) => ({ ...prev, commitmentDataSource: "latest-price" }))}
+                    />
+                    <span>Use Latest Price to create a Commitment Change Order in the presence of a Prime PCO (Default)</span>
+                  </label>
+                  <label className="flex items-center gap-2 py-1">
+                    <input
+                      type="radio"
+                      name="commitmentDataSource"
+                      checked={settings.commitmentDataSource === "latest-cost"}
+                      onChange={() => setSettings((prev) => ({ ...prev, commitmentDataSource: "latest-cost" }))}
+                    />
+                    <span>Use Latest Cost to create a Commitment Change Order independent of the presence of a Prime PCO</span>
+                  </label>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-gray-900 mb-2">ATTACHMENTS</h3>
+                <label className="flex items-center justify-between py-2 border-y border-gray-200">
+                  <span>Copy attachments from RFQ responses to Prime PCOs:</span>
+                  <input type="checkbox" checked={settings.copyToPrimePcos} onChange={(e) => setSettings((prev) => ({ ...prev, copyToPrimePcos: e.target.checked }))} />
+                </label>
+                <label className="flex items-center justify-between py-2 border-b border-gray-200">
+                  <span>Copy attachments from RFQ responses to Commitment COs:</span>
+                  <input type="checkbox" checked={settings.copyToCommitmentCos} onChange={(e) => setSettings((prev) => ({ ...prev, copyToCommitmentCos: e.target.checked }))} />
+                </label>
+              </section>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-center">
+              <button onClick={() => setSettingsOpen(false)} className="px-4 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-800">
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filter bar */}
       <div className="px-4 py-2 border-b border-gray-100 bg-white shrink-0">
