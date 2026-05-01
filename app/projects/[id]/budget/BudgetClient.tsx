@@ -2944,7 +2944,7 @@ export default function BudgetClient({
                                   </svg>
                                 </button>
                                 {rowMenuId === item.id && (
-                                  <div className="absolute right-0 top-8 w-36 bg-white border border-gray-100 rounded-xl shadow-lg py-1 z-20">
+                                  <div className="absolute right-0 bottom-8 w-36 bg-white border border-gray-100 rounded-xl shadow-lg py-1 z-30">
                                     <button
                                       onClick={() => { setEditingItem(item); setRowMenuId(null); }}
                                       className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
