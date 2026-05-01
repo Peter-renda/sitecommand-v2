@@ -1,8 +1,9 @@
 /**
  * GET /api/integrations/quickbooks/connect
  *
- * Initiates the QuickBooks Online OAuth 2.0 authorization flow. Redirects the
- * user to the Intuit authorization page. After authorization, Intuit redirects
+ * Initiates the Intuit OAuth 2.0 authorization flow for QBO-compatible
+ * accounting tenants (QuickBooks Online and Intuit Enterprise Suite).
+ * Redirects the user to Intuit authorization; after approval Intuit redirects
  * to /api/integrations/quickbooks/callback.
  *
  * Auth: company super_admin or site_admin.
@@ -13,7 +14,8 @@ import { getSession } from "@/lib/auth";
 import { getQBOAppCredentials } from "@/lib/quickbooks";
 
 const QBO_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
-const SCOPES = "com.intuit.quickbooks.accounting";
+const INTUIT_ACCOUNTING_SCOPE = "com.intuit.quickbooks.accounting";
+const SCOPES = process.env.INTUIT_OAUTH_SCOPES?.trim() || INTUIT_ACCOUNTING_SCOPE;
 
 export async function GET(req: NextRequest) {
   const origin = new URL(req.url).origin;

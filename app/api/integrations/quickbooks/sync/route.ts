@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
   }
 
   const [appCreds, companyCreds] = await Promise.all([
-    getQBOAppCredentials(),
+    getQBOAppCredentials(session.company_id),
     getQBOCompanyCredentials(session.company_id),
   ]);
 
