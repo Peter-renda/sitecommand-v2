@@ -13,7 +13,7 @@ export type TemplateCategory = "company" | "invitee";
 
 export type CompanyUserType = "super_admin" | "admin" | "member";
 export type InviteeUserType = "subcontractor" | "architect_engineer" | "owner_client";
-export type TemplateUserType = CompanyUserType | InviteeUserType;
+export type TemplateUserType = CompanyUserType | InviteeUserType | string;
 
 export const COMPANY_USER_TYPES: { value: CompanyUserType; label: string }[] = [
   { value: "super_admin", label: "Super Admin" },
@@ -32,8 +32,10 @@ export function isTemplateCategory(v: unknown): v is TemplateCategory {
 }
 
 export function isTemplateUserType(category: TemplateCategory, v: unknown): v is TemplateUserType {
-  if (category === "company") return v === "super_admin" || v === "admin" || v === "member";
-  return v === "subcontractor" || v === "architect_engineer" || v === "owner_client";
+  if (typeof v !== "string") return false;
+  if (!v.trim()) return false;
+  if (category === "company") return true;
+  return true;
 }
 
 export function isPermissionLevel(v: unknown): v is PermissionLevel {

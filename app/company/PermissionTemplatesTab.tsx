@@ -20,6 +20,8 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newTypeName, setNewTypeName] = useState("");
 
   function handleCategoryChange(next: TemplateCategory) {
     setCategory(next);
@@ -55,6 +57,7 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
   }, [category, userType]);
 
   const userTypeOptions = category === "company" ? COMPANY_USER_TYPES : INVITEE_USER_TYPES;
+  const createOptionValue = "__create_new_template__";
 
   function setLevel(tool: string, level: PermissionLevel) {
     setSaved(false);
@@ -106,7 +109,13 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
             <label className="block text-xs font-medium text-gray-700 mb-1">User Type</label>
             <select
               value={userType}
-              onChange={(e) => setUserType(e.target.value as TemplateUserType)}
+              onChange={(e) => {
+                if (e.target.value === createOptionValue) {
+                  setShowCreateModal(true);
+                  return;
+                }
+                setUserType(e.target.value as TemplateUserType);
+              }}
               className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
             >
               {userTypeOptions.map((t) => (
@@ -114,6 +123,10 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
                   {t.label}
                 </option>
               ))}
+              {!userTypeOptions.some((t) => t.value === userType) && (
+                <option value={userType}>{userType.replace(/_/g, " ")}</option>
+              )}
+              <option value={createOptionValue}>Create new template</option>
             </select>
           </div>
         </div>
@@ -159,6 +172,51 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {showCreateModal && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center px-4">
+            <div className="w-full max-w-xl bg-white rounded-xl border border-gray-200 shadow-xl p-5">
+              <h3 className="text-base font-semibold text-gray-900">Create New Template</h3>
+              <p className="mt-1 text-xs text-gray-500">Enter a user type name and save permission levels for each tool.</p>
+
+              <label className="block text-xs font-medium text-gray-700 mt-4 mb-1">User Type Name</label>
+              <input
+                value={newTypeName}
+                onChange={(e) => setNewTypeName(e.target.value)}
+                placeholder="Ex: Estimator"
+                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              />
+
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setNewTypeName("");
+                  }}
+                  className="px-3 py-2 text-sm border border-gray-200 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const normalized = newTypeName.trim().toLowerCase().replace(/\s+/g, "_");
+                    if (!normalized) {
+                      setError("Please enter a user type name");
+                      return;
+                    }
+                    setUserType(normalized);
+                    setLevels(Object.fromEntries(TEMPLATE_TOOLS.map((tool) => [tool, "none"])) as Record<string, PermissionLevel>);
+                    setShowCreateModal(false);
+                    setNewTypeName("");
+                  }}
+                  className="px-3 py-2 text-sm bg-gray-900 text-white rounded-md"
+                >
+                  Create
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
