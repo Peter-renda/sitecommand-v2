@@ -38,10 +38,10 @@ export async function PATCH(
   const { id: projectId, contactId } = await params;
   const body = await req.json();
 
-  const allowed = ["first_name", "last_name", "email", "phone", "company", "permission", "group_name", "notes", "job_title", "address"];
+  const allowed = ["first_name", "last_name", "email", "phone", "company", "permission", "group_name", "notes", "job_title", "address", "abbreviated_name", "dba", "business_phone", "business_fax", "website", "city", "country", "state", "zip", "project_roles", "tags_keywords", "license_number", "labor_union", "entity_type", "primary_contact", "authorized_bidder", "union_member", "small_business", "prevailing_wage", "african_american_business", "asian_american_business", "hispanic_business", "native_american_business", "women_business", "disadvantaged_business", "hub_zone", "minority_business_enterprise", "sdvosb", "business_8a", "affirmative_action", "certified_business_enterprise", "prequalified", "trades", "cost_codes", "bidder_comment", "bidder_rating"];
   const update: Record<string, unknown> = {};
   for (const key of allowed) {
-    if (key in body) update[key] = body[key] || null;
+    if (key in body) update[key] = body[key] === "" ? null : body[key];
   }
 
   const supabase = getSupabase();
