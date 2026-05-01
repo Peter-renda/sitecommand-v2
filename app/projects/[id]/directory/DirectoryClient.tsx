@@ -1005,7 +1005,7 @@ export default function DirectoryClient({
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2.5">
                         <button onClick={() => setEditTarget(ce)} className="shrink-0 px-2 py-0.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition-colors">Edit</button>
-                        <span className="font-medium text-gray-900 text-sm">{displayName(ce)}</span>
+                        <button onClick={() => openContactDetail(ce.id)} className="font-medium text-gray-900 text-sm hover:text-blue-700 hover:underline transition-colors">{displayName(ce)}</button>
                       </div>
                     </td>
                     <td className="px-3 py-3 text-sm text-gray-500"><span className="text-gray-300">—</span></td>
@@ -1074,8 +1074,9 @@ export default function DirectoryClient({
                       <td colSpan={7} className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => toggleGroup(companyName)}
-                            className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                            onClick={() => openContactDetail(companyEntry?.id ?? "")}
+                            disabled={!companyEntry}
+                            className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors disabled:text-gray-500 disabled:no-underline"
                           >
                             {companyName}
                           </button>
