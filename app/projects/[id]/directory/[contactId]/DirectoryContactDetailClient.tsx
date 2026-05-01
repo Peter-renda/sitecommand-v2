@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
 import { Brand, Eyebrow } from "@/components/design-system/Primitives";
+import { PERMISSION_TEMPLATES, type PermissionLevel } from "@/lib/permission-templates";
 
 type Contact = {
   id: string;
