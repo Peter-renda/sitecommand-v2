@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
   if (recordType === "commitments") {
     const { data: commitment, error: fetchErr } = await supabase
       .from("commitments")
-      .select("id, type, number, title, contract_company, original_contract_amount, status, project_id")
+      .select("id, type, number, title, contract_company, original_contract_amount, status, project_id, qbo_id")
       .eq("id", recordId)
       .is("deleted_at", null)
       .single();
@@ -99,11 +99,19 @@ export async function POST(req: NextRequest) {
 
     await supabase.from("commitments").update({ erp_status: "pending" }).eq("id", recordId);
 
-    const result = await syncCommitmentToQBO(session.company_id, appCreds, companyCreds, commitment);
-    const newStatus = result.ok ? "synced" : "not_synced";
+    const result = await syncCommitmentToQBO(
+      session.company_id, appCreds, companyCreds, commitment, commitment.qbo_id
+    );
+
+    const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
+    if (result.ok) {
+      update.qbo_id = result.id;
+      update.qbo_sync_token = result.syncToken ?? null;
+      update.last_synced_at = new Date().toISOString();
+    }
 
     await Promise.all([
-      supabase.from("commitments").update({ erp_status: newStatus }).eq("id", recordId),
+      supabase.from("commitments").update(update).eq("id", recordId),
       writeLog(supabase, "commitments", recordId, result),
     ]);
 
@@ -115,7 +123,7 @@ export async function POST(req: NextRequest) {
   if (recordType === "prime_contracts") {
     const { data: contract, error: fetchErr } = await supabase
       .from("prime_contracts")
-      .select("id, contract_number, title, owner_client, contractor, architect_engineer, description, original_contract_amount, approved_change_orders, default_retainage, status, executed, start_date, estimated_completion_date")
+      .select("id, contract_number, title, owner_client, contractor, architect_engineer, description, original_contract_amount, approved_change_orders, default_retainage, status, executed, start_date, estimated_completion_date, qbo_id")
       .eq("id", recordId)
       .single();
 
@@ -125,11 +133,19 @@ export async function POST(req: NextRequest) {
 
     await supabase.from("prime_contracts").update({ erp_status: "pending" }).eq("id", recordId);
 
-    const result = await syncPrimeContractToQBO(session.company_id, appCreds, companyCreds, contract);
-    const newStatus = result.ok ? "synced" : "not_synced";
+    const result = await syncPrimeContractToQBO(
+      session.company_id, appCreds, companyCreds, contract, contract.qbo_id
+    );
+
+    const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
+    if (result.ok) {
+      update.qbo_id = result.id;
+      update.qbo_sync_token = result.syncToken ?? null;
+      update.last_synced_at = new Date().toISOString();
+    }
 
     await Promise.all([
-      supabase.from("prime_contracts").update({ erp_status: newStatus }).eq("id", recordId),
+      supabase.from("prime_contracts").update(update).eq("id", recordId),
       writeLog(supabase, "prime_contracts", recordId, result),
     ]);
 
@@ -141,7 +157,7 @@ export async function POST(req: NextRequest) {
   if (recordType === "ap_invoice") {
     const { data: commitment, error: fetchErr } = await supabase
       .from("commitments")
-      .select("id, number, title, contract_company")
+      .select("id, number, title, contract_company, qbo_ap_invoice_id")
       .eq("id", recordId)
       .is("deleted_at", null)
       .single();
@@ -165,16 +181,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await syncAPInvoiceToQBO(session.company_id, appCreds, companyCreds, {
-      commitmentId: commitment.id,
-      commitmentNumber: commitment.number,
-      vendorName: commitment.contract_company,
-      description: commitment.title,
-      lineItems: sovItems.map((item) => ({
-        description: item.description || commitment.title,
-        amount: Number(item.billed_to_date),
-      })),
-    });
+    const result = await syncAPInvoiceToQBO(
+      session.company_id, appCreds, companyCreds,
+      {
+        commitmentId: commitment.id,
+        commitmentNumber: commitment.number,
+        vendorName: commitment.contract_company,
+        description: commitment.title,
+        lineItems: sovItems.map((item) => ({
+          description: item.description || commitment.title,
+          amount: Number(item.billed_to_date),
+        })),
+      },
+      commitment.qbo_ap_invoice_id
+    );
+
+    if (result.ok) {
+      await supabase
+        .from("commitments")
+        .update({
+          qbo_ap_invoice_id: result.id,
+          qbo_ap_invoice_sync_token: result.syncToken ?? null,
+          qbo_ap_invoice_synced_at: new Date().toISOString(),
+        })
+        .eq("id", recordId);
+    }
 
     await writeLog(supabase, "ap_invoice", recordId, result);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
@@ -185,7 +216,7 @@ export async function POST(req: NextRequest) {
   if (recordType === "ar_invoice") {
     const { data: contract, error: fetchErr } = await supabase
       .from("prime_contracts")
-      .select("id, contract_number, title, owner_client")
+      .select("id, contract_number, title, owner_client, qbo_ar_invoice_id")
       .eq("id", recordId)
       .is("deleted_at", null)
       .single();
@@ -209,16 +240,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await syncARInvoiceToQBO(session.company_id, appCreds, companyCreds, {
-      contractId: contract.id,
-      contractNumber: contract.contract_number,
-      customerName: contract.owner_client,
-      description: contract.title,
-      lineItems: sovItems.map((item) => ({
-        description: item.description || contract.title,
-        amount: Number(item.work_completed_this_period),
-      })),
-    });
+    const result = await syncARInvoiceToQBO(
+      session.company_id, appCreds, companyCreds,
+      {
+        contractId: contract.id,
+        contractNumber: contract.contract_number,
+        customerName: contract.owner_client,
+        description: contract.title,
+        lineItems: sovItems.map((item) => ({
+          description: item.description || contract.title,
+          amount: Number(item.work_completed_this_period),
+        })),
+      },
+      contract.qbo_ar_invoice_id
+    );
+
+    if (result.ok) {
+      await supabase
+        .from("prime_contracts")
+        .update({
+          qbo_ar_invoice_id: result.id,
+          qbo_ar_invoice_sync_token: result.syncToken ?? null,
+          qbo_ar_invoice_synced_at: new Date().toISOString(),
+        })
+        .eq("id", recordId);
+    }
 
     await writeLog(supabase, "ar_invoice", recordId, result);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
