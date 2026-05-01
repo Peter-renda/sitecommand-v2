@@ -99,16 +99,11 @@ export default function DirectoryContactDetailClient({ projectId, username, init
     }
   }
 
-  function set(field: string, value: any) { setSaved(false); setForm((p) => ({ ...p, [field]: value })); }
-  async function save() { setSaving(true); const res = await fetch(`/api/projects/${projectId}/directory/${initialContact.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) }); setSaving(false); if (res.ok) { setSaved(true); setTimeout(() => setSaved(false), 2000); } }
-
-  return <div className="min-h-screen bg-gray-50">
+  return (
+    <div className="min-h-screen bg-gray-50">
     <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between"><a href="/dashboard" className="hover:opacity-80 transition-opacity"><Brand /></a><div className="flex items-center gap-5"><span className="text-sm text-gray-400">{username}</span><button onClick={() => router.push(`/projects/${projectId}/directory`)} className="text-sm text-gray-400 hover:text-gray-900">Back to Directory</button></div></header>
     <ProjectNav projectId={projectId} />
     <main className="max-w-screen-xl mx-auto px-6 py-6 space-y-5">
-      <div className="rounded-xl border border-[var(--border-base)] bg-white p-4"><Eyebrow quiet>Project Workspace</Eyebrow><h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)] mt-2">{isCompany ? (form.company || "Company Details") : "Contact Details"}</h1></div>
-
-      <main className="max-w-screen-xl mx-auto px-6 py-6 space-y-5">
         <div className="rounded-xl border border-[var(--border-base)] bg-white p-4">
           <Eyebrow quiet>Project Workspace</Eyebrow>
           <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)] mt-2">{isCompany ? (String(companyForm.company || "Company Details")) : "Contact Details"}</h1>
