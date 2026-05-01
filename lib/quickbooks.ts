@@ -181,7 +181,7 @@ export async function refreshQBOTokens(
 // ── API call helper ───────────────────────────────────────────────────────────
 
 export type QBOResult =
-  | { ok: true; id: string; rawResponse: string }
+  | { ok: true; id: string; syncToken?: string; rawResponse: string }
   | { ok: false; error: string; rawResponse: string };
 
 /**
@@ -232,6 +232,39 @@ export async function callQBO(
   try { json = JSON.parse(rawText); } catch { /* non-JSON */ }
 
   return { status: res.status, json, rawText };
+}
+
+// ── Idempotency helpers ───────────────────────────────────────────────────────
+
+/**
+ * Fetches the current SyncToken for a QBO entity. QBO requires the latest token
+ * on every update — if our cached value is stale it returns an error, so we
+ * always re-read before issuing an update.
+ *
+ * `entity` is the QBO endpoint name in lowercase, e.g. "bill", "purchaseorder",
+ * "invoice". Returns null if the read fails (caller should fall back to create
+ * or surface the error).
+ */
+export async function fetchQBOSyncToken(
+  companyId: string,
+  appCreds: QBOAppCredentials,
+  companyCreds: QBOCompanyCredentials,
+  entity: "bill" | "purchaseorder" | "invoice",
+  qboId: string
+): Promise<string | null> {
+  try {
+    const { status, json } = await callQBO(
+      companyId, appCreds, companyCreds, "GET", `${entity}/${qboId}`
+    );
+    if (status !== 200) return null;
+    // QBO wraps the response in a capitalized entity key (Bill / PurchaseOrder / Invoice)
+    const entityKey = entity === "purchaseorder" ? "PurchaseOrder" : entity.charAt(0).toUpperCase() + entity.slice(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const syncToken = (json as any)?.[entityKey]?.SyncToken;
+    return syncToken !== undefined && syncToken !== null ? String(syncToken) : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Vendor list ───────────────────────────────────────────────────────────────
@@ -322,7 +355,13 @@ export type QBOCommitmentPayload = {
 };
 
 /**
- * Creates a Bill (subcontract) or PurchaseOrder in QuickBooks Online.
+ * Creates or updates a Bill (subcontract) / PurchaseOrder in QuickBooks Online.
+ *
+ * Idempotency: pass `existingQboId` to update an existing record. We always
+ * fetch the current SyncToken from QBO before updating (stale tokens are
+ * rejected by Intuit). If the existing record can't be found, falls back to
+ * creating a new one.
+ *
  * The vendor is matched by display name; if QBO can't resolve it the sync
  * still proceeds using the name as a ref.
  */
@@ -330,15 +369,26 @@ export async function syncCommitmentToQBO(
   companyId: string,
   appCreds: QBOAppCredentials,
   companyCreds: QBOCompanyCredentials,
-  commitment: QBOCommitmentPayload
+  commitment: QBOCommitmentPayload,
+  existingQboId?: string | null
 ): Promise<QBOResult> {
   const today = new Date().toISOString().slice(0, 10);
   const amount = Number(commitment.original_contract_amount.toFixed(2));
+  const entity = commitment.type === "subcontract" ? "bill" : "purchaseorder";
+
+  // For updates, fetch the latest SyncToken from QBO
+  let syncToken: string | null = null;
+  if (existingQboId) {
+    syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, entity, existingQboId);
+    if (syncToken === null) {
+      // Record was deleted on QBO side — fall through to create
+      existingQboId = null;
+    }
+  }
 
   try {
     if (commitment.type === "subcontract") {
-      // AP Bill
-      const payload = {
+      const basePayload: Record<string, unknown> = {
         VendorRef: { name: commitment.contract_company },
         TxnDate: today,
         DocNumber: String(commitment.number),
@@ -354,20 +404,25 @@ export async function syncCommitmentToQBO(
           },
         ],
       };
+      const path = existingQboId ? "bill?operation=update" : "bill";
+      const payload = existingQboId
+        ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true }
+        : basePayload;
 
       const { status, json, rawText } = await callQBO(
-        companyId, appCreds, companyCreds, "POST", "bill", payload
+        companyId, appCreds, companyCreds, "POST", path, payload
       );
 
       if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const id = String((json as any)?.Bill?.Id ?? "");
+      const bill = (json as any)?.Bill;
+      const id = String(bill?.Id ?? "");
+      const newSyncToken = bill?.SyncToken !== undefined ? String(bill.SyncToken) : undefined;
       if (!id) return { ok: false, error: "QBO returned no Bill Id", rawResponse: rawText.slice(0, 8000) };
-      return { ok: true, id, rawResponse: rawText.slice(0, 8000) };
+      return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
 
     } else {
-      // Purchase Order
-      const payload = {
+      const basePayload: Record<string, unknown> = {
         VendorRef: { name: commitment.contract_company },
         TxnDate: today,
         DocNumber: String(commitment.number),
@@ -385,16 +440,22 @@ export async function syncCommitmentToQBO(
           },
         ],
       };
+      const path = existingQboId ? "purchaseorder?operation=update" : "purchaseorder";
+      const payload = existingQboId
+        ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true }
+        : basePayload;
 
       const { status, json, rawText } = await callQBO(
-        companyId, appCreds, companyCreds, "POST", "purchaseorder", payload
+        companyId, appCreds, companyCreds, "POST", path, payload
       );
 
       if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const id = String((json as any)?.PurchaseOrder?.Id ?? "");
+      const po = (json as any)?.PurchaseOrder;
+      const id = String(po?.Id ?? "");
+      const newSyncToken = po?.SyncToken !== undefined ? String(po.SyncToken) : undefined;
       if (!id) return { ok: false, error: "QBO returned no PurchaseOrder Id", rawResponse: rawText.slice(0, 8000) };
-      return { ok: true, id, rawResponse: rawText.slice(0, 8000) };
+      return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Network error";
@@ -430,7 +491,8 @@ export async function syncPrimeContractToQBO(
   companyId: string,
   appCreds: QBOAppCredentials,
   companyCreds: QBOCompanyCredentials,
-  contract: QBOPrimeContractPayload
+  contract: QBOPrimeContractPayload,
+  existingQboId?: string | null
 ): Promise<QBOResult> {
   const today = new Date().toISOString().slice(0, 10);
   const revisedAmount = Number(
@@ -446,8 +508,15 @@ export async function syncPrimeContractToQBO(
     `Status: ${contract.status}`,
   ].filter(Boolean).join("\n");
 
+  // For updates, fetch the latest SyncToken from QBO
+  let syncToken: string | null = null;
+  if (existingQboId) {
+    syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, "invoice", existingQboId);
+    if (syncToken === null) existingQboId = null; // record gone on QBO side → recreate
+  }
+
   try {
-    const payload: Record<string, unknown> = {
+    const basePayload: Record<string, unknown> = {
       CustomerRef: { name: contract.owner_client },
       TxnDate: contract.start_date ?? today,
       DueDate: contract.estimated_completion_date ?? undefined,
@@ -469,17 +538,24 @@ export async function syncPrimeContractToQBO(
     };
 
     // Remove undefined values so QBO doesn't reject
-    if (!payload.DueDate) delete payload.DueDate;
+    if (!basePayload.DueDate) delete basePayload.DueDate;
+
+    const path = existingQboId ? "invoice?operation=update" : "invoice";
+    const payload = existingQboId
+      ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true }
+      : basePayload;
 
     const { status, json, rawText } = await callQBO(
-      companyId, appCreds, companyCreds, "POST", "invoice", payload
+      companyId, appCreds, companyCreds, "POST", path, payload
     );
 
     if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const id = String((json as any)?.Invoice?.Id ?? "");
+    const inv = (json as any)?.Invoice;
+    const id = String(inv?.Id ?? "");
+    const newSyncToken = inv?.SyncToken !== undefined ? String(inv.SyncToken) : undefined;
     if (!id) return { ok: false, error: "QBO returned no Invoice Id", rawResponse: rawText.slice(0, 8000) };
-    return { ok: true, id, rawResponse: rawText.slice(0, 8000) };
+    return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Network error";
     return { ok: false, error: msg, rawResponse: "" };
@@ -500,12 +576,19 @@ export async function syncAPInvoiceToQBO(
   companyId: string,
   appCreds: QBOAppCredentials,
   companyCreds: QBOCompanyCredentials,
-  invoice: QBOAPInvoicePayload
+  invoice: QBOAPInvoicePayload,
+  existingQboId?: string | null
 ): Promise<QBOResult> {
   const today = new Date().toISOString().slice(0, 10);
 
+  let syncToken: string | null = null;
+  if (existingQboId) {
+    syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, "bill", existingQboId);
+    if (syncToken === null) existingQboId = null;
+  }
+
   try {
-    const payload = {
+    const basePayload: Record<string, unknown> = {
       VendorRef: { name: invoice.vendorName },
       TxnDate: today,
       DocNumber: String(invoice.commitmentNumber),
@@ -519,16 +602,22 @@ export async function syncAPInvoiceToQBO(
         },
       })),
     };
+    const path = existingQboId ? "bill?operation=update" : "bill";
+    const payload = existingQboId
+      ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true }
+      : basePayload;
 
     const { status, json, rawText } = await callQBO(
-      companyId, appCreds, companyCreds, "POST", "bill", payload
+      companyId, appCreds, companyCreds, "POST", path, payload
     );
 
     if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const id = String((json as any)?.Bill?.Id ?? "");
+    const bill = (json as any)?.Bill;
+    const id = String(bill?.Id ?? "");
+    const newSyncToken = bill?.SyncToken !== undefined ? String(bill.SyncToken) : undefined;
     if (!id) return { ok: false, error: "QBO returned no Bill Id", rawResponse: rawText.slice(0, 8000) };
-    return { ok: true, id, rawResponse: rawText.slice(0, 8000) };
+    return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Network error";
     return { ok: false, error: msg, rawResponse: "" };
@@ -549,12 +638,19 @@ export async function syncARInvoiceToQBO(
   companyId: string,
   appCreds: QBOAppCredentials,
   companyCreds: QBOCompanyCredentials,
-  invoice: QBOARInvoicePayload
+  invoice: QBOARInvoicePayload,
+  existingQboId?: string | null
 ): Promise<QBOResult> {
   const today = new Date().toISOString().slice(0, 10);
 
+  let syncToken: string | null = null;
+  if (existingQboId) {
+    syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, "invoice", existingQboId);
+    if (syncToken === null) existingQboId = null;
+  }
+
   try {
-    const payload = {
+    const basePayload: Record<string, unknown> = {
       CustomerRef: { name: invoice.customerName },
       TxnDate: today,
       DocNumber: String(invoice.contractNumber),
@@ -570,16 +666,22 @@ export async function syncARInvoiceToQBO(
         },
       })),
     };
+    const path = existingQboId ? "invoice?operation=update" : "invoice";
+    const payload = existingQboId
+      ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true }
+      : basePayload;
 
     const { status, json, rawText } = await callQBO(
-      companyId, appCreds, companyCreds, "POST", "invoice", payload
+      companyId, appCreds, companyCreds, "POST", path, payload
     );
 
     if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const id = String((json as any)?.Invoice?.Id ?? "");
+    const inv = (json as any)?.Invoice;
+    const id = String(inv?.Id ?? "");
+    const newSyncToken = inv?.SyncToken !== undefined ? String(inv.SyncToken) : undefined;
     if (!id) return { ok: false, error: "QBO returned no Invoice Id", rawResponse: rawText.slice(0, 8000) };
-    return { ok: true, id, rawResponse: rawText.slice(0, 8000) };
+    return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Network error";
     return { ok: false, error: msg, rawResponse: "" };
