@@ -44,7 +44,7 @@ It supports both **QuickBooks Online (QBO)** and **Intuit Enterprise Suite (IES)
 ## Automatic sync (daily on Vercel Hobby)
 
 In addition to manual triggers, a background cron job at
-`/api/cron/quickbooks-sync` runs once daily on Vercel Hobby (configured in `vercel.json`)
+`/api/cron/quickbooks-sync` runs once daily at **17:00 UTC** on Vercel Hobby (configured in `vercel.json`)
 and pushes any "dirty" records to QBO for every company that has connected
 QuickBooks. Dirty means:
 
