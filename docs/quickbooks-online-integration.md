@@ -41,10 +41,10 @@ It supports both **QuickBooks Online (QBO)** and **Intuit Enterprise Suite (IES)
 - Access token expiration is handled automatically.
 - On a `401` from QBO, SiteCommand refreshes token once using the stored refresh token and retries.
 
-## Automatic sync (every 5 minutes)
+## Automatic sync (daily on Vercel Hobby)
 
 In addition to manual triggers, a background cron job at
-`/api/cron/quickbooks-sync` runs every 5 minutes (configured in `vercel.json`)
+`/api/cron/quickbooks-sync` runs once daily at **17:00 UTC** on Vercel Hobby (configured in `vercel.json`)
 and pushes any "dirty" records to QBO for every company that has connected
 QuickBooks. Dirty means:
 
@@ -74,12 +74,12 @@ a fresh record.
 - Each run processes at most 25 records per type per company (commitments,
   prime contracts, AP invoices, AR invoices) — enough to keep us under both
   Vercel's serverless timeout and Intuit's 500-req/min/realm rate limit. A
-  large backlog drains across multiple 5-minute cycles.
+  large backlog drains across multiple daily cycles on Hobby plans (or faster on higher plans).
 
 ### Vercel plan note
 
 Sub-hourly cron schedules require Vercel **Pro** or higher. On the Hobby plan
-the schedule will be downgraded to once daily.
+use a once-daily cron expression in `vercel.json` (as configured here).
 
 ## Current limitations
 
