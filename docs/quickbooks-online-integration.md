@@ -39,8 +39,50 @@ This integration is **manual push sync** (not automatic continuous sync). You co
 - Access token expiration is handled automatically.
 - On a `401` from QBO, SiteCommand refreshes token once using the stored refresh token and retries.
 
+## Automatic sync (every 5 minutes)
+
+In addition to manual triggers, a background cron job at
+`/api/cron/quickbooks-sync` runs every 5 minutes (configured in `vercel.json`)
+and pushes any "dirty" records to QBO for every company that has connected
+QuickBooks. Dirty means:
+
+- `commitments` / `prime_contracts` whose `updated_at > last_synced_at` (or
+  never synced).
+- AP/AR invoices whose underlying SOV item updated after the last invoice push
+  (`commitment_sov_items.updated_at > commitments.qbo_ap_invoice_synced_at`,
+  same pattern for AR).
+
+### Idempotency
+
+Every sync function in `lib/quickbooks.ts` accepts an optional `existingQboId`.
+When present, the function does a QBO `GET` to retrieve the latest `SyncToken`
+and then a `POST ?operation=update` with `sparse: true`. When absent it does a
+plain `POST` to create. The returned QBO ID and SyncToken are persisted on the
+SiteCommand row (`qbo_id`, `qbo_sync_token`, `last_synced_at`), so the next pass
+updates in place rather than creating a duplicate.
+
+If the QBO record was deleted on Intuit's side, the sync falls back to creating
+a fresh record.
+
+### Auth & safety caps
+
+- The cron endpoint requires `Authorization: Bearer ${CRON_SECRET}`. Vercel Cron
+  passes this header automatically when `CRON_SECRET` is set as an environment
+  variable in the Vercel project.
+- Each run processes at most 25 records per type per company (commitments,
+  prime contracts, AP invoices, AR invoices) — enough to keep us under both
+  Vercel's serverless timeout and Intuit's 500-req/min/realm rate limit. A
+  large backlog drains across multiple 5-minute cycles.
+
+### Vercel plan note
+
+Sub-hourly cron schedules require Vercel **Pro** or higher. On the Hobby plan
+the schedule will be downgraded to once daily.
+
 ## Current limitations
 
-- Sync is currently **push-only** from SiteCommand to QBO.
-- There is no background scheduler for automatic recurring sync jobs.
+- Sync is **push-only** from SiteCommand to QBO. There is no pull from QBO into
+  SiteCommand.
 - Mapping is name-based for customer/vendor records when creating transactions.
+- Change orders, invoices distinct from SOV billing, and other accessory
+  records are not yet synced.
