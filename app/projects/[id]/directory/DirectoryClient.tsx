@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
-import { Brand, Pill } from "@/components/design-system/Primitives";
+import { Brand } from "@/components/design-system/Primitives";
 import { PERMISSION_TEMPLATE_ORDER } from "@/lib/permission-templates";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -833,10 +833,18 @@ export default function DirectoryClient({
 
       <main className="max-w-screen-xl mx-auto px-6 py-6">
         {/* Toolbar */}
-        <div className="mb-4 rounded-xl border border-[var(--border-base)] bg-white p-4">
-          <div className="mt-2 flex items-center justify-between">
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Directory</h1>
-            <Pill className="pill-open">{totalCount} contacts</Pill>
+        <div className="mb-4 flex items-end justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Directory</h1>
+            {totalCount > 0 && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{totalCount}</span> contacts
+                <span className="sep">·</span>
+                <span className="num">{companyEntries.length}</span> companies
+              </p>
+            )}
           </div>
         </div>
 

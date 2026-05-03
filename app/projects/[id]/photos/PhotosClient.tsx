@@ -358,7 +358,16 @@ export default function PhotosClient({
         >
           {/* Page heading */}
           <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0">
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Photos</h1>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Photos</h1>
+            {photos.length > 0 && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{photos.length}</span> photos
+                <span className="sep">·</span>
+                <span className="num">{albums.length}</span> albums
+              </p>
+            )}
           </div>
           {/* Toolbar */}
           <div className="bg-white border-b border-gray-100 px-6 py-3 flex items-center justify-between shrink-0">

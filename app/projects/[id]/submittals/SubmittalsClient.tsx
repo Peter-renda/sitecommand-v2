@@ -1161,8 +1161,19 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
-          <div>
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Submittals</h1>
+          <div className="min-w-0">
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Submittals</h1>
+            {!loading && submittals.length > 0 && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{submittals.filter((s) => s.status === "open").length}</span> open
+                <span className="sep">·</span>
+                <span className="num">{submittals.filter((s) => s.status === "closed").length}</span> closed
+                <span className="sep">·</span>
+                <span className="num">{submittals.length}</span> total
+              </p>
+            )}
             <div className="mt-3 inline-flex rounded-md border hairline overflow-hidden bg-white">
               <button onClick={() => { setActiveTab("items"); setSelectedIds([]); }} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "items" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Items</button>
               <button onClick={() => { setActiveTab("packages"); setSelectedIds([]); }} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "packages" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Packages</button>

@@ -1344,7 +1344,15 @@ export default function DailyLogClient({
       <ProjectNav projectId={projectId} />
 
       <main className="max-w-[1500px] mx-auto px-4 py-8">
-        {/* Weather hero band — warm gradient + DM Serif temp, eyebrow page heading */}
+        <div className="mb-5">
+          <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Daily Log</h1>
+          <p className="sec-sub mt-1.5">
+            <span className="serif-italic text-[color:var(--brand-700)]">{isToday ? "Today's entry" : "Viewing past entry"}</span>
+            <span className="sep">·</span>
+            <span className="num">{new Date(date + "T00:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</span>
+          </p>
+        </div>
+        {/* Weather hero band — warm gradient + DM Serif temp */}
         <div className="bezel mb-6">
           <div className="bezel-inner weather-hero">
             <div className="relative z-[1] grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-6 px-6 sm:px-8 py-6 sm:py-7">

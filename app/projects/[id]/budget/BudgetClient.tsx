@@ -2174,12 +2174,16 @@ export default function BudgetClient({
 
       <main className="px-6 py-8">
         {/* Title + actions */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Budget</h1>
-            {snapshots.length > 0 && (
-              <p className="text-xs text-gray-400 mt-0.5">
-                {snapshots.length} snapshot{snapshots.length !== 1 ? "s" : ""} saved
+        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+          <div className="min-w-0">
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Budget</h1>
+            {(items.length > 0 || snapshots.length > 0) && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">{isBudgetLocked ? "Locked" : "Across this project"}</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{items.length}</span> line items
+                <span className="sep">·</span>
+                <span className="num">{snapshots.length}</span> snapshots
               </p>
             )}
           </div>
