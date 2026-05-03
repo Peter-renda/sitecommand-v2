@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
-import { Brand, Eyebrow } from "@/components/design-system/Primitives";
+import { Brand } from "@/components/design-system/Primitives";
 import { PERMISSION_TEMPLATES, type PermissionLevel } from "@/lib/permission-templates";
 
 type Contact = {
@@ -106,7 +106,6 @@ export default function DirectoryContactDetailClient({ projectId, username, init
     <ProjectNav projectId={projectId} />
     <main className="max-w-screen-xl mx-auto px-6 py-6 space-y-5">
         <div className="rounded-xl border border-[var(--border-base)] bg-white p-4">
-          <Eyebrow quiet>Project Workspace</Eyebrow>
           <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)] mt-2">{isCompany ? (String(companyForm.company || "Company Details")) : "Contact Details"}</h1>
         </div>
 

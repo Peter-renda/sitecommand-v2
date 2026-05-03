@@ -751,7 +751,6 @@ export default function ScheduleClient({
 
       {/* Page heading */}
       <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0">
-        <p className="eyebrow mb-2">Project · Planning</p>
         <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Schedule</h1>
       </div>
 

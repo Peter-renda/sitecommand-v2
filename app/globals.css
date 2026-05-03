@@ -318,6 +318,188 @@ p           { text-wrap: pretty; }
   background: white;
 }
 
+/* ── W2 "field journal" RFI patterns ─────────────────────────────
+   Editorial italic indices on a timeline rail, orange tab underline,
+   peach proposed-solution callout, threaded conversation rail. */
+
+/* Italic serif index (RFI-042 in lists) with status dot on the left */
+.idx-italic {
+  display: inline-block;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--brand-500);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+  padding-left: 16px;
+  white-space: nowrap;
+}
+.idx-italic::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%; transform: translateY(-50%);
+  width: 7px; height: 7px;
+  border-radius: 9999px; background: #fff;
+  border: 1.5px solid var(--gray-300);
+}
+.idx-italic.status-open::before {
+  background: var(--brand-500); border-color: var(--brand-500);
+  box-shadow: 0 0 0 3px rgba(212, 80, 10, 0.15);
+}
+.idx-italic.status-answered::before {
+  background: var(--success-500); border-color: var(--success-500);
+}
+.idx-italic.status-closed::before {
+  background: #fff; border-color: var(--gray-500);
+}
+.idx-italic.status-draft::before {
+  background: var(--gray-300); border-color: var(--gray-300);
+}
+.idx-italic.status-open    { color: var(--brand-500); }
+.idx-italic.status-answered { color: var(--success-500); }
+.idx-italic.status-closed  { color: var(--gray-500); }
+.idx-italic.status-draft   { color: var(--gray-400); }
+
+/* Big italic serif index for detail headers (e.g. "042") */
+.idx-display {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--brand-500);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 38×1px orange hairline rule under detail page titles */
+.h-rule-orange {
+  width: 38px; height: 1px;
+  background: var(--brand-500); opacity: 0.6;
+  margin: 14px 0 12px;
+}
+
+/* W2 tab nav: orange underline on active + orange-tinted count badge */
+.tabs-w2 {
+  display: flex; gap: 4px; align-items: center;
+  border-bottom: 1px solid var(--gray-200);
+}
+.tabs-w2 button,
+.tabs-w2 a {
+  padding: 9px 14px;
+  font-size: 12px; font-weight: 500;
+  color: var(--gray-500);
+  background: transparent; border: 0; cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+.tabs-w2 button:hover,
+.tabs-w2 a:hover { color: var(--gray-700); }
+.tabs-w2 button.active,
+.tabs-w2 a.active {
+  color: var(--gray-900);
+  border-bottom-color: var(--brand-500);
+  font-weight: 600;
+}
+.tabs-w2 .count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 16px;
+  padding: 0 5px; margin-left: 6px;
+  border-radius: 9999px;
+  background: var(--gray-100); color: var(--gray-500);
+  font-size: 10px; font-weight: 600;
+}
+.tabs-w2 .active .count { background: var(--brand-100); color: var(--brand-700); }
+
+/* Peach contractor's-proposed-solution callout */
+.proposed {
+  background: #FFFBF5;
+  border: 1px solid #F3DCC4;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-top: 12px;
+}
+.proposed > .h {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 13px;
+  color: #9A6240;
+  margin-bottom: 6px;
+}
+.proposed > .b {
+  font-size: 13px; line-height: 1.55; color: #4A2A18;
+}
+
+/* Conversation thread on a timeline rail (RFI detail) */
+.thread { position: relative; padding-left: 26px; }
+.thread::before {
+  content: '';
+  position: absolute;
+  left: 9px; top: 6px; bottom: 6px;
+  width: 1px; background: var(--gray-200);
+}
+.thread .t-msg {
+  position: relative;
+  padding-bottom: 18px;
+}
+.thread .t-msg::before {
+  content: '';
+  position: absolute;
+  left: -22px; top: 6px;
+  width: 9px; height: 9px;
+  border-radius: 9999px; background: #fff;
+  border: 1.5px solid var(--gray-300);
+}
+.thread .t-msg.is-question::before {
+  background: var(--brand-500); border-color: var(--brand-500);
+}
+.thread .t-msg.is-answer::before,
+.thread .t-msg.is-official::before {
+  background: var(--success-500); border-color: var(--success-500);
+}
+.thread .t-msg.is-pending::before {
+  background: #fff; border-color: var(--gray-300);
+}
+
+/* Vertical project/event timeline (right-rail Timeline cards) */
+.timeline-rail { position: relative; padding-left: 18px; }
+.timeline-rail::before {
+  content: ''; position: absolute;
+  left: 4px; top: 4px; bottom: 4px;
+  width: 1px; background: var(--gray-200);
+}
+.timeline-rail .tl-item {
+  position: relative; padding: 5px 0;
+  font-size: 11px; color: var(--gray-500);
+  font-variant-numeric: tabular-nums;
+  display: flex; gap: 8px; align-items: baseline;
+}
+.timeline-rail .tl-item::before {
+  content: ''; position: absolute;
+  left: -18px; top: 11px;
+  width: 7px; height: 7px;
+  border-radius: 9999px; background: #fff;
+  border: 1.5px solid var(--gray-300);
+}
+.timeline-rail .tl-item.done::before { background: var(--gray-300); }
+.timeline-rail .tl-item.now::before {
+  background: var(--brand-500); border-color: var(--brand-500);
+  box-shadow: 0 0 0 3px rgba(212, 80, 10, 0.15);
+}
+
+/* Warm tinted avatar gradients for initials chips */
+.av-warm {
+  display: inline-grid; place-items: center;
+  border-radius: 9999px; color: #fff;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.av-1 { background: linear-gradient(135deg, #F4A261 0%, #E76F51 100%); }
+.av-2 { background: linear-gradient(135deg, #94B49F 0%, #5A8C73 100%); }
+.av-3 { background: linear-gradient(135deg, #B8956A 0%, #9A7548 100%); }
+.av-4 { background: linear-gradient(135deg, #D9A28F 0%, #B97559 100%); }
+.av-5 { background: linear-gradient(135deg, #8FA8B5 0%, #5C7C8C 100%); }
+
 /* Sparkline / progress track */
 .spark-track {
   background: var(--gray-100);

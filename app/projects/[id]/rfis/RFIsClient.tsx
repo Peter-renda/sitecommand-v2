@@ -494,7 +494,7 @@ function formatDateTime(d: string | null): string {
 
 const RFI_STATUS_PILL: Record<string, string> = {
   open: "pill-open",
-  closed: "pill-coc",
+  closed: "pill-post",
   draft: "pill-warn",
 };
 
@@ -883,13 +883,16 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
         )}
         <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
           <div>
-            <p className="eyebrow mb-2">Project · Coordination</p>
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">RFIs</h1>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Requests for information</h1>
             {!loading && rfis.length > 0 && (
-              <p className="text-xs text-gray-400 mt-1">
-                <span className="mono-label">{rfis.length} TOTAL</span>
-                <span className="mx-2 text-gray-300">·</span>
-                <span className="mono-label">{rfis.filter((r) => r.status === "open").length} OPEN</span>
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{rfis.filter((r) => r.status === "open").length}</span> open
+                <span className="sep">·</span>
+                <span className="num">{rfis.filter((r) => r.status === "closed").length}</span> closed
+                <span className="sep">·</span>
+                <span className="num">{rfis.length}</span> total
               </p>
             )}
           </div>
@@ -1102,7 +1105,7 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
                     {orderedVisibleColumns.map((key) => {
                       let cell: React.ReactNode = "—";
                       switch (key) {
-                        case "rfi_number": cell = <span className="font-mono text-[color:var(--ink)] tabular-nums">#{rfi.rfi_number}</span>; break;
+                        case "rfi_number": cell = <span className={`idx-italic status-${["open","closed","draft"].includes(rfi.status) ? rfi.status : "draft"}`}>{String(rfi.rfi_number).padStart(3, "0")}</span>; break;
                         case "subject": cell = <span className="text-sm text-gray-900 font-medium">{(rfi.subject ?? "").slice(0, 60)}{(rfi.subject ?? "").length > 60 ? "…" : ""}</span>; break;
                         case "due_date": cell = <span className="text-xs text-gray-500 tabular-nums">{formatDate(rfi.due_date)}</span>; break;
                         case "status": cell = <RFIStatusPill status={rfi.status} />; break;

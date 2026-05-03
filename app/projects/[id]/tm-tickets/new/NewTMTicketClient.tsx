@@ -98,7 +98,6 @@ export default function NewTMTicketClient({ projectId, username }: { projectId: 
           <span className="text-gray-900 font-semibold">Create a T&amp;M Ticket</span>
         </div>
 
-        <p className="eyebrow mb-2">Project · Workforce</p>
         <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)] mb-4">Create a T&amp;M Ticket</h1>
 
         <section className="bg-white border border-gray-300 rounded-sm overflow-hidden">

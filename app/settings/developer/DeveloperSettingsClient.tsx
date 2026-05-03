@@ -612,7 +612,6 @@ export default function DeveloperSettingsClient() {
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-6">
-          <p className="eyebrow mb-2">Settings · Developer</p>
           <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Developer Settings</h1>
           <p className="text-sm text-gray-500 mt-1">Manage API keys and webhooks for integrating with SiteCommand.</p>
         </div>

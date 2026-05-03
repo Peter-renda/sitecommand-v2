@@ -1083,7 +1083,6 @@ export default function NewChangeEventClient({
           <ChevronRight className="w-3 h-3" />
           <span className="text-gray-700">New Change Event</span>
         </nav>
-        <p className="eyebrow mb-2">Project · Cost</p>
         <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Create New Change Event</h1>
       </div>
 

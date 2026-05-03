@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import ProjectNav from "@/components/ProjectNav";
-import { Brand, Eyebrow, Pill, WeatherGlyph } from "@/components/design-system/Primitives";
+import { Brand, Pill, WeatherGlyph } from "@/components/design-system/Primitives";
 
 type Member = { id: string; username: string; email: string };
 
@@ -766,7 +766,6 @@ export default function ProjectClient({
           <>
             {/* Centered project name */}
             <div className="text-center mb-6 sm:mb-10">
-              <Eyebrow>Project Home</Eyebrow>
               <h1 className="font-display text-2xl sm:text-4xl lg:text-5xl text-[color:var(--ink)]">{project.name}</h1>
               <div className="mt-2">
                 <Pill className="pill-coc">{project.status || "active"}</Pill>
@@ -1016,7 +1015,7 @@ export default function ProjectClient({
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs text-gray-500 font-medium">Stage:</span>
-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${project.status === "course of construction" ? "bg-green-50 text-green-700" : project.status === "bidding" ? "bg-blue-50 text-blue-700" : project.status === "pre-construction" ? "bg-yellow-50 text-yellow-700" : project.status === "warranty" ? "bg-purple-50 text-purple-700" : "bg-gray-100 text-gray-500"}`}>
+                      <span className={`pill ${project.status === "course of construction" ? "pill-coc" : project.status === "bidding" ? "pill-bid" : project.status === "pre-construction" ? "pill-pre" : project.status === "warranty" ? "pill-war" : "pill-post"}`}>
                         {project.status}
                       </span>
                     </div>
@@ -1274,7 +1273,6 @@ export default function ProjectClient({
                 </div>
               </div>
 
-              <p className="eyebrow pt-1">Dates</p>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>

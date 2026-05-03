@@ -547,11 +547,29 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
 
       <ProjectNav projectId={projectId} />
 
-      {/* RFI title bar */}
-      <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4">
-        <h1 className="font-display text-[20px] leading-tight text-[color:var(--ink)] truncate">
-          RFI #{rfi.rfi_number}: {rfi.subject || "No subject"}
-        </h1>
+      {/* RFI title bar — W2 field-journal styling */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-3 mb-1">
+            <span className={`idx-display ${["open","closed","draft"].includes(rfi.status) ? `text-[color:var(--brand-500)]` : ""}`}>
+              {String(rfi.rfi_number).padStart(3, "0")}
+            </span>
+            <span className="font-mono text-[11px] text-gray-400 uppercase tracking-wider">
+              RFI{getSpecName(specifications, rfi.specification_id) !== "—" ? ` · ${getSpecName(specifications, rfi.specification_id)}` : ""}
+            </span>
+          </div>
+          <h1 className="font-display text-[24px] leading-[1.15] tracking-[-0.012em] text-[color:var(--ink)] truncate">
+            {rfi.subject || "No subject"}
+          </h1>
+          <div className="h-rule-orange" />
+          <p className="text-xs text-gray-500">
+            Submitted by{" "}
+            <span className="serif-italic text-[color:var(--brand-700)]">
+              {getContactNameById(directory, rfi.received_from_id) || "—"}
+            </span>{" "}
+            · <span className="font-mono">{formatDate(rfi.created_at?.split("T")[0] ?? null)}</span>
+          </p>
+        </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {canManage && (
             <a
@@ -653,14 +671,14 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="bg-white border-b border-gray-200 px-6">
-        <nav className="flex gap-0 -mb-px">
+      {/* Tabs — W2 orange-underline */}
+      <div className="bg-white px-6">
+        <nav className="tabs-w2">
           {[
-            { id: "general", label: "General" },
-            { id: "related", label: `Related Items (${relatedItemsCount})` },
-            { id: "emails", label: `Emails (${emailsCount})` },
-            { id: "history", label: `Change History (${historyCount})` },
+            { id: "general", label: "General", count: null as number | null },
+            { id: "related", label: "Related Items", count: relatedItemsCount },
+            { id: "emails", label: "Emails", count: emailsCount },
+            { id: "history", label: "Change History", count: historyCount },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -668,13 +686,10 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
                 setActiveTab(tab.id);
                 if (tab.id === "history") loadHistory();
               }}
-              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? "border-gray-900 text-gray-900"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+              className={activeTab === tab.id ? "active" : ""}
             >
               {tab.label}
+              {tab.count !== null && <span className="count">{tab.count}</span>}
             </button>
           ))}
         </nav>
@@ -1098,7 +1113,7 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
                 <div>
                   <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Status</dt>
                   <dd className="mt-0.5">
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${rfi.status === "open" ? "bg-blue-50 text-blue-700" : rfi.status === "closed" ? "bg-gray-100 text-gray-600" : "bg-amber-50 text-amber-700"}`}>
+                    <span className={`pill ${rfi.status === "open" ? "pill-open" : rfi.status === "closed" ? "pill-post" : "pill-warn"} capitalize`}>
                       {rfi.status}
                     </span>
                   </dd>

@@ -1162,7 +1162,6 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
           <div>
-            <p className="eyebrow mb-2">Project · Coordination</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Submittals</h1>
             <div className="mt-3 inline-flex rounded-md border hairline overflow-hidden bg-white">
               <button onClick={() => { setActiveTab("items"); setSelectedIds([]); }} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "items" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Items</button>
@@ -1235,7 +1234,6 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
         ) : activeTab === "packages" ? (
           packages.length === 0 ? (
             <div className="bg-white border border-dashed border-gray-200 rounded-xl py-16 text-center">
-              <p className="eyebrow eyebrow-quiet justify-center mb-3">Empty</p>
               <p className="font-display text-xl text-[color:var(--ink)] mb-1">No submittal packages yet</p>
               <p className="text-xs text-gray-400 mt-1">Click New submittal and choose Submittal Package</p>
             </div>
@@ -1270,7 +1268,6 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
         ) : activeTab === "spec_sections" ? (
           specSectionRows.length === 0 ? (
             <div className="bg-white border border-dashed border-gray-200 rounded-xl py-16 text-center">
-              <p className="eyebrow eyebrow-quiet justify-center mb-3">Empty</p>
               <p className="font-display text-xl text-[color:var(--ink)] mb-1">No specification sections yet</p>
             </div>
           ) : (
@@ -1299,7 +1296,6 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
           )
         ) : submittals.length === 0 ? (
           <div className="bg-white border border-dashed border-gray-200 rounded-xl py-16 text-center">
-            <p className="eyebrow eyebrow-quiet justify-center mb-3">Empty</p>
             <p className="font-display text-xl text-[color:var(--ink)] mb-1">No submittals yet</p>
             <p className="text-xs text-gray-400 mt-1">Click New submittal to add the first one</p>
           </div>
@@ -1436,7 +1432,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
               <button
                 type="button"
                 onClick={handleProceedToSpecifications}
-                className="px-4 py-2 text-sm font-semibold text-white bg-orange-500 rounded hover:bg-orange-600"
+                className="px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
               >
                 Proceed to Specifications
               </button>

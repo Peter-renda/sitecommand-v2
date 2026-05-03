@@ -365,7 +365,6 @@ export default function AdminClient({
           <>
             <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
               <div>
-                <p className="eyebrow mb-2">Project · Setup</p>
                 <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Project Admin</h1>
                 <p className="mt-1 text-base text-gray-700">{data?.name || "Untitled Project"}</p>
                 {!isAdmin ? (

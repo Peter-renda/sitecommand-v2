@@ -243,7 +243,6 @@ export default function SpecificationsClient({ projectId, username }: { projectI
       <div className="px-6 pt-8 pb-4 bg-gray-50">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <p className="eyebrow mb-2">Project · Coordination</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Specifications</h1>
           </div>
 
@@ -354,7 +353,7 @@ export default function SpecificationsClient({ projectId, username }: { projectI
                 type="button"
                 onClick={handleGenerateSubmittal}
                 disabled={!selectedSpecIdForSubmittal}
-                className="rounded bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-orange-200"
+                className="rounded-md bg-[color:var(--ink)] px-4 py-2 text-sm font-semibold text-white hover:bg-black transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Generate Submittal
               </button>

@@ -152,7 +152,6 @@ export default function BudgetModificationsReport({ projectId, username }: { pro
           {/* Title + Export */}
           <div className="flex items-start justify-between mb-6">
             <div>
-              <p className="eyebrow mb-2">Reporting · Cost</p>
               <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Budget Modifications</h1>
             </div>
 
@@ -233,7 +232,7 @@ export default function BudgetModificationsReport({ projectId, username }: { pro
 
         {/* Right filter panel */}
         <aside className="w-64 flex-shrink-0 bg-gray-100 border-l border-gray-200 px-4 py-6">
-          <h2 className="eyebrow mb-4">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 mb-4">
             Filter Modifications By
           </h2>
 

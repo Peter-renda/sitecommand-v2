@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
-import { Brand, Eyebrow, Pill } from "@/components/design-system/Primitives";
+import { Brand, Pill } from "@/components/design-system/Primitives";
 import { PERMISSION_TEMPLATE_ORDER } from "@/lib/permission-templates";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -834,9 +834,7 @@ export default function DirectoryClient({
       <main className="max-w-screen-xl mx-auto px-6 py-6">
         {/* Toolbar */}
         <div className="mb-4 rounded-xl border border-[var(--border-base)] bg-white p-4">
-          <Eyebrow quiet>Project Workspace</Eyebrow>
           <div className="mt-2 flex items-center justify-between">
-            <p className="eyebrow mb-2">Project · People</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Directory</h1>
             <Pill className="pill-open">{totalCount} contacts</Pill>
           </div>

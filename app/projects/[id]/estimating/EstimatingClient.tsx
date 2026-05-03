@@ -488,7 +488,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
             <div className="overflow-y-auto px-6 py-5 space-y-5">
               {/* Preview */}
               <div>
-                <p className="eyebrow mb-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 mb-2">
                   Preview (first 3 rows)
                 </p>
                 <div className="overflow-x-auto border border-gray-200 rounded-lg">
@@ -525,7 +525,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
 
               {/* Mapping dropdowns */}
               <div>
-                <p className="eyebrow mb-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 mb-3">
                   Column Mapping
                 </p>
                 <div className="grid grid-cols-2 gap-4">
@@ -588,7 +588,6 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <p className="eyebrow mb-2">Project · Preconstruction</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Estimating</h1>
             <p className="text-sm text-gray-500 mt-0.5">
               Build and organize your project cost estimate by CSI division

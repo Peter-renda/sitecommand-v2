@@ -569,7 +569,6 @@ export default function PunchListClient({ projectId, role, username, userId }: {
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="eyebrow mb-2">Project · Quality</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Punch List</h1>
           </div>
           <div className="flex items-center gap-2">

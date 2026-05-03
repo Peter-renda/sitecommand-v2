@@ -414,7 +414,6 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
       {/* Page header */}
       <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-gray-50 gap-4 flex-wrap">
         <div>
-          <p className="eyebrow mb-2">Project · Preconstruction</p>
           <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Scope of Work</h1>
         </div>
         <button
@@ -431,7 +430,7 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
         {/* ── Sidebar ────────────────────────────────────────────────────── */}
         <aside className="w-64 shrink-0 bg-white border-r border-gray-200 overflow-y-auto">
           <div className="px-4 py-3 border-b border-gray-100">
-            <p className="eyebrow">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">
               CSI Divisions
             </p>
           </div>

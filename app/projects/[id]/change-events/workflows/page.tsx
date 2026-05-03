@@ -516,7 +516,6 @@ export default async function ChangeEventWorkflowsPage({
       <ProjectNav projectId={projectId} />
       <main className="mx-auto max-w-7xl px-6 py-8 space-y-6">
         <div>
-          <p className="eyebrow mb-2">Change Management</p>
           <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Workflow Guides</h1>
           <p className="mt-2 text-sm text-gray-600">
             Reference workflows aligned to SiteCommand&apos;s change-event process.

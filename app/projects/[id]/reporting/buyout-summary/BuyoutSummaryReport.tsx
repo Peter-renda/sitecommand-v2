@@ -180,7 +180,6 @@ export default function BuyoutSummaryReport({ projectId, username }: { projectId
         {/* Title + Export */}
         <div className="flex items-start justify-between mb-4">
           <div>
-            <p className="eyebrow mb-2">Reporting · Cost</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Buyout Summary Report</h1>
           </div>
 

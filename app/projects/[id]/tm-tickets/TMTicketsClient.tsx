@@ -38,7 +38,6 @@ export default function TMTicketsClient({ projectId, username }: { projectId: st
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
           <div>
-            <p className="eyebrow mb-2">Project · Workforce</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">T&amp;M Tickets</h1>
           </div>
           <a

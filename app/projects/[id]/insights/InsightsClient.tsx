@@ -216,7 +216,6 @@ export default function InsightsClient({
 
       {/* Body */}
       <div className="flex-1 px-6 py-8 max-w-5xl w-full mx-auto">
-        <p className="eyebrow mb-2">Project · Analytics</p>
         <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)] mb-1">Insights</h1>
         <p className="text-sm text-gray-400 mb-8">Overview of project activity across all tools.</p>
 

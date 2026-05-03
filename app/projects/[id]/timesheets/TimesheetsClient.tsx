@@ -242,7 +242,6 @@ export default function TimesheetsClient({
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-4">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <p className="eyebrow mb-2">Project · Workforce</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Timesheets</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">

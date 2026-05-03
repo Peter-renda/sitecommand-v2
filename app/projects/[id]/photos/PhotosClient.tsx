@@ -358,7 +358,6 @@ export default function PhotosClient({
         >
           {/* Page heading */}
           <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0">
-            <p className="eyebrow mb-2">Project · Coordination</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Photos</h1>
           </div>
           {/* Toolbar */}

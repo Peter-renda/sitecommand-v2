@@ -1407,7 +1407,6 @@ export default function DrawingsClient({
       {/* Page title */}
       <div className="bg-white border-b border-gray-100 px-6 py-3 shrink-0 flex items-center justify-between">
         <div>
-          <p className="eyebrow mb-2">Project · Coordination</p>
           <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Drawings</h1>
           <p className="text-sm text-gray-500">View, manage, and upload all of your drawings from the Drawings log.</p>
         </div>

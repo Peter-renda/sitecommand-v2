@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, ChangeEvent } from "re
 // Note: useRef/useCallback used by other parts of this file (folder tree, modals)
 import { Hand } from "lucide-react";
 import ProjectNav from "@/components/ProjectNav";
-import { Brand, Eyebrow, Pill } from "@/components/design-system/Primitives";
+import { Brand, Pill } from "@/components/design-system/Primitives";
 
 type DocItem = {
   id: string;
@@ -1465,7 +1465,7 @@ function ItemInfoPanel({
         <div className="flex-1 overflow-y-auto">
           {/* General Information */}
           <div className="px-4 py-4 border-b border-gray-100">
-            <h3 className="eyebrow mb-3">General Information</h3>
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">General Information</h3>
             <div className="space-y-3">
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Title</p>
@@ -2090,7 +2090,6 @@ export default function DocumentsClient({
         {/* Page title + breadcrumb + add button */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <Eyebrow quiet>Project workspace</Eyebrow>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Documents</h1>
             <div className="mt-1"><Pill className="pill-open">{items.length} items</Pill></div>
             <nav className="flex items-center gap-1 mt-1">

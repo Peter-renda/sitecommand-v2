@@ -585,7 +585,6 @@ function LineItemModal({
             </Field>
           </div>
 
-          <p className="eyebrow pt-1">Unit-Based Fields</p>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Manual Calculation">
               <select
@@ -648,7 +647,6 @@ function LineItemModal({
             </label>
           </div>
 
-          <p className="eyebrow pt-1">Budget</p>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Original Budget Amount">
               <MoneyInput
@@ -675,7 +673,6 @@ function LineItemModal({
             </Field>
           </div>
 
-          <p className="eyebrow pt-1">Costs</p>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Committed Costs">
               <MoneyInput value={form.committed_costs} onChange={(v) => set("committed_costs", v)} />
@@ -691,7 +688,6 @@ function LineItemModal({
             </Field>
           </div>
 
-          <p className="eyebrow pt-1">Advanced Forecasting Curve</p>
           <div className="grid grid-cols-3 gap-4">
             <Field label="Start Date">
               <input
@@ -2180,7 +2176,6 @@ export default function BudgetClient({
         {/* Title + actions */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="eyebrow mb-2">Project · Financials</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Budget</h1>
             {snapshots.length > 0 && (
               <p className="text-xs text-gray-400 mt-0.5">

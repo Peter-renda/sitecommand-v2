@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ProjectNav from "@/components/ProjectNav";
-import { Eyebrow, Pill } from "@/components/design-system/Primitives";
+import { Pill } from "@/components/design-system/Primitives";
 
 type Note = {
   id: string;
@@ -212,9 +212,7 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
 
       <main className="mx-auto max-w-[1400px] px-4 py-6">
         <div className="mb-4 rounded-xl border border-[var(--border-base)] bg-white p-4">
-          <Eyebrow quiet>Project Workspace</Eyebrow>
           <div className="mt-2 flex items-center justify-between">
-            <p className="eyebrow mb-2">Project · Coordination</p>
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Quick Notes</h1>
             <Pill className="pill-open">{notes.length} notes</Pill>
           </div>

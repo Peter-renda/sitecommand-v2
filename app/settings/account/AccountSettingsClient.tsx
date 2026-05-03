@@ -71,7 +71,6 @@ export default function AccountSettingsClient({
   return (
     <div className="space-y-6">
       <div>
-        <p className="eyebrow mb-2">Settings · Account</p>
         <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Account</h1>
         <p className="text-sm text-gray-500 mt-1">Manage your login credentials and contact info.</p>
       </div>

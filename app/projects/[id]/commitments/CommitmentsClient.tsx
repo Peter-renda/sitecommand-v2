@@ -422,7 +422,7 @@ function CommitmentModal({
             </Field>
           </div>
 
-          <p className="eyebrow pt-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 pt-1">
             Amounts
           </p>
 
@@ -862,7 +862,6 @@ export default function CommitmentsClient({
       <main className="px-6 py-8">
         {/* Title + actions */}
         <div className="flex items-center justify-between mb-5">
-          <p className="eyebrow mb-2">Project · Financials</p>
           <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Commitments</h1>
 
           <div className="flex items-center gap-2">
@@ -1125,7 +1124,6 @@ export default function CommitmentsClient({
               <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-100 rounded-xl shadow-lg z-20 p-4 space-y-4">
                 {/* Row Height */}
                 <div>
-                  <p className="eyebrow mb-2">Row Height</p>
                   <div className="flex gap-2">
                     {(["small", "medium", "large"] as const).map((h) => (
                       <button
@@ -1146,7 +1144,7 @@ export default function CommitmentsClient({
                 {/* Column Visibility */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="eyebrow">Columns</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Columns</p>
                     <div className="flex gap-2">
                       <button
                         onClick={() => setHiddenCols(new Set())}

@@ -514,7 +514,6 @@ export default function PrimeContractsClient({
       {/* Header */}
       <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-gray-50 gap-4 flex-wrap">
         <div>
-          <p className="eyebrow mb-2">Project · Cost</p>
           <div className="flex items-center gap-2">
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Prime Contracts</h1>
             <button
