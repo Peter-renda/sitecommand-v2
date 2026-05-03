@@ -751,7 +751,14 @@ export default function ScheduleClient({
 
       {/* Page heading */}
       <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0">
-        <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Schedule</h1>
+        <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Schedule</h1>
+        {schedule && tasks.length > 0 && (
+          <p className="sec-sub mt-1.5">
+            <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+            <span className="sep">·</span>
+            <span className="num" style={{ color: "var(--brand-500)" }}>{tasks.length}</span> tasks
+          </p>
+        )}
       </div>
 
       {/* Body */}

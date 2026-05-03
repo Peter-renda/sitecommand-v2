@@ -1405,10 +1405,18 @@ export default function DrawingsClient({
       <ProjectNav projectId={projectId} />
 
       {/* Page title */}
-      <div className="bg-white border-b border-gray-100 px-6 py-3 shrink-0 flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Drawings</h1>
-          <p className="text-sm text-gray-500">View, manage, and upload all of your drawings from the Drawings log.</p>
+      <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0 flex items-end justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Drawings</h1>
+          {drawings.length > 0 ? (
+            <p className="sec-sub mt-1.5">
+              <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+              <span className="sep">·</span>
+              <span className="num" style={{ color: "var(--brand-500)" }}>{drawings.length}</span> sheets
+            </p>
+          ) : (
+            <p className="sec-sub mt-1.5">View, manage, and upload all of your drawings from the Drawings log.</p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {uploading && (

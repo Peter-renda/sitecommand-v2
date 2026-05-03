@@ -861,8 +861,21 @@ export default function CommitmentsClient({
 
       <main className="px-6 py-8">
         {/* Title + actions */}
-        <div className="flex items-center justify-between mb-5">
-          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Commitments</h1>
+        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+          <div className="min-w-0">
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Commitments</h1>
+            {items.length > 0 && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{items.filter((i) => i.status === "approved").length}</span> approved
+                <span className="sep">·</span>
+                <span className="num">{items.filter((i) => i.status === "draft").length}</span> draft
+                <span className="sep">·</span>
+                <span className="num">{items.length}</span> total
+              </p>
+            )}
+          </div>
 
           <div className="flex items-center gap-2">
             {/* Export dropdown */}

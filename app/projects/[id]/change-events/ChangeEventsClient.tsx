@@ -489,7 +489,18 @@ export default function ChangeEventsClient({
 
       {/* ── Page Header ─────────────────────────────────────────────────────── */}
       <div className="px-6 pt-8 pb-4 bg-gray-50">
-        <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Change Events</h1>
+        <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Change Events</h1>
+        {events.length > 0 && (
+          <p className="sec-sub mt-1.5">
+            <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+            <span className="sep">·</span>
+            <span className="num" style={{ color: "var(--brand-500)" }}>{events.filter((e) => e.status?.toLowerCase() === "open").length}</span> open
+            <span className="sep">·</span>
+            <span className="num">{events.filter((e) => e.status?.toLowerCase() === "pending").length}</span> pending
+            <span className="sep">·</span>
+            <span className="num">{events.length}</span> total
+          </p>
+        )}
       </div>
 
       <div className="flex items-center justify-between px-6 py-2 border-b border-gray-200 bg-white shrink-0">

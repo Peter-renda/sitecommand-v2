@@ -311,8 +311,19 @@ export default function ChangeOrdersClient({
 
       {/* Page header */}
       <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-gray-50 gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Change Orders</h1>
+        <div className="min-w-0">
+          <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Change Orders</h1>
+          {orders.length > 0 && (
+            <p className="sec-sub mt-1.5">
+              <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+              <span className="sep">·</span>
+              <span className="num" style={{ color: "var(--brand-500)" }}>{orders.filter((o) => o.status?.toLowerCase().startsWith("pending")).length}</span> pending
+              <span className="sep">·</span>
+              <span className="num">{orders.filter((o) => o.status?.toLowerCase() === "approved").length}</span> approved
+              <span className="sep">·</span>
+              <span className="num">{orders.length}</span> total
+            </p>
+          )}
         </div>
         <button
           onClick={exportListAsCsv}
