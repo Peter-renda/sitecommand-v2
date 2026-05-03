@@ -68,6 +68,19 @@ export default function ProjectNav({
   // Favorites state
   const [favorites, setFavorites] = useState<string[]>([]);
   const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+  const projectBasePath = `/projects/${projectId}`;
+
+  const inProjectScope = pathname === projectBasePath || pathname?.startsWith(`${projectBasePath}/`);
+  const isProjectHome = pathname === projectBasePath;
+  const projectRelativePath = pathname?.startsWith(projectBasePath)
+    ? pathname.slice(projectBasePath.length)
+    : "";
+  const projectSegments = projectRelativePath.split("/").filter(Boolean);
+  const parentSegments = projectSegments.slice(0, -1);
+  const parentHref = parentSegments.length
+    ? `${projectBasePath}/${parentSegments.join("/")}`
+    : projectBasePath;
+  const showLayerUp = showBackToProject && inProjectScope && !isProjectHome;
 
   // Click outside for tools dropdown
   useEffect(() => {
@@ -342,14 +355,15 @@ export default function ProjectNav({
             </svg>
           </a>
 
-          {showBackToProject && (
+          {showLayerUp && (
             <>
               <div className="w-px h-4 bg-gray-200" />
               <a
-                href={`/projects/${projectId}`}
+                href={parentHref}
                 className="flex items-center gap-1.5 py-2.5 text-sm text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                title="Go up one level"
               >
-                ← Back to Project
+                ←
               </a>
             </>
           )}
