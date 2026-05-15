@@ -371,6 +371,10 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const dashboardSearchRef = useRef<HTMLDivElement>(null);
   const [dashboardSearch, setDashboardSearch] = useState("");
   const [showDashboardSearch, setShowDashboardSearch] = useState(false);
+  const [dashboardSearchResults, setDashboardSearchResults] = useState<
+    { id: string; title: string; subtitle: string; href: string }[]
+  >([]);
+  const [dashboardSearchLoading, setDashboardSearchLoading] = useState(false);
 
   // Settings modal state
   const [showSettings, setShowSettings] = useState(false);
@@ -511,52 +515,39 @@ export default function DashboardClient({ username, email, role, companyRole, us
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const searchQuery = dashboardSearch.trim().toLowerCase();
-  const dashboardSearchResults = searchQuery.length < 1
-    ? []
-    : [
-      ...projects
-        .filter((p) =>
-          [p.name, p.description, p.address, p.status].filter(Boolean).join(" ").toLowerCase().includes(searchQuery)
-        )
-        .map((p) => ({
-          id: `project-${p.id}`,
-          title: p.name,
-          subtitle: `Project • ${p.status || "No status"}`,
-          href: `/projects/${p.id}`,
-        })),
-      ...activities
-        .filter((a) =>
-          [a.title, a.project_name, TYPE_LABELS[a.type]].filter(Boolean).join(" ").toLowerCase().includes(searchQuery)
-        )
-        .map((a) => ({
-          id: `activity-${a.type}-${a.id}`,
-          title: a.title,
-          subtitle: `${TYPE_LABELS[a.type]} • ${a.project_name}`,
-          href:
-            a.type === "rfi"
-              ? `/projects/${a.project_id}/rfis/${a.id}`
-              : a.type === "submittal"
-                ? `/projects/${a.project_id}/submittals/${a.id}`
-                : a.type === "task"
-                  ? `/projects/${a.project_id}/tasks/${a.id}`
-                  : a.type === "document"
-                    ? `/projects/${a.project_id}/documents`
-                    : a.type === "daily_log"
-                      ? `/projects/${a.project_id}/daily-log`
-                      : `/projects/${a.project_id}/drawings`,
-        })),
-      ...myTasks
-        .filter((t) =>
-          [t.title, t.project_name, t.status].filter(Boolean).join(" ").toLowerCase().includes(searchQuery)
-        )
-        .map((t) => ({
-          id: `my-task-${t.id}`,
-          title: t.title,
-          subtitle: `My Task • ${t.project_name}`,
-          href: `/projects/${t.project_id}/tasks/${t.id}`,
-        })),
-    ].slice(0, 25);
+  const searchQuery = dashboardSearch.trim();
+
+  // Debounced server-side search across the entire portfolio of accessible projects.
+  useEffect(() => {
+    if (searchQuery.length < 1) {
+      setDashboardSearchResults([]);
+      setDashboardSearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDashboardSearchLoading(true);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search/global?q=${encodeURIComponent(searchQuery)}`);
+        if (!res.ok) {
+          if (!cancelled) setDashboardSearchResults([]);
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) {
+          setDashboardSearchResults(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        if (!cancelled) setDashboardSearchResults([]);
+      } finally {
+        if (!cancelled) setDashboardSearchLoading(false);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [searchQuery]);
 
   function toggleActivityType(type: string) {
     setVisibleCount(4);
@@ -742,7 +733,9 @@ export default function DashboardClient({ username, email, role, companyRole, us
             />
             {showDashboardSearch && dashboardSearch.trim().length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-[9999] max-h-80 overflow-y-auto">
-                {dashboardSearchResults.length === 0 ? (
+                {dashboardSearchLoading && dashboardSearchResults.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-gray-400">Searching…</p>
+                ) : dashboardSearchResults.length === 0 ? (
                   <p className="px-3 py-2 text-xs text-gray-400">No results found.</p>
                 ) : (
                   <div className="py-1">
