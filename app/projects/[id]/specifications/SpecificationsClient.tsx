@@ -32,10 +32,10 @@ export default function SpecificationsClient({ projectId, username }: { projectI
   const [showCreateSpecificationModal, setShowCreateSpecificationModal] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [divisions, setDivisions] = useState<Division[]>([{ number: "100", description: "Unclassified" }]);
+  const [divisions, setDivisions] = useState<Division[]>([]);
   const [newDivisionNumber, setNewDivisionNumber] = useState("");
   const [newDivisionDescription, setNewDivisionDescription] = useState("");
-  const [newSpecificationDivision, setNewSpecificationDivision] = useState("100");
+  const [newSpecificationDivision, setNewSpecificationDivision] = useState("");
   const [newSpecificationNumber, setNewSpecificationNumber] = useState("");
   const [newSpecificationDescription, setNewSpecificationDescription] = useState("");
   const [selectedSpecIdForSubmittal, setSelectedSpecIdForSubmittal] = useState<string | null>(null);
@@ -67,14 +67,22 @@ export default function SpecificationsClient({ projectId, username }: { projectI
     setDivisions((current) => {
       const seenNumbers = new Set(current.map((division) => division.number));
       const inferredDivisions: Division[] = [];
+      let hasUnclassified = false;
       specifications.forEach((spec) => {
+        if (spec.deleted_at) return;
         const match = spec.code?.match(/^\s*(\d{2,3})/);
-        if (!match) return;
+        if (!match) {
+          hasUnclassified = true;
+          return;
+        }
         const number = match[1];
         if (seenNumbers.has(number)) return;
         seenNumbers.add(number);
         inferredDivisions.push({ number, description: `Division ${number}` });
       });
+      if (hasUnclassified && !seenNumbers.has("100")) {
+        inferredDivisions.push({ number: "100", description: "Unclassified" });
+      }
       if (inferredDivisions.length === 0) return current;
       return [...current, ...inferredDivisions].sort((a, b) => a.number.localeCompare(b.number));
     });
@@ -168,7 +176,7 @@ export default function SpecificationsClient({ projectId, username }: { projectI
 
   function closeCreateSpecificationModal() {
     setShowCreateSpecificationModal(false);
-    setNewSpecificationDivision(divisions[0]?.number ?? "100");
+    setNewSpecificationDivision(divisions[0]?.number ?? "");
     setNewSpecificationNumber("");
     setNewSpecificationDescription("");
   }
