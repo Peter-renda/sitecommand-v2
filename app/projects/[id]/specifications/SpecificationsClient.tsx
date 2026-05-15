@@ -242,6 +242,11 @@ export default function SpecificationsClient({ projectId, username }: { projectI
     setNewDivisionDescription("");
   }
 
+  function openCreateSpecificationModal() {
+    setNewSpecificationDivision((current) => current || divisions[0]?.number || "");
+    setShowCreateSpecificationModal(true);
+  }
+
   function closeCreateSpecificationModal() {
     setShowCreateSpecificationModal(false);
     setNewSpecificationDivision(divisions[0]?.number ?? "");
@@ -410,7 +415,7 @@ export default function SpecificationsClient({ projectId, username }: { projectI
             </button>
             <button
               type="button"
-              onClick={() => setShowCreateSpecificationModal(true)}
+              onClick={openCreateSpecificationModal}
               className="flex items-center gap-1 hover:text-black"
             >
               <Plus className="h-4 w-4" />
@@ -737,11 +742,15 @@ export default function SpecificationsClient({ projectId, username }: { projectI
                   onChange={(e) => setNewSpecificationDivision(e.target.value)}
                   className="w-full rounded border border-gray-400 bg-[#efefef] px-3 py-2 text-sm outline-none focus:border-gray-500"
                 >
-                  {divisions.map((division) => (
-                    <option key={division.number} value={division.number}>
-                      {division.number} - {division.description}
-                    </option>
-                  ))}
+                  {divisions.length === 0 ? (
+                    <option value="">No divisions available</option>
+                  ) : (
+                    divisions.map((division) => (
+                      <option key={division.number} value={division.number}>
+                        {division.number} - {division.description}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
               <div>
