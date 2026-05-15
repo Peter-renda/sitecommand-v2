@@ -160,7 +160,7 @@ export async function POST(
         ...drawing,
         storage_path: pagePath,
         viewer_page: 1,
-        filename: file.name,
+        filename,
         uploaded_by_name: session.username,
         uploaded_at: uploadRow.uploaded_at,
       });
