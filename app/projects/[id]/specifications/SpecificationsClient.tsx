@@ -48,6 +48,7 @@ export default function SpecificationsClient({ projectId, username }: { projectI
   const [newSpecificationDescription, setNewSpecificationDescription] = useState("");
   const [selectedSpecIdForSubmittal, setSelectedSpecIdForSubmittal] = useState<string | null>(null);
   const [isCreatingSpecification, setIsCreatingSpecification] = useState(false);
+  const [isCreatingDivision, setIsCreatingDivision] = useState(false);
   const [isParsingUpload, setIsParsingUpload] = useState(false);
   const [isApplyingParsedUpload, setIsApplyingParsedUpload] = useState(false);
   const [parsedSections, setParsedSections] = useState<ParsedSpecSection[]>([]);
@@ -59,17 +60,29 @@ export default function SpecificationsClient({ projectId, username }: { projectI
 
   useEffect(() => {
     let mounted = true;
-    async function loadSpecifications() {
+    async function loadInitialData() {
       try {
-        const res = await fetch(`/api/projects/${projectId}/specifications`);
-        const data = await res.json();
+        const [specsRes, divisionsRes] = await Promise.all([
+          fetch(`/api/projects/${projectId}/specifications`),
+          fetch(`/api/projects/${projectId}/spec-divisions`),
+        ]);
+        const specsData = await specsRes.json();
+        const divisionsData = await divisionsRes.json();
         if (!mounted) return;
-        setSpecifications(Array.isArray(data) ? data : []);
+        setSpecifications(Array.isArray(specsData) ? specsData : []);
+        if (Array.isArray(divisionsData)) {
+          setDivisions(
+            divisionsData.map((d: { number: string; description: string }) => ({
+              number: d.number,
+              description: d.description,
+            }))
+          );
+        }
       } finally {
         if (mounted) setLoading(false);
       }
     }
-    loadSpecifications();
+    loadInitialData();
     return () => {
       mounted = false;
     };
@@ -254,14 +267,34 @@ export default function SpecificationsClient({ projectId, username }: { projectI
     setNewSpecificationDescription("");
   }
 
-  function handleCreateDivision() {
+  async function handleCreateDivision() {
     if (!newDivisionNumber.trim() || !newDivisionDescription.trim()) return;
     const nextDivision = { number: newDivisionNumber.trim(), description: newDivisionDescription.trim() };
-    setDivisions((current) => {
-      const deduped = current.filter((division) => division.number !== nextDivision.number);
-      return [...deduped, nextDivision].sort((a, b) => a.number.localeCompare(b.number));
-    });
-    closeCreateDivisionModal();
+    setIsCreatingDivision(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/spec-divisions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextDivision),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "Failed to create division");
+      }
+      const created = (await res.json()) as { number: string; description: string };
+      setDivisions((current) => {
+        const deduped = current.filter((division) => division.number !== created.number);
+        return [...deduped, { number: created.number, description: created.description }].sort((a, b) =>
+          a.number.localeCompare(b.number)
+        );
+      });
+      closeCreateDivisionModal();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create division";
+      window.alert(message);
+    } finally {
+      setIsCreatingDivision(false);
+    }
   }
 
   async function handleCreateSpecification() {
@@ -712,11 +745,11 @@ export default function SpecificationsClient({ projectId, username }: { projectI
               </button>
               <button
                 type="button"
-                disabled={!canCreateDivision}
+                disabled={!canCreateDivision || isCreatingDivision}
                 onClick={handleCreateDivision}
                 className="rounded px-4 py-2 text-sm font-semibold text-white disabled:bg-[#f4c7af] enabled:bg-[#f39a6e] enabled:hover:bg-[#ea8858]"
               >
-                Create
+                {isCreatingDivision ? "Creating..." : "Create"}
               </button>
             </div>
           </div>
