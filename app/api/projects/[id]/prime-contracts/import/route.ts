@@ -100,7 +100,7 @@ Document text:
 ${pdfText.slice(0, 10000)}`;
 
     const result = await genai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
     });
 
