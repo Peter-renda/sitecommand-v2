@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { GoogleGenAI } from "@google/genai";
+import { loadPdfjs } from "@/lib/pdfjs-server";
 
 type ParsedSection = {
   number: string;
@@ -64,8 +65,7 @@ export async function POST(_req: NextRequest) {
   }
 
   try {
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    pdfjs.GlobalWorkerOptions.workerSrc = "";
+    const pdfjs = await loadPdfjs();
     const bytes = new Uint8Array(await file.arrayBuffer());
     const pdf = await pdfjs.getDocument({ data: bytes, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise;
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { GoogleGenAI } from "@google/genai";
+import { loadPdfjs } from "@/lib/pdfjs-server";
 
 function parseModelError(err: unknown): { message: string; shouldFallback: boolean } {
   const record = err && typeof err === "object" ? (err as Record<string, unknown>) : null;
@@ -44,8 +45,7 @@ export async function POST(
   let pdfText = "";
 
   try {
-    const pdfjs = await import("pdfjs-dist");
-    pdfjs.GlobalWorkerOptions.workerSrc = "";
+    const pdfjs = await loadPdfjs();
     const pdf = await pdfjs
       .getDocument({ data: new Uint8Array(arrayBuffer), useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true })
       .promise;
