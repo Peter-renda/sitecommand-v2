@@ -17,6 +17,8 @@ function isToolEnabled(slug: string, enabledFeatures: string[] | null | undefine
   if (!slug) return true;
   // Core admin is always available from the project navigation.
   if (slug === "admin") return true;
+  // Assist is a core tool, available on every project regardless of feature allowlist.
+  if (slug === "assist") return true;
   if (!enabledFeatures) return true;
   if (enabledFeatures.includes(slug)) return true;
   // Backward compatibility: existing companies with feature allowlists often enabled

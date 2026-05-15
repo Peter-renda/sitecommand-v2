@@ -63,7 +63,7 @@ Requirements:
 - Do not include any preamble like "Here is a scope..." — just provide the scope text directly`;
 
     const result = await genai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
     });
     const text = (result.text ?? "").trim();

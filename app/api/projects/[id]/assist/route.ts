@@ -4,14 +4,16 @@ import { canAccessProject } from "@/lib/project-access";
 import { getSupabase } from "@/lib/supabase";
 import { GoogleGenAI } from "@google/genai";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 type Row = Record<string, unknown>;
 
 const PER_TABLE_LIMIT = 100;
 const MAX_VALUE_CHARS = 1500;
-const MAX_PDF_FILES = 3;
-const MAX_PDF_BYTES_TOTAL = 15 * 1024 * 1024;
+// Safety cap on total bytes uploaded to Gemini per question. Set high enough to fit
+// a typical full drawing set; well under Gemini's per-project storage quota.
+const MAX_PDF_BYTES_TOTAL = 500 * 1024 * 1024;
+const PDF_UPLOAD_CONCURRENCY = 5;
 
 const TABLES: Array<{ label: string; table: string; idCol?: string }> = [
   { label: "RFIs", table: "rfis" },
@@ -111,22 +113,22 @@ function buildContext(blocks: Array<{ label: string; rows: Row[] }>): string {
   return parts.join("\n");
 }
 
-async function fetchDrawingPdfs(
+async function uploadDrawingPdfsToGemini(
   supabase: ReturnType<typeof getSupabase>,
   projectId: string,
-): Promise<Array<{ filename: string; mimeType: string; data: string }>> {
+  ai: GoogleGenAI,
+): Promise<Array<{ filename: string; fileUri: string; mimeType: string }>> {
   const { data: uploads } = await supabase
     .from("drawing_uploads")
     .select("id, filename, storage_path, uploaded_at")
     .eq("project_id", projectId)
-    .order("uploaded_at", { ascending: false })
-    .limit(MAX_PDF_FILES);
+    .order("uploaded_at", { ascending: false });
 
   if (!uploads?.length) return [];
 
-  const out: Array<{ filename: string; mimeType: string; data: string }> = [];
+  // First pass: download from Supabase storage (sequential within budget).
+  const downloaded: Array<{ filename: string; blob: Blob }> = [];
   let bytesUsed = 0;
-
   for (const upload of uploads) {
     const path = (upload as Row).storage_path as string | undefined;
     const filename = ((upload as Row).filename as string | undefined) ?? "drawing.pdf";
@@ -134,17 +136,33 @@ async function fetchDrawingPdfs(
     try {
       const { data: blob, error } = await supabase.storage.from("project-drawings").download(path);
       if (error || !blob) continue;
-      const buf = Buffer.from(await blob.arrayBuffer());
-      if (bytesUsed + buf.byteLength > MAX_PDF_BYTES_TOTAL) continue;
-      bytesUsed += buf.byteLength;
-      out.push({
-        filename,
-        mimeType: "application/pdf",
-        data: buf.toString("base64"),
-      });
+      if (bytesUsed + blob.size > MAX_PDF_BYTES_TOTAL) break;
+      bytesUsed += blob.size;
+      downloaded.push({ filename, blob });
     } catch {
       // skip
     }
+  }
+
+  // Second pass: upload to Gemini Files API with limited concurrency.
+  const out: Array<{ filename: string; fileUri: string; mimeType: string }> = [];
+  for (let i = 0; i < downloaded.length; i += PDF_UPLOAD_CONCURRENCY) {
+    const batch = downloaded.slice(i, i + PDF_UPLOAD_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async (item) => {
+        try {
+          const file = await ai.files.upload({
+            file: item.blob,
+            config: { mimeType: "application/pdf", displayName: item.filename },
+          });
+          if (!file.uri || !file.mimeType) return null;
+          return { filename: item.filename, fileUri: file.uri, mimeType: file.mimeType };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    for (const r of results) if (r) out.push(r);
   }
   return out;
 }
@@ -178,14 +196,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .eq("id", projectId)
     .single();
 
-  const fetched = await Promise.all(
-    TABLES.map(async (t) => ({
-      label: t.label,
-      rows: await fetchTable(supabase, t.table, projectId, t.idCol),
-    })),
-  );
+  const genai = new GoogleGenAI({ apiKey });
 
-  const drawingPdfs = await fetchDrawingPdfs(supabase, projectId);
+  const [fetched, drawingPdfs] = await Promise.all([
+    Promise.all(
+      TABLES.map(async (t) => ({
+        label: t.label,
+        rows: await fetchTable(supabase, t.table, projectId, t.idCol),
+      })),
+    ),
+    uploadDrawingPdfsToGemini(supabase, projectId, genai),
+  ]);
 
   const projectHeader = project
     ? `Project: ${project.name ?? "Unknown"}${project.project_type ? ` (${project.project_type})` : ""}${project.address ? ` — ${project.address}` : ""}${project.status ? ` — Status: ${project.status}` : ""}`
@@ -215,17 +236,16 @@ ${context || "(no records found)"}
 ${question}`;
 
   try {
-    const genai = new GoogleGenAI({ apiKey });
-
-    const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
-      { text: userPrompt },
-    ];
+    const parts: Array<{
+      text?: string;
+      fileData?: { mimeType: string; fileUri: string };
+    }> = [{ text: userPrompt }];
     for (const pdf of drawingPdfs) {
-      parts.push({ inlineData: { mimeType: pdf.mimeType, data: pdf.data } });
+      parts.push({ fileData: { mimeType: pdf.mimeType, fileUri: pdf.fileUri } });
     }
 
     const result = await genai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: [{ role: "user", parts }],
       config: { systemInstruction },
     });
