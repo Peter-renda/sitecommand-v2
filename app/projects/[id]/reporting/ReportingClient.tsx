@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
 import { Pill } from "@/components/design-system/Primitives";
 
@@ -2002,6 +2003,7 @@ function Create360CategoryModal({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ReportingClient({ projectId }: { projectId: string }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"reports" | "dashboards">("reports");
   const [search, setSearch] = useState("");
   const [myReports, setMyReports] = useState<SavedReport[]>([]);
@@ -2607,7 +2609,7 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
           onClose={() => setShow360CategoryModal(false)}
           onContinue={() => {
             setShow360CategoryModal(false);
-            setShowCreateModal(true);
+            router.push(`/projects/${projectId}/reporting/360/new?category=${encodeURIComponent(selected360Category)}`);
           }}
         />
       )}
