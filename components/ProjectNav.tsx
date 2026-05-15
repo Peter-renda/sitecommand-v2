@@ -95,129 +95,54 @@ export default function ProjectNav({
   }, []);
 
   useEffect(() => {
-    const q = portalSearch.trim().toLowerCase();
+    const q = portalSearch.trim();
     if (q.length < 2) {
       setSearchResults([]);
       setSearching(false);
       return;
     }
 
+    const SECTION_LABELS: Record<string, string> = {
+      project: "Projects",
+      rfi: "RFIs",
+      submittal: "Submittals",
+      document: "Documents",
+      task: "Tasks",
+      drawing: "Drawings",
+    };
+
+    let cancelled = false;
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const [dailyLogsRes, drawingsRes, documentsRes, directoryRes, rfisRes, submittalsRes, tasksRes] = await Promise.all([
-          fetch(`/api/projects/${projectId}/daily-log`).then((r) => (r.ok ? r.json() : [])),
-          fetch(`/api/projects/${projectId}/drawings`).then((r) => (r.ok ? r.json() : { drawings: [] })),
-          fetch(`/api/projects/${projectId}/documents?all_folders=true`).then((r) => (r.ok ? r.json() : [])),
-          fetch(`/api/projects/${projectId}/directory`).then((r) => (r.ok ? r.json() : [])),
-          fetch(`/api/projects/${projectId}/rfis`).then((r) => (r.ok ? r.json() : [])),
-          fetch(`/api/projects/${projectId}/submittals`).then((r) => (r.ok ? r.json() : [])),
-          fetch(`/api/projects/${projectId}/tasks`).then((r) => (r.ok ? r.json() : [])),
-        ]);
-
-        const nextResults: { id: string; title: string; subtitle: string; href: string; section: string }[] = [];
-
-        for (const log of dailyLogsRes ?? []) {
-          const text = [log.log_date, log.summary, log.notes].filter(Boolean).join(" ").toLowerCase();
-          if (text.includes(q)) {
-            nextResults.push({
-              id: `daily-${log.id}`,
-              title: `Daily Log — ${log.log_date ?? "Untitled"}`,
-              subtitle: log.summary || log.notes || "Daily report entry",
-              href: `/projects/${projectId}/daily-log`,
-              section: "Daily Logs",
-            });
-          }
+        const res = await fetch(`/api/search/global?q=${encodeURIComponent(q)}`);
+        if (!res.ok) {
+          if (!cancelled) setSearchResults([]);
+          return;
         }
-
-        const drawings = drawingsRes?.drawings ?? [];
-        for (const d of drawings) {
-          const text = [d.filename, d.title, d.drawing_no, d.revision].filter(Boolean).join(" ").toLowerCase();
-          if (text.includes(q)) {
-            nextResults.push({
-              id: `drawing-${d.id}`,
-              title: d.title || d.filename || `Drawing ${d.page_number ?? ""}`,
-              subtitle: [d.drawing_no, d.revision].filter(Boolean).join(" • ") || "Drawing",
-              href: `/projects/${projectId}/drawings`,
-              section: "Drawings",
-            });
-          }
-        }
-
-        for (const doc of documentsRes ?? []) {
-          const text = [doc.name, doc.type].filter(Boolean).join(" ").toLowerCase();
-          if (text.includes(q)) {
-            nextResults.push({
-              id: `doc-${doc.id}`,
-              title: doc.name || "Untitled",
-              subtitle: doc.type === "folder" ? "Folder" : "Document",
-              href: `/projects/${projectId}/documents`,
-              section: "Documents",
-            });
-          }
-        }
-
-        for (const c of directoryRes ?? []) {
-          const fullName = [c.first_name, c.last_name].filter(Boolean).join(" ");
-          const text = [fullName, c.company, c.email, c.job_title].filter(Boolean).join(" ").toLowerCase();
-          if (text.includes(q)) {
-            nextResults.push({
-              id: `dir-${c.id}`,
-              title: fullName || c.email || "Unnamed contact",
-              subtitle: [c.company, c.job_title, c.email].filter(Boolean).join(" • ") || "Directory contact",
-              href: `/projects/${projectId}/directory`,
-              section: "Directory",
-            });
-          }
-        }
-
-        for (const rfi of rfisRes ?? []) {
-          const text = [rfi.number, rfi.subject, rfi.question, rfi.status].filter(Boolean).join(" ").toLowerCase();
-          if (text.includes(q)) {
-            nextResults.push({
-              id: `rfi-${rfi.id}`,
-              title: `${rfi.number ? `${rfi.number} — ` : ""}${rfi.subject || "RFI"}`,
-              subtitle: rfi.status || "RFI",
-              href: `/projects/${projectId}/rfis/${rfi.id}`,
-              section: "RFIs",
-            });
-          }
-        }
-
-        for (const submittal of submittalsRes ?? []) {
-          const text = [submittal.number, submittal.title, submittal.status].filter(Boolean).join(" ").toLowerCase();
-          if (text.includes(q)) {
-            nextResults.push({
-              id: `sub-${submittal.id}`,
-              title: `${submittal.number ? `${submittal.number} — ` : ""}${submittal.title || "Submittal"}`,
-              subtitle: submittal.status || "Submittal",
-              href: `/projects/${projectId}/submittals/${submittal.id}`,
-              section: "Submittals",
-            });
-          }
-        }
-
-        for (const task of tasksRes ?? []) {
-          const text = [task.title, task.description, task.status, task.priority].filter(Boolean).join(" ").toLowerCase();
-          if (text.includes(q)) {
-            nextResults.push({
-              id: `task-${task.id}`,
-              title: task.title || "Task",
-              subtitle: [task.status, task.priority].filter(Boolean).join(" • ") || "Task",
-              href: `/projects/${projectId}/tasks/${task.id}`,
-              section: "Tasks",
-            });
-          }
-        }
-
-        setSearchResults(nextResults.slice(0, 30));
+        const data: { id: string; type: string; title: string; subtitle: string; href: string }[] = await res.json();
+        if (cancelled) return;
+        setSearchResults(
+          (Array.isArray(data) ? data : []).map((r) => ({
+            id: r.id,
+            title: r.title,
+            subtitle: r.subtitle,
+            href: r.href,
+            section: SECTION_LABELS[r.type] ?? r.type,
+          }))
+        );
+      } catch {
+        if (!cancelled) setSearchResults([]);
       } finally {
-        setSearching(false);
+        if (!cancelled) setSearching(false);
       }
-    }, 250);
+    }, 200);
 
-    return () => clearTimeout(timer);
-  }, [portalSearch, projectId]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [portalSearch]);
 
   // Fetch favorites on mount
   useEffect(() => {
