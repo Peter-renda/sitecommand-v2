@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import { saveReport, type StoredReport } from "../../saved-reports-store";
 
 // ─── Column catalog ──────────────────────────────────────────────────────────
 // Categories shown in the Configure Columns popout. The "source" maps to the
@@ -438,7 +439,32 @@ export default function Create360ReportClient({
             </button>
             <button
               disabled={!canSave}
-              onClick={() => router.push(`/projects/${projectId}/reporting`)}
+              onClick={() => {
+                const now = new Date().toISOString();
+                const totalRecords = Object.values(rowsBySource).reduce((sum, r) => sum + r.length, 0);
+                const stored: StoredReport = {
+                  id: crypto.randomUUID(),
+                  name: reportName.trim() || defaultName,
+                  reportType: "360 Report",
+                  description: description.trim() || `${category} 360 Report`,
+                  createdBy: "Me",
+                  createdAt: now,
+                  updatedAt: now,
+                  sharedWith: [],
+                  category,
+                  selectedColumns: selectedColumns.map((c) => ({
+                    id: c.id,
+                    categoryLabel: c.categoryLabel,
+                    source: c.source,
+                    fieldKey: c.fieldKey,
+                    fieldLabel: c.fieldLabel,
+                    format: c.format,
+                  })),
+                  lastRunRecordCount: totalRecords,
+                };
+                saveReport(projectId, stored);
+                router.push(`/projects/${projectId}/reporting`);
+              }}
               className="px-5 py-2 text-sm font-medium bg-orange-500 text-white rounded-md hover:bg-orange-600 disabled:bg-orange-200 disabled:cursor-not-allowed"
             >
               Save
@@ -859,6 +885,57 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
     }));
   }
 
+  if (source === "budget-codes") {
+    const res = await fetch(`/api/projects/${projectId}/budget`);
+    if (!res.ok) throw new Error("Failed to load budget");
+    const data = await res.json();
+    const items: Row[] = Array.isArray(data) ? data : [];
+    // De-dupe by cost_code so each unique budget code appears once.
+    const seen = new Set<string>();
+    const rows: Row[] = [];
+    for (const it of items) {
+      const code = String(it.cost_code ?? "").trim();
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      rows.push({
+        code,
+        description: it.description ?? "",
+        cost_type: it.cost_type ?? "",
+        active: it.is_active === false ? false : true,
+      });
+    }
+    return rows;
+  }
+
+  if (source === "budget-line-items") {
+    const res = await fetch(`/api/projects/${projectId}/budget`);
+    if (!res.ok) throw new Error("Failed to load budget");
+    const data = await res.json();
+    const items: Row[] = Array.isArray(data) ? data : [];
+    return items.map((it: Row) => {
+      const original = Number(it.original_budget_amount ?? 0);
+      const approvedCos = Number(it.approved_cos ?? 0);
+      const modifications = Number(it.budget_modifications ?? 0);
+      const committed = Number(it.committed_costs ?? 0);
+      const revised = original + approvedCos + modifications;
+      return {
+        cost_code: it.cost_code ?? "",
+        description: it.description ?? "",
+        original_budget: original,
+        revised_budget: revised,
+        committed_costs: committed,
+        variance: revised - committed,
+      };
+    });
+  }
+
+  if (source === "budget-modifications") {
+    const res = await fetch(`/api/projects/${projectId}/budget/modifications`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  }
+
   if (source === "change-events") {
     const res = await fetch(`/api/projects/${projectId}/reports?type=change-events`);
     if (!res.ok) return [];
@@ -868,13 +945,6 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
 
   if (source === "commitment-change-orders") {
     const res = await fetch(`/api/projects/${projectId}/reports?type=commitment-change-orders`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
-  }
-
-  if (source === "budget-line-items") {
-    const res = await fetch(`/api/projects/${projectId}/reports?type=budget-summary`);
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];

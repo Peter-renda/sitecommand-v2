@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import { deleteSavedReport, loadSavedReports, type StoredReport } from "./saved-reports-store";
 import { Pill } from "@/components/design-system/Primitives";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -2072,7 +2073,32 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
 
   function deleteReport(id: string) {
     setMyReports((prev) => prev.filter((r) => r.id !== id));
+    deleteSavedReport(projectId, id);
   }
+
+  // Hydrate persisted 360 reports on mount so reports saved from the new
+  // builder page appear under "My Reports" immediately.
+  useEffect(() => {
+    const persisted = loadSavedReports(projectId);
+    if (persisted.length === 0) return;
+    setMyReports((prev) => {
+      const existingIds = new Set(prev.map((r) => r.id));
+      const additions: SavedReport[] = persisted
+        .filter((p: StoredReport) => !existingIds.has(p.id))
+        .map((p: StoredReport) => ({
+          id: p.id,
+          name: p.name,
+          reportType: p.reportType,
+          description: p.description,
+          createdBy: p.createdBy,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+          sharedWith: p.sharedWith ?? [],
+          lastRunRecordCount: p.lastRunRecordCount,
+        }));
+      return [...additions, ...prev];
+    });
+  }, [projectId]);
 
   function updateSavedReport(reportId: string, patch: Partial<SavedReport>) {
     setMyReports((prev) => prev.map((r) => (r.id === reportId ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r)));
