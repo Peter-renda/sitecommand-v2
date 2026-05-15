@@ -19,6 +19,14 @@ type Division = {
 };
 
 type TopTab = "specifications" | "all-revisions" | "recycle-bin";
+type ParsedSpecSection = {
+  number: string;
+  division: string;
+  title: string;
+  startPage: number;
+  endPage: number;
+  pageCount: number;
+};
 
 export default function SpecificationsClient({ projectId, username }: { projectId: string; username?: string }) {
   const router = useRouter();
@@ -40,6 +48,10 @@ export default function SpecificationsClient({ projectId, username }: { projectI
   const [newSpecificationDescription, setNewSpecificationDescription] = useState("");
   const [selectedSpecIdForSubmittal, setSelectedSpecIdForSubmittal] = useState<string | null>(null);
   const [isCreatingSpecification, setIsCreatingSpecification] = useState(false);
+  const [isParsingUpload, setIsParsingUpload] = useState(false);
+  const [isApplyingParsedUpload, setIsApplyingParsedUpload] = useState(false);
+  const [parsedSections, setParsedSections] = useState<ParsedSpecSection[]>([]);
+  const [showParseReviewModal, setShowParseReviewModal] = useState(false);
 
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const isGenerateSubmittalFlow = searchParams.get("generateSubmittal") === "1";
@@ -166,6 +178,62 @@ export default function SpecificationsClient({ projectId, username }: { projectI
   function handleAttachFiles(fileList: FileList | null) {
     if (!fileList?.length) return;
     setUploadFiles(Array.from(fileList));
+  }
+
+  async function handleProcessUpload() {
+    const file = uploadFiles[0];
+    if (!file) {
+      window.alert("Please attach a PDF first.");
+      return;
+    }
+    setIsParsingUpload(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`/api/projects/${projectId}/specifications/parse`, {
+        method: "POST",
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Failed to parse specification PDF.");
+      setParsedSections(Array.isArray(data?.sections) ? data.sections : []);
+      setShowUploadModal(false);
+      setShowParseReviewModal(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to parse specification PDF.";
+      window.alert(message);
+    } finally {
+      setIsParsingUpload(false);
+    }
+  }
+
+  async function handleApproveParsedSections() {
+    if (parsedSections.length === 0) return;
+    setIsApplyingParsedUpload(true);
+    try {
+      const created: Specification[] = [];
+      for (const section of parsedSections) {
+        const code = section.number;
+        const name = `${section.title} (Pages ${section.startPage}-${section.endPage})`;
+        const res = await fetch(`/api/projects/${projectId}/specifications`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, code }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error ?? `Failed creating section ${section.number}`);
+        created.push(data as Specification);
+      }
+      setSpecifications((current) => [...created, ...current].sort((a, b) => a.name.localeCompare(b.name)));
+      setShowParseReviewModal(false);
+      setParsedSections([]);
+      setUploadFiles([]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to upload parsed specifications.";
+      window.alert(message);
+    } finally {
+      setIsApplyingParsedUpload(false);
+    }
   }
 
   function closeCreateDivisionModal() {
@@ -529,8 +597,68 @@ export default function SpecificationsClient({ projectId, username }: { projectI
                 >
                   Cancel
                 </button>
-                <button type="button" className="rounded bg-orange-200 px-4 py-2 text-sm font-semibold text-white">Process</button>
+                <button
+                  type="button"
+                  disabled={isParsingUpload || uploadFiles.length === 0}
+                  onClick={handleProcessUpload}
+                  className="rounded bg-orange-400 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-orange-200"
+                >
+                  {isParsingUpload ? "Processing..." : "Process"}
+                </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showParseReviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+          <div className="w-full max-w-[860px] rounded bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
+              <h2 className="text-2xl font-semibold text-gray-900">Review Parsed Specifications</h2>
+              <button type="button" onClick={() => setShowParseReviewModal(false)} className="rounded p-1 text-gray-500 hover:bg-gray-100">
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="max-h-[60vh] overflow-auto px-6 py-4">
+              <p className="mb-3 text-sm text-gray-600">
+                Confirm the section numbers and page ranges before uploading to Specifications.
+              </p>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2">Division</th>
+                    <th className="px-3 py-2">Section Number</th>
+                    <th className="px-3 py-2">Detected Heading</th>
+                    <th className="px-3 py-2">Page Range</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parsedSections.map((section, idx) => (
+                    <tr key={`${section.number}-${idx}`} className="border-t border-gray-100">
+                      <td className="px-3 py-2">{section.division}</td>
+                      <td className="px-3 py-2 font-semibold text-gray-900">{section.number}</td>
+                      <td className="px-3 py-2 text-gray-700">{section.title}</td>
+                      <td className="px-3 py-2 text-gray-700">
+                        {section.startPage} - {section.endPage} ({section.pageCount} page{section.pageCount === 1 ? "" : "s"})
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-gray-100 px-6 py-4">
+              <button type="button" onClick={() => setShowParseReviewModal(false)} className="px-3 py-2 text-sm font-semibold text-gray-700">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApproveParsedSections}
+                disabled={isApplyingParsedUpload || parsedSections.length === 0}
+                className="rounded bg-[color:var(--ink)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isApplyingParsedUpload ? "Uploading..." : "Approve & Upload"}
+              </button>
             </div>
           </div>
         </div>
