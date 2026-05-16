@@ -30,7 +30,14 @@ export async function loadPdfjs(): Promise<PdfjsModule> {
         if (!g.Path2D) g.Path2D = canvas.Path2D;
       }
       const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-      pdfjs.GlobalWorkerOptions.workerSrc = "";
+      // pdfjs v5 on Node still needs a real worker path to bootstrap its
+      // "fake worker"; an empty string throws
+      // 'No "GlobalWorkerOptions.workerSrc" specified.'
+      const { createRequire } = await import("module");
+      const requireFromHere = createRequire(import.meta.url);
+      const workerPath = requireFromHere.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
+      const { pathToFileURL } = await import("url");
+      pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
       return pdfjs;
     })();
   }
