@@ -1408,7 +1408,10 @@ export default function DrawingsClient({
           const pdf = await getDocument(url).promise;
           for (const d of pages) {
             try {
-              const dataUrl = await renderPageFromDoc(pdf, d.page_number);
+              // Per-page extracted PDFs are single-page (viewer_page === 1);
+              // legacy rows share a multi-page PDF and need their real page_number.
+              const pageInDoc = d.viewer_page > 0 ? d.viewer_page : d.page_number;
+              const dataUrl = await renderPageFromDoc(pdf, pageInDoc);
               thumbnails.current.set(d.id, dataUrl);
               setThumbVersion((v) => v + 1);
             } catch (pageErr) {
