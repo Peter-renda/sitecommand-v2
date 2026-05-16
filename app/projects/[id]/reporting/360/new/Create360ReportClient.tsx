@@ -1825,18 +1825,26 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
     return Array.isArray(data) ? data : [];
   }
 
-  if (source === "change-events") {
-    const res = await fetch(`/api/projects/${projectId}/reports?type=change-events`);
+  if (source === "change-events" || source === "change-event-line-items") {
+    const res = await fetch(`/api/projects/${projectId}/change-events`);
     if (!res.ok) return [];
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
-  }
-
-  if (source === "change-event-line-items") {
-    const res = await fetch(`/api/projects/${projectId}/reports?type=change-events`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    const events: Row[] = Array.isArray(data) ? data : [];
+    const events: Row[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+    if (source === "change-events") {
+      return events.map((ev) => ({
+        number: ev.number,
+        title: ev.title,
+        status: ev.status,
+        type: ev.type,
+        scope: ev.scope,
+        change_reason: ev.change_reason,
+        origin: ev.origin,
+        rom_amount: ev.rom_amount,
+        description: ev.description,
+        created_at: ev.created_at,
+        updated_at: ev.updated_at,
+      }));
+    }
     const rows: Row[] = [];
     for (const ev of events) {
       const lines = Array.isArray(ev.line_items) ? ev.line_items : [];
@@ -1859,10 +1867,10 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
   }
 
   if (source === "commitment-change-orders") {
-    const res = await fetch(`/api/projects/${projectId}/reports?type=commitment-change-orders`);
+    const res = await fetch(`/api/projects/${projectId}/change-orders?type=commitment`);
     if (!res.ok) return [];
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
   }
 
   // ── Project Execution ────────────────────────────────────────────────────
