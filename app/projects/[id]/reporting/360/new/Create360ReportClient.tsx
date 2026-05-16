@@ -325,11 +325,10 @@ const PROJECT_EXECUTION_CATEGORIES: CategoryDef[] = [
     source: "daily-log-accidents",
     fields: [
       { key: "log_date", label: "Date", format: "date" },
+      { key: "time", label: "Time" },
       { key: "person_involved", label: "Person Involved" },
       { key: "company", label: "Company" },
-      { key: "location", label: "Location" },
       { key: "description", label: "Description" },
-      { key: "severity", label: "Severity" },
       { key: "reported_by", label: "Reported By" },
       { key: "created_at", label: "Created", format: "date" },
     ],
@@ -375,6 +374,7 @@ const PROJECT_EXECUTION_CATEGORIES: CategoryDef[] = [
     source: "daily-log-deliveries",
     fields: [
       { key: "log_date", label: "Date", format: "date" },
+      { key: "time", label: "Time" },
       { key: "delivered_by", label: "Delivered By" },
       { key: "tracking_number", label: "Tracking #" },
       { key: "contents", label: "Contents" },
@@ -414,6 +414,8 @@ const PROJECT_EXECUTION_CATEGORIES: CategoryDef[] = [
       { key: "inspection_type", label: "Type" },
       { key: "inspector", label: "Inspector" },
       { key: "company", label: "Company" },
+      { key: "location", label: "Location" },
+      { key: "inspection_area", label: "Inspection Area" },
       { key: "result", label: "Result" },
       { key: "notes", label: "Notes" },
     ],
@@ -424,10 +426,10 @@ const PROJECT_EXECUTION_CATEGORIES: CategoryDef[] = [
     fields: [
       { key: "log_date", label: "Date", format: "date" },
       { key: "company", label: "Company" },
-      { key: "trade", label: "Trade" },
       { key: "worker_count", label: "Workers" },
-      { key: "hours_worked", label: "Hours Worked" },
+      { key: "hours_per_worker", label: "Hrs/Worker" },
       { key: "location", label: "Location" },
+      { key: "cost_code", label: "Cost Code" },
       { key: "notes", label: "Notes" },
     ],
   },
@@ -438,6 +440,7 @@ const PROJECT_EXECUTION_CATEGORIES: CategoryDef[] = [
       { key: "log_date", label: "Date", format: "date" },
       { key: "note", label: "Note" },
       { key: "category", label: "Category" },
+      { key: "location", label: "Location" },
       { key: "created_by", label: "Created By" },
     ],
   },
@@ -507,12 +510,12 @@ const PROJECT_EXECUTION_CATEGORIES: CategoryDef[] = [
     source: "daily-log-safety-violations",
     fields: [
       { key: "log_date", label: "Date", format: "date" },
+      { key: "time", label: "Time" },
       { key: "violation_type", label: "Violation Type" },
       { key: "person_involved", label: "Person Involved" },
-      { key: "company", label: "Company" },
-      { key: "location", label: "Location" },
-      { key: "description", label: "Description" },
+      { key: "description", label: "Safety Notice" },
       { key: "action_taken", label: "Action Taken" },
+      { key: "compliance_due", label: "Compliance Due", format: "date" },
     ],
   },
   {
@@ -1734,12 +1737,41 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
       contract_company: c.contract_company,
       title: c.title,
       status: c.status,
+      executed: c.executed,
       sov_accounting_method: c.sov_accounting_method,
       original_contract_amount: c.original_contract_amount,
       approved_change_orders: c.approved_change_orders,
       pending_change_orders: c.pending_change_orders,
+      delivery_date: c.delivery_date,
+      signed_po_received_date: c.signed_po_received_date,
       erp_status: c.erp_status,
+      created_at: c.created_at,
     }));
+  }
+
+  if (source === "commitment-line-items") {
+    const res = await fetch(`/api/projects/${projectId}/commitments`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const items: Row[] = Array.isArray(data) ? data : data.items ?? [];
+    const rows: Row[] = [];
+    for (const c of items) {
+      const sov = Array.isArray(c.schedule_of_values) ? c.schedule_of_values : [];
+      for (const line of sov as Row[]) {
+        rows.push({
+          commitment_number: c.number,
+          budget_code: line.budget_code,
+          description: line.description,
+          quantity: line.quantity ?? line.qty,
+          uom: line.uom,
+          unit_cost: line.unit_cost,
+          amount: line.amount,
+          billed_to_date: line.billed_to_date,
+          amount_remaining: line.amount_remaining,
+        });
+      }
+    }
+    return rows;
   }
 
   if (source === "budget-codes") {
@@ -1800,11 +1832,529 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
     return Array.isArray(data) ? data : [];
   }
 
+  if (source === "change-event-line-items") {
+    const res = await fetch(`/api/projects/${projectId}/reports?type=change-events`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const events: Row[] = Array.isArray(data) ? data : [];
+    const rows: Row[] = [];
+    for (const ev of events) {
+      const lines = Array.isArray(ev.line_items) ? ev.line_items : [];
+      for (const line of lines as Row[]) {
+        rows.push({
+          change_event_number: ev.number,
+          budget_code: line.budget_code,
+          description: line.description,
+          vendor: line.vendor,
+          quantity: line.quantity ?? line.unit_qty,
+          uom: line.uom,
+          rom_unit_cost: line.rom_unit_cost ?? line.unit_cost,
+          rom_amount: line.rom_amount ?? line.amount,
+          actual_unit_cost: line.actual_unit_cost,
+          actual_amount: line.actual_amount,
+        });
+      }
+    }
+    return rows;
+  }
+
   if (source === "commitment-change-orders") {
     const res = await fetch(`/api/projects/${projectId}/reports?type=commitment-change-orders`);
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
+  }
+
+  // ── Project Execution ────────────────────────────────────────────────────
+  if (source === "project") {
+    const res = await fetch(`/api/projects/${projectId}`);
+    if (!res.ok) return [];
+    const p = (await res.json()) as Row;
+    if (!p || typeof p !== "object") return [];
+    return [{
+      name: p.name,
+      project_number: p.project_number,
+      stage: p.stage,
+      status: p.status,
+      address: p.address,
+      city: p.city,
+      state: p.state,
+      value: p.value,
+      start_date: p.start_date ?? p.actual_start_date,
+      completion_date: p.completion_date,
+      projected_finish_date: p.projected_finish_date,
+    }];
+  }
+
+  if (source === "project-roles") {
+    const res = await fetch(`/api/projects/${projectId}`);
+    if (!res.ok) return [];
+    const p = (await res.json()) as Row;
+    const roles = (p?.project_roles ?? {}) as Record<string, unknown>;
+    const rows: Row[] = [];
+    for (const [role, members] of Object.entries(roles)) {
+      const list = Array.isArray(members) ? (members as Row[]) : [];
+      for (const m of list) {
+        rows.push({
+          role,
+          user_name: m.name ?? m.username ?? m.id,
+          company: m.company,
+          email: m.email,
+        });
+      }
+    }
+    return rows;
+  }
+
+  // RFI family — single parent fetch, multiple flattenings
+  if (source === "rfis" || source === "rfi-assignees" || source === "rfi-distribution-list" || source === "rfi-ball-in-court") {
+    const res = await fetch(`/api/projects/${projectId}/rfis`);
+    if (!res.ok) return [];
+    const rfis: Row[] = await res.json();
+    if (source === "rfis") {
+      return (rfis ?? []).map((r) => ({
+        rfi_number: r.rfi_number,
+        subject: r.subject,
+        status: r.status,
+        rfi_stage: r.rfi_stage,
+        due_date: r.due_date,
+        rfi_manager: r.rfi_manager_name ?? r.rfi_manager_id,
+        received_from: r.received_from_name ?? r.received_from_id,
+        specification: r.specification_name ?? r.specification_id,
+        drawing_number: r.drawing_number,
+        cost_code: r.cost_code,
+        schedule_impact: r.schedule_impact,
+        cost_impact: r.cost_impact,
+        private: r.private,
+        created_at: r.created_at,
+      }));
+    }
+    const rows: Row[] = [];
+    for (const r of rfis ?? []) {
+      if (source === "rfi-assignees") {
+        const list = Array.isArray(r.assignees) ? (r.assignees as Row[]) : [];
+        for (const m of list) rows.push({ rfi_number: r.rfi_number, assignee_name: m.name ?? m.id, company: m.company, email: m.email });
+      } else if (source === "rfi-distribution-list") {
+        const list = Array.isArray(r.distribution_list) ? (r.distribution_list as Row[]) : [];
+        for (const m of list) rows.push({ rfi_number: r.rfi_number, member_name: m.name ?? m.id, company: m.company, email: m.email });
+      } else {
+        // rfi-ball-in-court
+        if (r.ball_in_court_id || r.ball_in_court_name) {
+          rows.push({
+            rfi_number: r.rfi_number,
+            holder_name: r.ball_in_court_name ?? r.ball_in_court_id,
+            company: r.ball_in_court_company,
+            assigned_at: r.ball_in_court_assigned_at ?? r.updated_at ?? r.created_at,
+          });
+        }
+      }
+    }
+    return rows;
+  }
+
+  // Submittal family
+  if (source === "submittals" || source === "submittal-approvers" || source === "submittal-ball-in-court" || source === "submittal-distribution-list") {
+    const res = await fetch(`/api/projects/${projectId}/submittals`);
+    if (!res.ok) return [];
+    const subs: Row[] = await res.json();
+    if (source === "submittals") {
+      return (subs ?? []).map((s) => ({
+        submittal_number: s.submittal_number,
+        revision: s.revision,
+        title: s.title,
+        submittal_type: s.submittal_type,
+        status: s.status,
+        specification: s.specification_name ?? s.specification_id,
+        responsible_contractor: s.responsible_contractor_name ?? s.responsible_contractor_id,
+        received_from: s.received_from_name ?? s.received_from_id,
+        submittal_manager: s.submittal_manager_name ?? s.submittal_manager_id,
+        submit_by: s.submit_by,
+        received_date: s.received_date,
+        issue_date: s.issue_date,
+        final_due_date: s.final_due_date,
+        required_on_site_date: s.required_on_site_date,
+        lead_time: s.lead_time,
+        cost_code: s.cost_code,
+        private: s.private,
+      }));
+    }
+    const rows: Row[] = [];
+    for (const s of subs ?? []) {
+      if (source === "submittal-approvers") {
+        const steps = Array.isArray(s.workflow_steps) ? (s.workflow_steps as Row[]) : [];
+        for (const step of steps) {
+          rows.push({
+            submittal_number: s.submittal_number,
+            approver_name: step.approver_name ?? step.name ?? step.approver_id,
+            company: step.company,
+            response: step.response ?? step.status,
+            due_date: step.due_date,
+            responded_at: step.responded_at,
+          });
+        }
+      } else if (source === "submittal-distribution-list") {
+        const list = Array.isArray(s.distribution_list) ? (s.distribution_list as Row[]) : [];
+        for (const m of list) rows.push({ submittal_number: s.submittal_number, member_name: m.name ?? m.id, company: m.company, email: m.email });
+      } else {
+        if (s.ball_in_court_id || s.ball_in_court_name) {
+          rows.push({
+            submittal_number: s.submittal_number,
+            holder_name: s.ball_in_court_name ?? s.ball_in_court_id,
+            company: s.ball_in_court_company,
+            assigned_at: s.distributed_at ?? s.updated_at ?? s.created_at,
+          });
+        }
+      }
+    }
+    return rows;
+  }
+
+  // Punch family
+  if (source === "punch-items" || source === "punch-item-assignees" || source === "punch-item-ball-in-court" || source === "punch-item-distribution-members") {
+    const res = await fetch(`/api/projects/${projectId}/punch-list`);
+    if (!res.ok) return [];
+    const items: Row[] = await res.json();
+    if (source === "punch-items") {
+      return (items ?? []).map((p) => ({
+        item_number: p.item_number,
+        title: p.title,
+        status: p.status,
+        type: p.type,
+        priority: p.priority,
+        trade: p.trade,
+        location: p.location,
+        due_date: p.due_date,
+        schedule_impact: p.schedule_impact,
+        cost_impact: p.cost_impact,
+        private: p.private,
+        created_at: p.created_at,
+      }));
+    }
+    const rows: Row[] = [];
+    for (const p of items ?? []) {
+      if (source === "punch-item-assignees") {
+        const list = Array.isArray(p.assignees) ? (p.assignees as Row[]) : [];
+        for (const m of list) rows.push({ item_number: p.item_number, assignee_name: m.name ?? m.id, company: m.company, email: m.email });
+      } else if (source === "punch-item-distribution-members") {
+        const list = Array.isArray(p.distribution_list) ? (p.distribution_list as Row[]) : [];
+        for (const m of list) rows.push({ item_number: p.item_number, member_name: m.name ?? m.id, company: m.company, email: m.email });
+      } else {
+        const holderId = p.final_approver_id ?? p.punch_item_manager_id;
+        if (holderId) {
+          rows.push({
+            item_number: p.item_number,
+            holder_name: p.final_approver_name ?? p.punch_item_manager_name ?? holderId,
+            company: p.final_approver_company,
+            assigned_at: p.created_at,
+          });
+        }
+      }
+    }
+    return rows;
+  }
+
+  // Task family
+  if (source === "tasks" || source === "task-assignees" || source === "task-distribution-members") {
+    const res = await fetch(`/api/projects/${projectId}/tasks`);
+    if (!res.ok) return [];
+    const items: Row[] = await res.json();
+    if (source === "tasks") {
+      return (items ?? []).map((t) => ({
+        task_number: t.task_number,
+        title: t.title,
+        status: t.status,
+        category: t.category,
+        description: t.description,
+        created_by: t.created_by_name ?? t.created_by,
+        created_at: t.created_at,
+      }));
+    }
+    const rows: Row[] = [];
+    for (const t of items ?? []) {
+      if (source === "task-assignees") {
+        const list = Array.isArray(t.assignees) ? (t.assignees as Row[]) : [];
+        for (const m of list) rows.push({ task_number: t.task_number, assignee_name: m.name ?? m.id, company: m.company, email: m.email });
+      } else {
+        const list = Array.isArray(t.distribution_list) ? (t.distribution_list as Row[]) : [];
+        for (const m of list) rows.push({ task_number: t.task_number, member_name: m.name ?? m.id, company: m.company, email: m.email });
+      }
+    }
+    return rows;
+  }
+
+  // Meetings
+  if (source === "meetings" || source === "meeting-attendees") {
+    const res = await fetch(`/api/projects/${projectId}/meetings`);
+    if (!res.ok) return [];
+    const items: Row[] = await res.json();
+    if (source === "meetings") {
+      return (items ?? []).map((m) => ({
+        meeting_number: m.meeting_number,
+        title: m.title,
+        series: m.series,
+        date: m.date,
+        end_date: m.end_date,
+        location: m.location,
+        status: m.status,
+        is_private: m.is_private,
+        created_by: m.created_by_name ?? m.created_by,
+      }));
+    }
+    const rows: Row[] = [];
+    for (const m of items ?? []) {
+      const list = Array.isArray(m.attendees) ? (m.attendees as Row[]) : [];
+      for (const a of list) {
+        rows.push({
+          meeting_number: m.meeting_number,
+          attendee_name: a.name ?? a.id,
+          company: a.company,
+          email: a.email,
+          attended: a.attended,
+        });
+      }
+    }
+    return rows;
+  }
+
+  // Drawings
+  if (source === "drawings") {
+    const res = await fetch(`/api/projects/${projectId}/drawings`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const drawings: Row[] = Array.isArray(data?.drawings) ? data.drawings : Array.isArray(data) ? data : [];
+    return drawings.map((d) => ({
+      drawing_no: d.drawing_no,
+      title: d.title,
+      revision: d.revision,
+      discipline: d.discipline,
+      drawing_set: d.drawing_set ?? d.set_name,
+      drawing_date: d.drawing_date,
+      received_date: d.received_date,
+      page_number: d.page_number,
+      updated_at: d.updated_at,
+    }));
+  }
+
+  // Documents
+  if (source === "documents") {
+    const res = await fetch(`/api/projects/${projectId}/documents`);
+    if (!res.ok) return [];
+    const data: Row[] = await res.json();
+    return (data ?? []).map((d) => ({
+      name: d.name,
+      type: d.type,
+      mime_type: d.mime_type,
+      size: d.size,
+      parent_name: d.parent_name ?? d.parent_id,
+      created_by: d.created_by_name ?? d.created_by,
+      created_at: d.created_at,
+    }));
+  }
+
+  // Photos
+  if (source === "photos") {
+    const res = await fetch(`/api/projects/${projectId}/photos`);
+    if (!res.ok) return [];
+    const data: Row[] = await res.json();
+    return (data ?? []).map((p) => ({
+      filename: p.filename,
+      caption: p.caption,
+      album: p.album_name ?? p.album_id,
+      location: p.location,
+      uploaded_by_name: p.uploaded_by_name,
+      uploaded_at: p.uploaded_at,
+    }));
+  }
+
+  // Locations
+  if (source === "locations") {
+    const res = await fetch(`/api/projects/${projectId}/locations`);
+    if (!res.ok) return [];
+    const data: Row[] = await res.json();
+    return (data ?? []).map((l) => ({
+      name: l.name,
+      path: l.path,
+      parent_name: l.parent_name ?? l.parent_id,
+      created_by: l.created_by_name ?? l.created_by,
+      created_at: l.created_at,
+      updated_at: l.updated_at,
+    }));
+  }
+
+  // Specifications
+  if (source === "specification-sections") {
+    const res = await fetch(`/api/projects/${projectId}/specifications`);
+    if (!res.ok) return [];
+    const data: Row[] = await res.json();
+    return (data ?? [])
+      .filter((s) => !s.deleted_at)
+      .map((s) => ({
+        code: s.code,
+        name: s.name,
+        division: s.division ?? s.division_name,
+        set_name: s.set_name,
+        revision: s.revision,
+        created_at: s.created_at,
+      }));
+  }
+
+  // Daily Log subtypes — single parent fetch, then flatten the JSONB array per source
+  const dailyLogMap: Record<string, { field: string; map: (entry: Row, log: Row) => Row }> = {
+    "daily-log-accidents": {
+      field: "accidents",
+      map: (e, l) => ({
+        log_date: l.log_date,
+        time: e.time,
+        person_involved: e.party_involved,
+        company: e.company_involved,
+        location: "",
+        description: e.comments,
+        severity: "",
+        reported_by: l.created_by_name ?? l.created_by,
+        created_at: l.created_at,
+      }),
+    },
+    "daily-log-delays": {
+      field: "delays",
+      map: (e, l) => ({
+        log_date: l.log_date,
+        delay_type: e.delay_type,
+        start_time: e.start_time,
+        end_time: e.end_time,
+        duration_hours: e.duration_hours,
+        location: e.location,
+        description: e.comments,
+        created_by: l.created_by_name ?? l.created_by,
+      }),
+    },
+    "daily-log-deliveries": {
+      field: "deliveries",
+      map: (e, l) => ({
+        log_date: l.log_date,
+        time: e.time,
+        delivered_by: e.delivery_from,
+        tracking_number: e.tracking_number,
+        contents: e.contents,
+        received_by: l.created_by_name ?? l.created_by,
+        notes: e.comments,
+      }),
+    },
+    "daily-log-inspections": {
+      field: "inspections",
+      map: (e, l) => ({
+        log_date: l.log_date,
+        inspection_type: e.inspection_type,
+        inspector: e.inspector_name,
+        company: e.inspecting_entity,
+        location: e.location,
+        inspection_area: e.inspection_area,
+        result: e.result ?? e.status,
+        notes: e.comments,
+      }),
+    },
+    "daily-log-manpower": {
+      field: "manpower",
+      map: (e, l) => ({
+        log_date: l.log_date,
+        company: e.company,
+        trade: e.trade,
+        worker_count: e.workers,
+        hours_per_worker: e.hours,
+        location: e.location,
+        cost_code: e.cost_code,
+        notes: e.comments,
+      }),
+    },
+    "daily-log-notes": {
+      field: "note_entries",
+      map: (e, l) => ({
+        log_date: l.log_date,
+        note: e.comments,
+        category: e.is_issue ? "Issue" : "Note",
+        location: e.location,
+        created_by: l.created_by_name ?? l.created_by,
+      }),
+    },
+    "daily-log-weather": {
+      field: "weather_observations",
+      map: (e, l) => ({
+        log_date: l.log_date,
+        time_of_day: e.time_observed,
+        conditions: e.sky,
+        temperature: e.temperature,
+        wind: e.wind,
+        humidity: e.humidity,
+        precipitation: e.avg_precipitation ?? e.calamity,
+      }),
+    },
+    "daily-log-safety-violations": {
+      field: "safety_violations",
+      map: (e, l) => ({
+        log_date: l.log_date,
+        time: e.time,
+        violation_type: e.subject,
+        person_involved: e.issued_to,
+        company: "",
+        location: "",
+        description: e.safety_notice,
+        action_taken: e.comments,
+        compliance_due: e.compliance_due,
+      }),
+    },
+    "daily-log-visitors": {
+      field: "visitors",
+      map: (e, l) => ({
+        log_date: l.log_date,
+        visitor_name: e.visitor,
+        company: "",
+        purpose: e.comments,
+        arrival_time: e.start_time,
+        departure_time: e.end_time,
+      }),
+    },
+  };
+
+  if (dailyLogMap[source]) {
+    const res = await fetch(`/api/projects/${projectId}/daily-log`);
+    if (!res.ok) return [];
+    const logs: Row[] = await res.json();
+    const { field, map } = dailyLogMap[source];
+    const rows: Row[] = [];
+    for (const log of logs ?? []) {
+      const entries = Array.isArray(log[field]) ? (log[field] as Row[]) : [];
+      for (const entry of entries) rows.push(map(entry, log));
+    }
+    return rows;
+  }
+
+  // Timecard entries — flatten timesheets.entries
+  if (source === "timecard-entries") {
+    const res = await fetch(`/api/projects/${projectId}/timesheets`);
+    if (!res.ok) return [];
+    const sheets: Row[] = await res.json();
+    const rows: Row[] = [];
+    for (const sheet of sheets ?? []) {
+      const entries = Array.isArray(sheet.entries) ? (sheet.entries as Row[]) : [];
+      for (const e of entries) {
+        rows.push({
+          work_date: sheet.work_date,
+          resource_name: e.resource_name,
+          resource_type: e.resource_type,
+          start_time: e.start_time,
+          stop_time: e.stop_time,
+          lunch_minutes: e.lunch_minutes,
+          total_hours: e.total_hours,
+          time_type: e.time_type,
+          billable: e.billable,
+          cost_code: e.cost_code,
+          cost_type: e.cost_type,
+          location_path: e.location_path,
+          description: e.description,
+          status: e.status,
+        });
+      }
+    }
+    return rows;
   }
 
   // Unknown / not-yet-backed source — render an empty table.
