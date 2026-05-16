@@ -24,6 +24,7 @@ type DrawingPage = {
   revision: string | null;
   drawing_date: string | null;
   received_date: string | null;
+  category: string | null;
   updated_at: string;
   // resolved by API: per-page extracted PDF path (new) or shared upload path (legacy)
   storage_path: string;
@@ -52,18 +53,25 @@ function drawingLabel(d: DrawingPage) {
   return `Page ${d.page_number} of ${d.filename}`;
 }
 
-function inferDiscipline(drawingNo: string | null): string {
+const DISCIPLINE_LABELS: Record<string, string> = {
+  A: "Architectural", C: "Civil", E: "Electrical",
+  M: "Mechanical", P: "Plumbing", S: "Structural",
+  L: "Landscape", G: "General", T: "Telecommunications",
+  FP: "Fire Protection",
+};
+
+function disciplineLabelFromCode(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return DISCIPLINE_LABELS[code.toUpperCase()] ?? null;
+}
+
+function inferDiscipline(drawingNo: string | null, category?: string | null): string {
+  const fromCategory = disciplineLabelFromCode(category);
+  if (fromCategory) return fromCategory;
   if (!drawingNo) return "General";
   const m = drawingNo.match(/^([A-Za-z]+)[-\d]/);
   if (!m) return "General";
-  const prefix = m[1].toUpperCase();
-  const map: Record<string, string> = {
-    A: "Architectural", C: "Civil", E: "Electrical",
-    M: "Mechanical", P: "Plumbing", S: "Structural",
-    L: "Landscape", G: "General", T: "Telecommunications",
-    FP: "Fire Protection",
-  };
-  return map[prefix] ?? "General";
+  return DISCIPLINE_LABELS[m[1].toUpperCase()] ?? "General";
 }
 
 // ── PDF.js lazy loader ────────────────────────────────────────────────────────
@@ -970,6 +978,319 @@ function DrawingPdfViewerModal({
   );
 }
 
+// ── Review Extracted Metadata Modal ───────────────────────────────────────────
+
+type ReviewRow = {
+  drawing_id: string;
+  page_number: number;
+  title: string;
+  drawing_no: string;
+  category: string;
+  revision: string;
+  drawing_date: string;
+  approved: boolean;
+  saving: boolean;
+};
+
+const CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "", label: "—" },
+  { value: "A", label: "A — Architectural" },
+  { value: "C", label: "C — Civil" },
+  { value: "E", label: "E — Electrical" },
+  { value: "M", label: "M — Mechanical" },
+  { value: "P", label: "P — Plumbing" },
+  { value: "S", label: "S — Structural" },
+  { value: "L", label: "L — Landscape" },
+  { value: "G", label: "G — General" },
+  { value: "T", label: "T — Telecommunications" },
+  { value: "FP", label: "FP — Fire Protection" },
+];
+
+function ReviewExtractedModal({
+  projectId,
+  uploadId,
+  drawings,
+  onClose,
+  onApplied,
+}: {
+  projectId: string;
+  uploadId: string;
+  drawings: DrawingPage[];
+  onClose: () => void;
+  onApplied: (updates: DrawingPage[]) => void;
+}) {
+  const [rows, setRows] = useState<ReviewRow[]>(() =>
+    drawings.map((d) => ({
+      drawing_id: d.id,
+      page_number: d.page_number,
+      title: d.title ?? "",
+      drawing_no: d.drawing_no ?? "",
+      category: d.category ?? "",
+      revision: d.revision ?? "",
+      drawing_date: d.drawing_date ?? "",
+      approved: false,
+      saving: false,
+    })),
+  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [applyingAll, setApplyingAll] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/drawings/uploads/${uploadId}/extract-metadata`,
+          { method: "POST" },
+        );
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error ?? "Extraction failed");
+        }
+        const data = await res.json();
+        if (cancelled) return;
+        type ExtractedField = { title: string; sheet_number: string; category: string; revision: string; date: string };
+        const byId = new Map<string, ExtractedField>();
+        for (const r of (data.results ?? []) as Array<{
+          drawing_id: string; title: string; sheet_number: string; category: string; revision: string; date: string;
+        }>) {
+          byId.set(r.drawing_id, {
+            title: r.title ?? "",
+            sheet_number: r.sheet_number ?? "",
+            category: (r.category ?? "").toUpperCase(),
+            revision: r.revision ?? "",
+            date: r.date ?? "",
+          });
+        }
+        setRows((prev) =>
+          prev.map((row) => {
+            const m = byId.get(row.drawing_id);
+            if (!m) return row;
+            return {
+              ...row,
+              title: m.title || row.title,
+              drawing_no: m.sheet_number || row.drawing_no,
+              category: m.category || row.category,
+              revision: m.revision || row.revision,
+              drawing_date: m.date || row.drawing_date,
+            };
+          }),
+        );
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Extraction failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    run();
+    return () => { cancelled = true; };
+  }, [projectId, uploadId]);
+
+  function updateRow(drawingId: string, patch: Partial<ReviewRow>) {
+    setRows((prev) => prev.map((r) => (r.drawing_id === drawingId ? { ...r, ...patch } : r)));
+  }
+
+  async function applyRow(row: ReviewRow): Promise<DrawingPage | null> {
+    updateRow(row.drawing_id, { saving: true });
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/drawings/${row.drawing_id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            drawing_no: row.drawing_no || null,
+            title: row.title || null,
+            revision: row.revision || null,
+            drawing_date: row.drawing_date || null,
+            category: row.category || null,
+          }),
+        },
+      );
+      if (!res.ok) throw new Error("Save failed");
+      const updated = await res.json();
+      updateRow(row.drawing_id, { approved: true, saving: false });
+      return updated as DrawingPage;
+    } catch {
+      updateRow(row.drawing_id, { saving: false });
+      return null;
+    }
+  }
+
+  async function handleApprove(row: ReviewRow) {
+    const updated = await applyRow(row);
+    if (updated) onApplied([updated]);
+  }
+
+  async function handleApproveAll() {
+    setApplyingAll(true);
+    const pending = rows.filter((r) => !r.approved);
+    const applied: DrawingPage[] = [];
+    for (const row of pending) {
+      const updated = await applyRow(row);
+      if (updated) applied.push(updated);
+    }
+    if (applied.length > 0) onApplied(applied);
+    setApplyingAll(false);
+  }
+
+  const allApproved = rows.length > 0 && rows.every((r) => r.approved);
+  const approvedCount = rows.filter((r) => r.approved).length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Review extracted drawing info</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              We read the title block on each page. Edit any field, then approve to save.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+            aria-label="Close"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {loading && (
+          <div className="px-6 py-12 flex flex-col items-center justify-center text-sm text-gray-500">
+            <svg className="w-6 h-6 animate-spin text-blue-500 mb-3" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+            </svg>
+            Reading the title block on each page…
+          </div>
+        )}
+
+        {error && !loading && (
+          <div className="px-6 py-4 bg-amber-50 border-b border-amber-100 text-sm text-amber-800">
+            {error}. You can still edit fields manually and approve.
+          </div>
+        )}
+
+        {!loading && (
+          <div className="flex-1 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left w-12">#</th>
+                  <th className="px-3 py-2 text-left">Sheet No.</th>
+                  <th className="px-3 py-2 text-left">Title</th>
+                  <th className="px-3 py-2 text-left w-44">Category</th>
+                  <th className="px-3 py-2 text-left w-24">Rev.</th>
+                  <th className="px-3 py-2 text-left w-40">Date</th>
+                  <th className="px-3 py-2 text-left w-32"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {rows.map((row) => (
+                  <tr key={row.drawing_id} className={row.approved ? "bg-emerald-50/50" : ""}>
+                    <td className="px-3 py-2 text-gray-500">{row.page_number}</td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="text"
+                        value={row.drawing_no}
+                        onChange={(e) => updateRow(row.drawing_id, { drawing_no: e.target.value, approved: false })}
+                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="A-101"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="text"
+                        value={row.title}
+                        onChange={(e) => updateRow(row.drawing_id, { title: e.target.value, approved: false })}
+                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Floor Plan"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        value={row.category}
+                        onChange={(e) => updateRow(row.drawing_id, { category: e.target.value, approved: false })}
+                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      >
+                        {CATEGORY_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="text"
+                        value={row.revision}
+                        onChange={(e) => updateRow(row.drawing_id, { revision: e.target.value, approved: false })}
+                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="2"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="date"
+                        value={row.drawing_date}
+                        onChange={(e) => updateRow(row.drawing_id, { drawing_date: e.target.value, approved: false })}
+                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      {row.approved ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-medium">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                          Approved
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleApprove(row)}
+                          disabled={row.saving || applyingAll}
+                          className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+                        >
+                          {row.saving ? "Saving…" : "Approve"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+          <p className="text-xs text-gray-500">
+            {approvedCount} of {rows.length} approved
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              {allApproved ? "Close" : "Skip"}
+            </button>
+            <button
+              onClick={handleApproveAll}
+              disabled={loading || applyingAll || allApproved}
+              className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              {applyingAll ? "Approving…" : "Approve All"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function DrawingsClient({
@@ -1006,9 +1327,13 @@ export default function DrawingsClient({
   const [editRevision, setEditRevision] = useState("");
   const [editDrawingDate, setEditDrawingDate] = useState("");
   const [editReceivedDate, setEditReceivedDate] = useState("");
+  const [editCategory, setEditCategory] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [extracting, setExtracting] = useState(false);
+
+  // Review modal state — opens after upload so user can approve auto-extracted metadata
+  const [reviewModal, setReviewModal] = useState<{ uploadId: string; drawings: DrawingPage[] } | null>(null);
 
   // Thumbnail cache: drawingId → dataUrl
   const thumbnails = useRef<Map<string, string>>(new Map());
@@ -1040,6 +1365,7 @@ export default function DrawingsClient({
       setEditRevision(selected.revision ?? "");
       setEditDrawingDate(selected.drawing_date ?? "");
       setEditReceivedDate(selected.received_date ?? "");
+      setEditCategory(selected.category ?? "");
       setDeleteConfirm(false);
     }
   }, [selected]);
@@ -1148,6 +1474,9 @@ export default function DrawingsClient({
       const newDrawings = (data.drawings ?? []) as DrawingPage[];
       setDrawings((prev) => [...newDrawings, ...prev]);
       setUploads((prev) => [data.upload, ...prev]);
+      if (data.upload?.id && newDrawings.length > 0) {
+        setReviewModal({ uploadId: data.upload.id as string, drawings: newDrawings });
+      }
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed");
       setUploadStatus("");
@@ -1193,6 +1522,7 @@ export default function DrawingsClient({
         revision: editRevision || null,
         drawing_date: editDrawingDate || null,
         received_date: editReceivedDate || null,
+        category: editCategory || null,
       }),
     });
     if (res.ok) {
@@ -1269,7 +1599,7 @@ export default function DrawingsClient({
         !d.filename.toLowerCase().includes(q)
       ) return false;
     }
-    if (disciplineFilter && inferDiscipline(d.drawing_no) !== disciplineFilter) return false;
+    if (disciplineFilter && inferDiscipline(d.drawing_no, d.category) !== disciplineFilter) return false;
     if (setFilter && d.upload_id !== setFilter) return false;
     return true;
   });
@@ -1277,7 +1607,7 @@ export default function DrawingsClient({
   const disciplineGroups = useMemo(() => {
     const map = new Map<string, DrawingPage[]>();
     for (const d of filteredDrawings) {
-      const disc = inferDiscipline(d.drawing_no);
+      const disc = inferDiscipline(d.drawing_no, d.category);
       const group = map.get(disc) ?? [];
       group.push(d);
       map.set(disc, group);
@@ -1373,6 +1703,25 @@ export default function DrawingsClient({
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Review extracted metadata after upload */}
+      {reviewModal && (
+        <ReviewExtractedModal
+          projectId={projectId}
+          uploadId={reviewModal.uploadId}
+          drawings={reviewModal.drawings}
+          onClose={() => setReviewModal(null)}
+          onApplied={(updates) => {
+            setDrawings((prev) => {
+              const byId = new Map(updates.map((u) => [u.id, u]));
+              return prev.map((d) => {
+                const u = byId.get(d.id);
+                return u ? { ...d, ...u } : d;
+              });
+            });
+          }}
+        />
+      )}
+
       {/* PDF Viewer Modal */}
       {viewingDrawing && (
         <DrawingPdfViewerModal
@@ -1767,6 +2116,18 @@ export default function DrawingsClient({
                   <label className="block text-xs font-medium text-gray-500 mb-1">Title</label>
                   <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="e.g. Floor Plan"
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Category</label>
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    {CATEGORY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Revision</label>
