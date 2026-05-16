@@ -28,6 +28,58 @@ type ParsedSpecSection = {
   pageCount: number;
 };
 
+
+// ── PDF.js lazy loader ────────────────────────────────────────────────────────
+
+let pdfJsLoaded = false;
+
+async function ensurePdfJs() {
+  if (pdfJsLoaded) return;
+  // pdfjs-dist v5 uses Promise.withResolvers (ES2024) — polyfill for Chrome < 119
+  if (typeof (Promise as { withResolvers?: unknown }).withResolvers !== "function") {
+    (Promise as { withResolvers?: unknown }).withResolvers = function <T>() {
+      let resolve!: (value: T | PromiseLike<T>) => void;
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+      return { promise, resolve, reject };
+    };
+  }
+  // pdfjs-dist v5 uses URL.parse (Chrome 120+) — polyfill for older browsers
+  if (typeof URL.parse !== "function") {
+    (URL as unknown as { parse: (url: string, base?: string) => URL | null }).parse = (url, base) => {
+      try { return new URL(url, base); } catch { return null; }
+    };
+  }
+  const { GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  pdfJsLoaded = true;
+}
+
+type PageHead = { page: number; text: string };
+
+async function extractSpecificationPageHeads(file: File): Promise<{ totalPages: number; pageHeads: PageHead[] }> {
+  await ensurePdfJs();
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data: bytes, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise;
+  const pageHeads: PageHead[] = [];
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const lines = content.items
+      .map((item: unknown) => ((item as { str?: string }).str ?? "").trim())
+      .filter(Boolean)
+      .slice(0, 30);
+
+    pageHeads.push({ page: i, text: lines.join(" ").slice(0, 500) });
+  }
+
+  const totalPages = pdf.numPages;
+  await pdf.destroy();
+  return { totalPages, pageHeads };
+}
+
 export default function SpecificationsClient({ projectId, username }: { projectId: string; username?: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -205,28 +257,16 @@ export default function SpecificationsClient({ projectId, username }: { projectI
     }
     setIsParsingUpload(true);
     try {
-      // Step 1: get a signed upload URL (no file bytes sent through Vercel,
-      // which caps request bodies at 4.5 MB on serverless functions).
-      const urlRes = await fetch(
-        `/api/projects/${projectId}/specifications/parse-upload-url?filename=${encodeURIComponent(file.name)}`
-      );
-      const urlData = await urlRes.json();
-      if (!urlRes.ok) throw new Error(urlData?.error ?? "Could not get upload URL");
-      const { signedUrl, storagePath } = urlData as { signedUrl: string; storagePath: string };
+      // Parse text locally in the browser so the serverless API never has to
+      // receive or re-download the PDF bytes. This avoids Vercel body limits and
+      // Node/PDF.js runtime issues while still letting the API optionally refine
+      // the detected sections with Gemini from a small JSON payload.
+      const { totalPages, pageHeads } = await extractSpecificationPageHeads(file);
 
-      // Step 2: upload directly to Supabase Storage.
-      const putRes = await fetch(signedUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": "application/pdf" },
-      });
-      if (!putRes.ok) throw new Error(`Storage upload failed (${putRes.status})`);
-
-      // Step 3: ask the server to download from storage and parse sections.
       const res = await fetch(`/api/projects/${projectId}/specifications/parse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storagePath, filename: file.name }),
+        body: JSON.stringify({ filename: file.name, totalPages, pageHeads }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Failed to parse specification PDF.");
