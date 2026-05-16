@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
   experimental: {
     serverBodySizeLimit: "100mb",
   },
