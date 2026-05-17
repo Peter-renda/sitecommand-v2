@@ -3,13 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import ProjectNav from "@/components/ProjectNav";
 
-type SourceDocument = { filename: string; url: string };
+type SourceDocument = { filename: string; url: string; description?: string };
 
 type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  stats?: { recordCount: number; toolsSearched: number; drawingPdfsAttached: number };
+  stats?: { recordCount: number; toolsSearched: number; filesAttached: number; filesCited: number };
   sourceDocuments?: SourceDocument[];
 };
 
@@ -89,8 +89,8 @@ export default function AssistClient({ projectId }: { projectId: string }) {
               <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Assist</h1>
               <p className="mt-1 text-sm text-gray-600">
                 Ask anything about this project. Assist searches across RFIs, submittals, daily logs, meetings,
-                tasks, contracts, budget, commitments, change orders/events, schedules, specs, photos, and the
-                most recent drawing PDFs.
+                tasks, contracts, budget, commitments, change orders/events, schedules, specs, photos, and any
+                attached files (drawings, spec book, RFI/submittal attachments, project documents).
               </p>
             </div>
           </div>
@@ -137,13 +137,13 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                               href={doc.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                              className="inline-flex items-start gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
                                 viewBox="0 0 20 20"
                                 fill="currentColor"
-                                className="w-3.5 h-3.5"
+                                className="w-3.5 h-3.5 mt-0.5 flex-shrink-0"
                                 aria-hidden="true"
                               >
                                 <path
@@ -152,7 +152,12 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                                   clipRule="evenodd"
                                 />
                               </svg>
-                              {doc.filename}
+                              <span>
+                                {doc.filename}
+                                {doc.description && (
+                                  <span className="text-gray-500"> — {doc.description}</span>
+                                )}
+                              </span>
                             </a>
                           </li>
                         ))}
@@ -162,8 +167,8 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                   {m.stats && (
                     <div className="mt-2 pt-2 border-t border-gray-200 text-[11px] text-gray-500">
                       Searched {m.stats.recordCount} records across {m.stats.toolsSearched} tools
-                      {m.stats.drawingPdfsAttached > 0
-                        ? ` · ${m.stats.drawingPdfsAttached} drawing PDF${m.stats.drawingPdfsAttached === 1 ? "" : "s"} read`
+                      {m.stats.filesAttached > 0
+                        ? ` · ${m.stats.filesCited} of ${m.stats.filesAttached} file${m.stats.filesAttached === 1 ? "" : "s"} cited`
                         : ""}
                     </div>
                   )}
