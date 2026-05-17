@@ -54,7 +54,7 @@ export default function Home() {
       <a href="#main-content" className="skip-link">
         Skip to content
       </a>
-      <Navbar />
+      <Navbar hidePricing />
 
       <main id="main-content">
         {/* ── Hero ── */}
@@ -102,7 +102,7 @@ export default function Home() {
                 {/* CTAs */}
                 <div className="animate-fade-up delay-300 mt-10 flex flex-wrap items-center gap-3">
                   <a
-                    href="/pricing"
+                    href="/signup"
                     className="group relative inline-flex items-center px-7 py-3.5 text-sm font-semibold text-white rounded-xl overflow-hidden transition-all duration-200 active:scale-[0.98]"
                     style={{ background: "#111110" }}
                   >
@@ -366,7 +366,7 @@ export default function Home() {
         </section>
 
         {/* ── Features Bento Grid ── */}
-        <section className="py-24 px-6 sm:px-10" style={{ background: "#FAFAF9" }}>
+        <section id="features" className="py-24 px-6 sm:px-10" style={{ background: "#FAFAF9" }}>
           <div className="max-w-7xl mx-auto">
             {/* Section header */}
             <div className="mb-14 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -379,7 +379,7 @@ export default function Home() {
                 </h2>
               </div>
               <a
-                href="/pricing"
+                href="#features"
                 className="self-start sm:self-auto text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors duration-150 flex items-center gap-1.5 shrink-0"
               >
                 See all features
@@ -468,14 +468,6 @@ export default function Home() {
 
                   <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
                     <a
-                      href="/pricing"
-                      className="group relative inline-flex items-center px-8 py-4 text-sm font-semibold text-white rounded-xl overflow-hidden transition-all duration-200 active:scale-[0.98]"
-                      style={{ background: "#111110" }}
-                    >
-                      <span className="relative z-10">See Pricing</span>
-                      <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-[0.08] transition-opacity duration-200" />
-                    </a>
-                    <a
                       href="/demo"
                       className="inline-flex items-center gap-2 px-8 py-4 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 active:scale-[0.98]"
                     >
@@ -499,9 +491,6 @@ export default function Home() {
             SiteCommand
           </span>
           <div className="flex flex-wrap gap-6 text-xs text-gray-400">
-            <a href="/pricing" className="hover:text-gray-700 transition-colors">
-              Pricing
-            </a>
             <a href="/demo" className="hover:text-gray-700 transition-colors">
               Demo
             </a>

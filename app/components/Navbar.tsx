@@ -82,10 +82,15 @@ const navItems: { label: string; items: NavSubItem[]; href?: string }[] = [
   },
 ];
 
-export default function Navbar() {
+type NavbarProps = { hidePricing?: boolean };
+
+export default function Navbar({ hidePricing = false }: NavbarProps) {
   const [open, setOpen] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visibleNavItems = hidePricing
+    ? navItems.filter((item) => item.label !== "Pricing")
+    : navItems;
 
   const handleEnter = (label: string) => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -118,7 +123,7 @@ export default function Navbar() {
 
         {/* Desktop nav items */}
         <div className="hidden md:flex items-center gap-1">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <div
               key={item.label}
               className="relative"
@@ -248,7 +253,7 @@ export default function Navbar() {
       {/* Mobile drawer */}
       {mobileOpen && (
         <div className="md:hidden border-t border-gray-100 bg-white px-4 py-3 space-y-1">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <div key={item.label}>
               {item.items.length === 0 && item.label !== "Solutions" ? (
                 <a
