@@ -2646,7 +2646,7 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
                       <button
                         onClick={() => {
                           setCreateMenuOpen(false);
-                          setShowCreateModal(true);
+                          router.push(`/projects/${projectId}/reporting/single-tool/new`);
                         }}
                         className="w-full text-left px-4 py-2.5 hover:bg-gray-50"
                       >
