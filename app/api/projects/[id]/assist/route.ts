@@ -2,18 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { canAccessProject } from "@/lib/project-access";
 import { getSupabase } from "@/lib/supabase";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 export const maxDuration = 300;
 
 type Row = Record<string, unknown>;
+type Supa = ReturnType<typeof getSupabase>;
 
 const PER_TABLE_LIMIT = 100;
 const MAX_VALUE_CHARS = 1500;
-// Safety cap on total bytes uploaded to Gemini per question. Set high enough to fit
-// a typical full drawing set; well under Gemini's per-project storage quota.
+// Safety cap on total bytes uploaded to Gemini per question.
 const MAX_PDF_BYTES_TOTAL = 500 * 1024 * 1024;
-const PDF_UPLOAD_CONCURRENCY = 5;
+const UPLOAD_CONCURRENCY = 5;
 
 const TABLES: Array<{ label: string; table: string; idCol?: string }> = [
   { label: "RFIs", table: "rfis" },
@@ -50,6 +50,18 @@ const SKIP_KEYS = new Set([
   "page_image_path",
 ]);
 
+const SUPPORTED_DOC_MIME_PREFIXES = ["image/", "text/"];
+const SUPPORTED_DOC_MIME_EXACT = new Set([
+  "application/pdf",
+  "application/json",
+]);
+
+function isSupportedMime(mime: string | null | undefined): boolean {
+  if (!mime) return false;
+  if (SUPPORTED_DOC_MIME_EXACT.has(mime)) return true;
+  return SUPPORTED_DOC_MIME_PREFIXES.some((p) => mime.startsWith(p));
+}
+
 function stringify(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "string") {
@@ -84,7 +96,7 @@ function serializeRow(row: Row): string {
 }
 
 async function fetchTable(
-  supabase: ReturnType<typeof getSupabase>,
+  supabase: Supa,
   table: string,
   projectId: string,
   idCol = "project_id",
@@ -113,54 +125,164 @@ function buildContext(blocks: Array<{ label: string; rows: Row[] }>): string {
   return parts.join("\n");
 }
 
-async function uploadDrawingPdfsToGemini(
-  supabase: ReturnType<typeof getSupabase>,
-  projectId: string,
-  ai: GoogleGenAI,
-): Promise<Array<{ filename: string; fileUri: string; mimeType: string; storagePath: string }>> {
-  const { data: uploads } = await supabase
+type Candidate = {
+  bucket: string;
+  storagePath: string;
+  filename: string;
+  mimeType: string;
+  description: string;
+};
+
+// Extract a Supabase storage path from a public URL like
+// https://<host>/storage/v1/object/public/<bucket>/<path>
+function pathFromPublicUrl(url: string, bucket: string): string | null {
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return decodeURIComponent(url.slice(idx + marker.length));
+}
+
+async function collectDrawingPdfs(supabase: Supa, projectId: string): Promise<Candidate[]> {
+  const { data } = await supabase
     .from("drawing_uploads")
-    .select("id, filename, storage_path, uploaded_at")
+    .select("filename, storage_path, uploaded_at")
     .eq("project_id", projectId)
     .order("uploaded_at", { ascending: false });
+  return (data ?? [])
+    .filter((row) => (row as Row).storage_path)
+    .map((row) => ({
+      bucket: "project-drawings",
+      storagePath: (row as Row).storage_path as string,
+      filename: ((row as Row).filename as string | null) ?? "drawing.pdf",
+      mimeType: "application/pdf",
+      description: "Drawing Set",
+    }));
+}
 
-  if (!uploads?.length) return [];
+async function collectSpecBook(supabase: Supa, projectId: string): Promise<Candidate[]> {
+  const { data } = await supabase
+    .from("project_spec_books")
+    .select("filename, storage_path")
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (!data?.storage_path) return [];
+  return [{
+    bucket: "project-drawings",
+    storagePath: data.storage_path as string,
+    filename: (data.filename as string | null) ?? "spec-book.pdf",
+    mimeType: "application/pdf",
+    description: "Specification Book",
+  }];
+}
 
-  // First pass: download from Supabase storage (sequential within budget).
-  const downloaded: Array<{ filename: string; blob: Blob; storagePath: string }> = [];
+async function collectRfiAttachments(supabase: Supa, projectId: string): Promise<Candidate[]> {
+  const { data } = await supabase
+    .from("rfis")
+    .select("id, rfi_number, subject, attachments")
+    .eq("project_id", projectId);
+  const out: Candidate[] = [];
+  for (const rfi of (data ?? []) as Row[]) {
+    const atts = Array.isArray(rfi.attachments) ? (rfi.attachments as Array<{ name?: string; url?: string }>) : [];
+    for (const att of atts) {
+      if (!att?.url || !att?.name) continue;
+      if (!att.name.toLowerCase().endsWith(".pdf")) continue;
+      const path = pathFromPublicUrl(att.url, "rfi-attachments");
+      if (!path) continue;
+      const number = rfi.rfi_number ?? rfi.id;
+      out.push({
+        bucket: "rfi-attachments",
+        storagePath: path,
+        filename: att.name,
+        mimeType: "application/pdf",
+        description: `RFI #${number}${rfi.subject ? ` — ${rfi.subject}` : ""} (Attachment)`,
+      });
+    }
+  }
+  return out;
+}
+
+async function collectSubmittalAttachments(supabase: Supa, projectId: string): Promise<Candidate[]> {
+  const { data } = await supabase
+    .from("submittals")
+    .select("id, number, title, attachments")
+    .eq("project_id", projectId);
+  const out: Candidate[] = [];
+  for (const sub of (data ?? []) as Row[]) {
+    const atts = Array.isArray(sub.attachments) ? (sub.attachments as Array<{ name?: string; url?: string }>) : [];
+    for (const att of atts) {
+      if (!att?.url || !att?.name) continue;
+      if (!att.name.toLowerCase().endsWith(".pdf")) continue;
+      const path = pathFromPublicUrl(att.url, "submittal-attachments");
+      if (!path) continue;
+      const number = sub.number ?? sub.id;
+      out.push({
+        bucket: "submittal-attachments",
+        storagePath: path,
+        filename: att.name,
+        mimeType: "application/pdf",
+        description: `Submittal #${number}${sub.title ? ` — ${sub.title}` : ""} (Attachment)`,
+      });
+    }
+  }
+  return out;
+}
+
+async function collectDocuments(supabase: Supa, projectId: string): Promise<Candidate[]> {
+  const { data } = await supabase
+    .from("documents")
+    .select("name, storage_path, mime_type")
+    .eq("project_id", projectId)
+    .eq("type", "file");
+  return ((data ?? []) as Row[])
+    .filter((d) => d.storage_path && isSupportedMime(d.mime_type as string))
+    .map((d) => ({
+      bucket: "project-documents",
+      storagePath: d.storage_path as string,
+      filename: (d.name as string | null) ?? "document",
+      mimeType: (d.mime_type as string) || "application/octet-stream",
+      description: "Document",
+    }));
+}
+
+type UploadedFile = Candidate & { fileId: string; geminiUri: string; geminiMime: string };
+
+async function downloadAndUpload(
+  supabase: Supa,
+  ai: GoogleGenAI,
+  candidates: Candidate[],
+): Promise<UploadedFile[]> {
+  // Download sequentially with shared byte budget.
+  const downloaded: Array<Candidate & { blob: Blob }> = [];
   let bytesUsed = 0;
-  for (const upload of uploads) {
-    const path = (upload as Row).storage_path as string | undefined;
-    const filename = ((upload as Row).filename as string | undefined) ?? "drawing.pdf";
-    if (!path) continue;
+  for (const cand of candidates) {
     try {
-      const { data: blob, error } = await supabase.storage.from("project-drawings").download(path);
+      const { data: blob, error } = await supabase.storage.from(cand.bucket).download(cand.storagePath);
       if (error || !blob) continue;
       if (bytesUsed + blob.size > MAX_PDF_BYTES_TOTAL) break;
       bytesUsed += blob.size;
-      downloaded.push({ filename, blob, storagePath: path });
+      downloaded.push({ ...cand, blob });
     } catch {
       // skip
     }
   }
 
-  // Second pass: upload to Gemini Files API with limited concurrency.
-  const out: Array<{ filename: string; fileUri: string; mimeType: string; storagePath: string }> = [];
-  for (let i = 0; i < downloaded.length; i += PDF_UPLOAD_CONCURRENCY) {
-    const batch = downloaded.slice(i, i + PDF_UPLOAD_CONCURRENCY);
+  // Upload to Gemini Files API with limited concurrency.
+  const out: UploadedFile[] = [];
+  for (let i = 0; i < downloaded.length; i += UPLOAD_CONCURRENCY) {
+    const batch = downloaded.slice(i, i + UPLOAD_CONCURRENCY);
     const results = await Promise.all(
-      batch.map(async (item) => {
+      batch.map(async (item, idxInBatch) => {
         try {
           const file = await ai.files.upload({
             file: item.blob,
-            config: { mimeType: "application/pdf", displayName: item.filename },
+            config: { mimeType: item.mimeType, displayName: item.filename },
           });
           if (!file.uri || !file.mimeType) return null;
           return {
-            filename: item.filename,
-            fileUri: file.uri,
-            mimeType: file.mimeType,
-            storagePath: item.storagePath,
+            ...item,
+            fileId: `file-${i + idxInBatch + 1}`,
+            geminiUri: file.uri,
+            geminiMime: file.mimeType,
           };
         } catch {
           return null;
@@ -169,7 +291,8 @@ async function uploadDrawingPdfsToGemini(
     );
     for (const r of results) if (r) out.push(r);
   }
-  return out;
+  // Renumber sequentially in case some failed.
+  return out.map((f, idx) => ({ ...f, fileId: `file-${idx + 1}` }));
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -183,7 +306,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI service not configured" }, { status: 503 });
 
-  let body: { question?: string; history?: Array<{ role: string; content: string }> };
+  let body: { question?: string };
   try {
     body = await req.json();
   } catch {
@@ -203,36 +326,55 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const genai = new GoogleGenAI({ apiKey });
 
-  const [fetched, drawingPdfs] = await Promise.all([
+  // Gather candidates from all sources. Drawings + spec book first (typically larger
+  // reference docs), then attachments, then general documents.
+  const [drawings, specBook, rfiAtts, subAtts, docs, tableRows] = await Promise.all([
+    collectDrawingPdfs(supabase, projectId),
+    collectSpecBook(supabase, projectId),
+    collectRfiAttachments(supabase, projectId),
+    collectSubmittalAttachments(supabase, projectId),
+    collectDocuments(supabase, projectId),
     Promise.all(
       TABLES.map(async (t) => ({
         label: t.label,
         rows: await fetchTable(supabase, t.table, projectId, t.idCol),
       })),
     ),
-    uploadDrawingPdfsToGemini(supabase, projectId, genai),
   ]);
+
+  const candidates: Candidate[] = [...specBook, ...drawings, ...rfiAtts, ...subAtts, ...docs];
+  const uploaded = await downloadAndUpload(supabase, genai, candidates);
 
   const projectHeader = project
     ? `Project: ${project.name ?? "Unknown"}${project.project_type ? ` (${project.project_type})` : ""}${project.address ? ` — ${project.address}` : ""}${project.status ? ` — Status: ${project.status}` : ""}`
     : `Project ID: ${projectId}`;
 
-  const recordCount = fetched.reduce((sum, b) => sum + b.rows.length, 0);
-  const context = buildContext(fetched);
+  const recordCount = tableRows.reduce((sum, b) => sum + b.rows.length, 0);
+  const context = buildContext(tableRows);
+  const manifest = uploaded.length
+    ? uploaded.map((f) => `- [${f.fileId}] ${f.description}: ${f.filename}`).join("\n")
+    : "(no files attached)";
 
-  const systemInstruction = `You are SiteCommand Assist, an AI assistant embedded inside a construction project management platform. You answer questions by searching across the project's records (RFIs, submittals, daily logs, meetings, tasks, contracts, budgets, commitments, change orders, change events, schedules, specifications, photos, drawings, and any drawing PDFs attached to this request).
+  const systemInstruction = `You are SiteCommand Assist, an AI assistant embedded inside a construction project management platform. You answer questions by searching across the project's records (RFIs, submittals, daily logs, meetings, tasks, contracts, budgets, commitments, change orders, change events, schedules, specifications, photos, drawings) and any attached files (drawings, spec book, RFI/submittal attachments, project documents).
 
 Rules:
-- Ground every answer in the provided project data. Quote relevant record fields when useful.
+- Ground every answer in the provided project data and attached files. Quote relevant record fields or file content when useful.
 - When you cite a record, reference it by its tool and identifying fields (e.g., "RFI #12 — Subject: Roof flashing detail" or "Daily Log on 2026-04-01").
-- If the answer isn't in the data, say so clearly and suggest where the user might add the information (e.g., "I don't see this in the RFIs or specifications — try uploading the spec section to the Specifications tool").
+- If the answer isn't in the data, say so clearly and suggest where the user might add the information.
 - Keep responses concise and scannable. Use short paragraphs or bullet lists.
 - Do not invent records, numbers, or quotes. If a field is missing, say so.
-- For questions about drawings or specs, the most recent drawing PDFs may be attached as files — read them to answer.`;
+
+Response format:
+- Return a JSON object with two fields:
+  - "answer": your answer as plain text (use newlines and bullet markers, not markdown headings).
+  - "citedFileIds": an array of file IDs (e.g., ["file-1", "file-3"]) for ONLY the files you actually used to compose the answer. Do NOT include files you opened but did not draw information from. If you used no files, return an empty array.`;
 
   const userPrompt = `${projectHeader}
 
-I have indexed ${recordCount} records across ${fetched.filter((b) => b.rows.length).length} tools for this project.${drawingPdfs.length ? ` ${drawingPdfs.length} drawing PDF${drawingPdfs.length === 1 ? "" : "s"} attached.` : ""}
+I have indexed ${recordCount} records across ${tableRows.filter((b) => b.rows.length).length} tools for this project.${uploaded.length ? ` ${uploaded.length} file${uploaded.length === 1 ? "" : "s"} attached.` : ""}
+
+=== ATTACHED FILES ===
+${manifest}
 
 === PROJECT DATA ===
 ${context || "(no records found)"}
@@ -245,39 +387,67 @@ ${question}`;
       text?: string;
       fileData?: { mimeType: string; fileUri: string };
     }> = [{ text: userPrompt }];
-    for (const pdf of drawingPdfs) {
-      parts.push({ fileData: { mimeType: pdf.mimeType, fileUri: pdf.fileUri } });
+    for (const f of uploaded) {
+      parts.push({ fileData: { mimeType: f.geminiMime, fileUri: f.geminiUri } });
     }
 
     const result = await genai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [{ role: "user", parts }],
-      config: { systemInstruction },
+      config: {
+        systemInstruction,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            answer: { type: Type.STRING },
+            citedFileIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+          required: ["answer", "citedFileIds"],
+        },
+      },
     });
 
-    const answer = (result.text ?? "").trim();
+    const raw = (result.text ?? "").trim();
+    let answer = raw || "(no response)";
+    let citedFileIds: string[] = [];
+    try {
+      const parsed = JSON.parse(raw) as { answer?: string; citedFileIds?: string[] };
+      if (typeof parsed.answer === "string" && parsed.answer.trim()) answer = parsed.answer.trim();
+      if (Array.isArray(parsed.citedFileIds)) {
+        citedFileIds = parsed.citedFileIds.filter((id): id is string => typeof id === "string");
+      }
+    } catch {
+      // Fall back to raw text if JSON parsing fails.
+    }
+
+    const citedSet = new Set(citedFileIds);
+    const citedFiles = uploaded.filter((f) => citedSet.has(f.fileId));
 
     const sourceDocuments = (
       await Promise.all(
-        drawingPdfs.map(async (pdf) => {
+        citedFiles.map(async (f) => {
           try {
             const { data } = await supabase.storage
-              .from("project-drawings")
-              .createSignedUrl(pdf.storagePath, 60 * 60);
-            return data?.signedUrl ? { filename: pdf.filename, url: data.signedUrl } : null;
+              .from(f.bucket)
+              .createSignedUrl(f.storagePath, 60 * 60);
+            return data?.signedUrl
+              ? { filename: f.filename, url: data.signedUrl, description: f.description }
+              : null;
           } catch {
             return null;
           }
         }),
       )
-    ).filter((d): d is { filename: string; url: string } => d !== null);
+    ).filter((d): d is { filename: string; url: string; description: string } => d !== null);
 
     return NextResponse.json({
-      answer: answer || "(no response)",
+      answer,
       stats: {
         recordCount,
-        toolsSearched: fetched.filter((b) => b.rows.length).length,
-        drawingPdfsAttached: drawingPdfs.length,
+        toolsSearched: tableRows.filter((b) => b.rows.length).length,
+        filesAttached: uploaded.length,
+        filesCited: sourceDocuments.length,
       },
       sourceDocuments,
     });
