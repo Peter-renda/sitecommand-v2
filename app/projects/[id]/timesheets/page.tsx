@@ -1,6 +1,6 @@
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import TimesheetsClient from "./TimesheetsClient";
+import UnderConstructionNotice from "../components/UnderConstructionNotice";
 
 export default async function TimesheetsPage({
   params,
@@ -9,7 +9,6 @@ export default async function TimesheetsPage({
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
-
-  const { id } = await params;
-  return <TimesheetsClient projectId={id} username={session.username} />;
+  await params;
+  return <UnderConstructionNotice title="Timesheets" />;
 }
