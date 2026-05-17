@@ -117,7 +117,7 @@ async function uploadDrawingPdfsToGemini(
   supabase: ReturnType<typeof getSupabase>,
   projectId: string,
   ai: GoogleGenAI,
-): Promise<Array<{ filename: string; fileUri: string; mimeType: string }>> {
+): Promise<Array<{ filename: string; fileUri: string; mimeType: string; storagePath: string }>> {
   const { data: uploads } = await supabase
     .from("drawing_uploads")
     .select("id, filename, storage_path, uploaded_at")
@@ -127,7 +127,7 @@ async function uploadDrawingPdfsToGemini(
   if (!uploads?.length) return [];
 
   // First pass: download from Supabase storage (sequential within budget).
-  const downloaded: Array<{ filename: string; blob: Blob }> = [];
+  const downloaded: Array<{ filename: string; blob: Blob; storagePath: string }> = [];
   let bytesUsed = 0;
   for (const upload of uploads) {
     const path = (upload as Row).storage_path as string | undefined;
@@ -138,14 +138,14 @@ async function uploadDrawingPdfsToGemini(
       if (error || !blob) continue;
       if (bytesUsed + blob.size > MAX_PDF_BYTES_TOTAL) break;
       bytesUsed += blob.size;
-      downloaded.push({ filename, blob });
+      downloaded.push({ filename, blob, storagePath: path });
     } catch {
       // skip
     }
   }
 
   // Second pass: upload to Gemini Files API with limited concurrency.
-  const out: Array<{ filename: string; fileUri: string; mimeType: string }> = [];
+  const out: Array<{ filename: string; fileUri: string; mimeType: string; storagePath: string }> = [];
   for (let i = 0; i < downloaded.length; i += PDF_UPLOAD_CONCURRENCY) {
     const batch = downloaded.slice(i, i + PDF_UPLOAD_CONCURRENCY);
     const results = await Promise.all(
@@ -156,7 +156,12 @@ async function uploadDrawingPdfsToGemini(
             config: { mimeType: "application/pdf", displayName: item.filename },
           });
           if (!file.uri || !file.mimeType) return null;
-          return { filename: item.filename, fileUri: file.uri, mimeType: file.mimeType };
+          return {
+            filename: item.filename,
+            fileUri: file.uri,
+            mimeType: file.mimeType,
+            storagePath: item.storagePath,
+          };
         } catch {
           return null;
         }
@@ -252,6 +257,21 @@ ${question}`;
 
     const answer = (result.text ?? "").trim();
 
+    const sourceDocuments = (
+      await Promise.all(
+        drawingPdfs.map(async (pdf) => {
+          try {
+            const { data } = await supabase.storage
+              .from("project-drawings")
+              .createSignedUrl(pdf.storagePath, 60 * 60);
+            return data?.signedUrl ? { filename: pdf.filename, url: data.signedUrl } : null;
+          } catch {
+            return null;
+          }
+        }),
+      )
+    ).filter((d): d is { filename: string; url: string } => d !== null);
+
     return NextResponse.json({
       answer: answer || "(no response)",
       stats: {
@@ -259,6 +279,7 @@ ${question}`;
         toolsSearched: fetched.filter((b) => b.rows.length).length,
         drawingPdfsAttached: drawingPdfs.length,
       },
+      sourceDocuments,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "AI request failed";
