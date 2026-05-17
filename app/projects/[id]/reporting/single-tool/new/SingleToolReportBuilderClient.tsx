@@ -361,7 +361,15 @@ type ReportTab = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export default function SingleToolReportBuilderClient({ projectId }: { projectId: string }) {
+export default function SingleToolReportBuilderClient({
+  projectId,
+  currentUserName,
+  currentUserEmail,
+}: {
+  projectId: string;
+  currentUserName: string;
+  currentUserEmail: string;
+}) {
   const router = useRouter();
   const [reportName, setReportName] = useState("");
   const [reportDescription, setReportDescription] = useState("");
@@ -480,7 +488,7 @@ export default function SingleToolReportBuilderClient({ projectId }: { projectId
       name: reportName.trim(),
       reportType: "Single Tool Report",
       description: reportDescription.trim() || (ds ? `Single tool report on ${ds.label}.` : "Single tool report."),
-      createdBy: "Me",
+      createdBy: currentUserName || currentUserEmail,
       createdAt: now,
       updatedAt: now,
       sharedWith: [],
@@ -628,6 +636,7 @@ export default function SingleToolReportBuilderClient({ projectId }: { projectId
               onDrop={handleColumnDrop}
               onRemove={removeColumn}
               onReorder={reorderColumn}
+              currentUserName={currentUserName || currentUserEmail}
             />
           )}
         </main>
@@ -877,12 +886,14 @@ function DataSetBuilder({
   onDrop,
   onRemove,
   onReorder,
+  currentUserName,
 }: {
   dataSet: DataSet;
   selectedColumns: string[];
   onDrop: (col: string) => void;
   onRemove: (col: string) => void;
   onReorder: (from: number, to: number) => void;
+  currentUserName: string;
 }) {
   const [dropActive, setDropActive] = useState(false);
   const [reorderFromIndex, setReorderFromIndex] = useState<number | null>(null);
@@ -1027,7 +1038,7 @@ function DataSetBuilder({
               <tr key={rowIndex} className="border-b border-gray-100 last:border-0">
                 {selectedColumns.map((col) => (
                   <td key={col} className="px-4 py-3 align-top text-gray-700 max-w-[420px]">
-                    {mockValueFor(col, rowIndex)}
+                    {mockValueFor(col, rowIndex, currentUserName)}
                   </td>
                 ))}
               </tr>
@@ -1103,9 +1114,12 @@ function pick<T>(arr: T[], i: number): T {
   return arr[i % arr.length];
 }
 
-function mockValueFor(column: string, rowIndex: number): React.ReactNode {
+function mockValueFor(column: string, rowIndex: number, currentUserName: string): React.ReactNode {
   const c = column.toLowerCase();
-  if (c === "created by" || c === "inspector" || c === "received by" || c === "assignee" || c === "ball in court" || c === "assigned to" || c === "owner" || c === "operator") {
+  if (c === "created by") {
+    return currentUserName;
+  }
+  if (c === "inspector" || c === "received by" || c === "assignee" || c === "ball in court" || c === "assigned to" || c === "owner" || c === "operator") {
     return pick(MOCK_PEOPLE, rowIndex);
   }
   if (c === "company" || c === "company involved" || c === "vendor" || c === "hauler" || c === "inspecting entity") {
