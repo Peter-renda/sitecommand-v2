@@ -105,6 +105,9 @@ export default function SpecificationsClient({ projectId, username }: { projectI
   const [isApplyingParsedUpload, setIsApplyingParsedUpload] = useState(false);
   const [parsedSections, setParsedSections] = useState<ParsedSpecSection[]>([]);
   const [showParseReviewModal, setShowParseReviewModal] = useState(false);
+  const [parsedTotalPages, setParsedTotalPages] = useState<number | null>(null);
+  const [specBookFilename, setSpecBookFilename] = useState<string | null>(null);
+  const [isOpeningSpecBook, setIsOpeningSpecBook] = useState(false);
 
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const isGenerateSubmittalFlow = searchParams.get("generateSubmittal") === "1";
@@ -135,6 +138,27 @@ export default function SpecificationsClient({ projectId, username }: { projectI
       }
     }
     loadInitialData();
+    return () => {
+      mounted = false;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadSpecBook() {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/spec-book`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!mounted) return;
+        if (data?.specBook?.filename) {
+          setSpecBookFilename(data.specBook.filename);
+        }
+      } catch {
+        // Non-fatal — the Open button will fall back to a "no spec book" alert.
+      }
+    }
+    loadSpecBook();
     return () => {
       mounted = false;
     };
@@ -226,13 +250,34 @@ export default function SpecificationsClient({ projectId, username }: { projectI
     setSelectedSpecIdForSubmittal(specifications[0].id);
   }, [isGenerateSubmittalFlow, selectedSpecIdForSubmittal, specifications]);
 
-  function handleOpenSpecBook() {
+  async function handleOpenSpecBook() {
+    if (isOpeningSpecBook) return;
+    setIsOpeningSpecBook(true);
+    // Open the tab synchronously so the click is still attributed as user
+    // intent — popup blockers reject window.open calls made after async work.
     const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.title = "Open Specification Book";
-    win.document.body.style.margin = "0";
-    win.document.body.style.height = "100vh";
-    win.document.body.style.background = "#000";
+    try {
+      const res = await fetch(`/api/projects/${projectId}/spec-book`);
+      const data = res.ok ? await res.json() : null;
+      const url = data?.specBook?.url as string | undefined;
+      if (!url) {
+        if (win) win.close();
+        setSpecBookFilename(null);
+        window.alert("No specification book has been uploaded for this project yet. Click Upload to add one.");
+        return;
+      }
+      setSpecBookFilename((data?.specBook?.filename as string | undefined) ?? null);
+      if (win) {
+        win.location.href = url;
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    } catch {
+      if (win) win.close();
+      window.alert("Could not open the specification book. Please try again.");
+    } finally {
+      setIsOpeningSpecBook(false);
+    }
   }
 
   function handleExport(format: "pdf" | "csv") {
@@ -271,6 +316,7 @@ export default function SpecificationsClient({ projectId, username }: { projectI
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Failed to parse specification PDF.");
       setParsedSections(Array.isArray(data?.sections) ? data.sections : []);
+      setParsedTotalPages(totalPages);
       setShowUploadModal(false);
       setShowParseReviewModal(true);
     } catch (error) {
@@ -299,8 +345,46 @@ export default function SpecificationsClient({ projectId, username }: { projectI
         created.push(data as Specification);
       }
       setSpecifications((current) => [...created, ...current].sort((a, b) => a.name.localeCompare(b.name)));
+
+      // Persist the PDF itself so "Open Specification Book" can stream it
+      // back. Failures here are non-fatal — the parsed sections are already
+      // saved, and the user can re-upload to retry persistence.
+      const pdfFile = uploadFiles[0];
+      if (pdfFile) {
+        try {
+          const urlRes = await fetch(
+            `/api/projects/${projectId}/spec-book/upload-url?filename=${encodeURIComponent(pdfFile.name)}`
+          );
+          if (urlRes.ok) {
+            const { signedUrl, storagePath } = await urlRes.json();
+            const putRes = await fetch(signedUrl, {
+              method: "PUT",
+              body: pdfFile,
+              headers: { "Content-Type": "application/pdf" },
+            });
+            if (putRes.ok) {
+              const registerRes = await fetch(`/api/projects/${projectId}/spec-book`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  storagePath,
+                  filename: pdfFile.name,
+                  totalPages: parsedTotalPages,
+                }),
+              });
+              if (registerRes.ok) {
+                setSpecBookFilename(pdfFile.name);
+              }
+            }
+          }
+        } catch {
+          // Silently ignore persistence failures so the sections still save.
+        }
+      }
+
       setShowParseReviewModal(false);
       setParsedSections([]);
+      setParsedTotalPages(null);
       setUploadFiles([]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to upload parsed specifications.";
@@ -432,9 +516,11 @@ export default function SpecificationsClient({ projectId, username }: { projectI
             <button
               type="button"
               onClick={handleOpenSpecBook}
-              className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              disabled={isOpeningSpecBook}
+              title={specBookFilename ?? undefined}
+              className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Open Specification Book
+              {isOpeningSpecBook ? "Opening…" : "Open Specification Book"}
             </button>
 
             <div className="relative" ref={exportMenuRef}>

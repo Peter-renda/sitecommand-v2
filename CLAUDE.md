@@ -1247,6 +1247,28 @@ Change event line items cannot be added to a commitment when:
 - Migration: `101_commitment_ssov_approved_at.sql` adds `commitments.ssov_approved_at` TIMESTAMPTZ.
 - SiteCommand uses a single **invoice contact** on the commitment (`subcontractor_contact`) rather than a distribution list; notifications are sent to that contact only.
 
+## Specifications – Spec Book PDF Storage
+
+### Overview
+The Specifications page lets a user upload a single PDF spec book per project. The PDF is parsed into per-section `project_specifications` rows AND persisted to storage so the **Open Specification Book** button in the page header can re-open it in a new browser tab.
+
+### Storage
+- Persistent PDF lives in the `project-drawings` Supabase bucket under `${projectId}/_spec-book/${timestamp}-${filename}` (250 MB file size limit per migration 124).
+- Each project has at most one stored spec book; uploading a new one upserts the `project_spec_books` row and removes the previous storage file.
+
+### Database
+- Table `project_spec_books` (migration `125_project_spec_book.sql`) — one row per project (`UNIQUE(project_id)`): `filename`, `storage_path`, `total_pages`, `uploaded_at`.
+
+### API
+- `GET /api/projects/[id]/spec-book/upload-url?filename=…` — issues a signed PUT URL for the persistent `_spec-book/` storage path.
+- `GET /api/projects/[id]/spec-book` — returns `{ specBook: { id, filename, totalPages, uploadedAt, url } | null }` where `url` is a fresh 1-hour signed download URL.
+- `POST /api/projects/[id]/spec-book` — upserts the metadata row after the client has uploaded the PDF via the signed URL; rejects `storagePath` values outside `${projectId}/_spec-book/` and deletes the prior storage file when replacing.
+
+### Client Flow (`SpecificationsClient.tsx`)
+- On mount, fetches `/spec-book` to learn whether a book exists (used to populate the button tooltip).
+- During parse review approval (`handleApproveParsedSections`), after creating per-section rows, the PDF retained in `uploadFiles` is uploaded to the signed URL and registered with `POST /spec-book`. Failures here are non-fatal — the sections still save and the user can re-upload to retry persistence.
+- **Open Specification Book** opens a blank tab synchronously (to keep popup blockers happy), fetches a fresh signed URL via `GET /spec-book`, and redirects the new tab to that URL. If no spec book is stored, the new tab is closed and the user gets an alert explaining they need to upload one first.
+
 ## Permission Templates – Company-Level Defaults
 
 ### Overview
