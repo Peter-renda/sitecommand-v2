@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import ProjectNav from "@/components/ProjectNav";
 
+type SourceDocument = { filename: string; url: string };
+
 type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
   stats?: { recordCount: number; toolsSearched: number; drawingPdfsAttached: number };
+  sourceDocuments?: SourceDocument[];
 };
 
 const SUGGESTIONS = [
@@ -57,6 +60,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
           role: "assistant",
           content: data.answer,
           stats: data.stats,
+          sourceDocuments: data.sourceDocuments,
         },
       ]);
     } catch (err) {
@@ -121,6 +125,40 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                   }`}
                 >
                   {m.content}
+                  {m.sourceDocuments && m.sourceDocuments.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <div className="text-[11px] font-medium uppercase tracking-wide text-gray-500 mb-1.5">
+                        Source documents
+                      </div>
+                      <ul className="space-y-1">
+                        {m.sourceDocuments.map((doc) => (
+                          <li key={doc.url}>
+                            <a
+                              href={doc.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 20 20"
+                                fill="currentColor"
+                                className="w-3.5 h-3.5"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  fillRule="evenodd"
+                                  d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm6 0v3a1 1 0 0 0 1 1h3l-4-4Z"
+                                  clipRule="evenodd"
+                                />
+                              </svg>
+                              {doc.filename}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {m.stats && (
                     <div className="mt-2 pt-2 border-t border-gray-200 text-[11px] text-gray-500">
                       Searched {m.stats.recordCount} records across {m.stats.toolsSearched} tools
