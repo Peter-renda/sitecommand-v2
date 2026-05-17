@@ -886,12 +886,66 @@ function DataSetBuilder({
 }) {
   const [dropActive, setDropActive] = useState(false);
   const [reorderFromIndex, setReorderFromIndex] = useState<number | null>(null);
+  const [insertIndicator, setInsertIndicator] = useState<number | null>(null);
+
+  const ROW_COUNT = 6;
+  const rows = useMemo(() => Array.from({ length: ROW_COUNT }, (_, i) => i), []);
+
+  function dropFromEvent(e: React.DragEvent, insertAt?: number) {
+    const dragged = e.dataTransfer.getData("text/plain");
+    if (!dragged) return;
+    if (selectedColumns.includes(dragged)) {
+      if (reorderFromIndex !== null && insertAt !== undefined && reorderFromIndex !== insertAt) {
+        const target = insertAt > reorderFromIndex ? insertAt - 1 : insertAt;
+        onReorder(reorderFromIndex, target);
+      }
+      return;
+    }
+    onDrop(dragged);
+  }
+
+  if (selectedColumns.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div className="text-xs text-gray-500 flex items-center gap-2">
+          <span>Data Set:</span>
+          <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-medium text-xs">{dataSet.label}</span>
+        </div>
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            setDropActive(true);
+          }}
+          onDragLeave={() => setDropActive(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDropActive(false);
+            dropFromEvent(e);
+          }}
+          className={`rounded-lg border-2 border-dashed p-10 text-center transition-colors ${
+            dropActive ? "border-orange-500 bg-orange-50" : "border-gray-300 bg-white"
+          }`}
+        >
+          <p className="text-sm text-gray-700 font-medium">Drag columns here from the right panel</p>
+          <p className="text-xs text-gray-400 mt-1">
+            Dropped columns are added to the report with sample data.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="text-xs text-gray-500 flex items-center gap-2">
-        <span>Data Set:</span>
-        <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-medium text-xs">{dataSet.label}</span>
+    <div className="space-y-3">
+      <div className="text-xs text-gray-500 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span>Data Set:</span>
+          <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-medium text-xs">{dataSet.label}</span>
+          <span className="text-gray-400">·</span>
+          <span>{selectedColumns.length} columns</span>
+        </div>
+        <span className="text-[11px] text-gray-400">Sample data shown — actual records will populate after the report runs.</span>
       </div>
 
       <div
@@ -900,95 +954,305 @@ function DataSetBuilder({
           e.dataTransfer.dropEffect = "copy";
           setDropActive(true);
         }}
-        onDragLeave={() => setDropActive(false)}
+        onDragLeave={(e) => {
+          if (e.currentTarget === e.target) setDropActive(false);
+        }}
         onDrop={(e) => {
           e.preventDefault();
           setDropActive(false);
-          const col = e.dataTransfer.getData("text/plain");
-          if (col) onDrop(col);
+          setInsertIndicator(null);
+          dropFromEvent(e, selectedColumns.length);
         }}
-        className={`rounded-lg border-2 border-dashed p-6 transition-colors ${
-          dropActive ? "border-orange-500 bg-orange-50" : "border-gray-300 bg-white"
+        className={`rounded-lg border bg-white overflow-x-auto transition-colors ${
+          dropActive ? "border-orange-400 ring-1 ring-orange-300" : "border-gray-200"
         }`}
       >
-        {selectedColumns.length === 0 ? (
-          <div className="text-center py-10">
-            <p className="text-sm text-gray-600 font-medium">Drag columns here from the right panel</p>
-            <p className="text-xs text-gray-400 mt-1">
-              Selected columns will become the columns of this tab&apos;s report.
-            </p>
-          </div>
-        ) : (
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
-              Selected Columns ({selectedColumns.length})
-            </p>
-            <ul className="space-y-2">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50">
               {selectedColumns.map((col, i) => (
-                <li
+                <th
                   key={col}
                   draggable
-                  onDragStart={() => setReorderFromIndex(i)}
+                  onDragStart={(e) => {
+                    setReorderFromIndex(i);
+                    e.dataTransfer.setData("text/plain", col);
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragEnd={() => {
+                    setReorderFromIndex(null);
+                    setInsertIndicator(null);
+                  }}
                   onDragOver={(e) => {
                     e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const before = e.clientX - rect.left < rect.width / 2;
+                    setInsertIndicator(before ? i : i + 1);
                   }}
                   onDrop={(e) => {
-                    const dragged = e.dataTransfer.getData("text/plain");
-                    if (dragged && !selectedColumns.includes(dragged)) {
-                      onDrop(dragged);
-                      setReorderFromIndex(null);
-                      return;
-                    }
-                    if (reorderFromIndex !== null && reorderFromIndex !== i) {
-                      onReorder(reorderFromIndex, i);
-                    }
-                    setReorderFromIndex(null);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const before = e.clientX - rect.left < rect.width / 2;
+                    const insertAt = before ? i : i + 1;
+                    setInsertIndicator(null);
+                    setDropActive(false);
+                    dropFromEvent(e, insertAt);
                   }}
-                  className="flex items-center gap-2 border border-gray-200 rounded px-3 py-2 bg-white"
+                  className={`group relative px-4 py-2.5 text-left font-medium text-gray-700 whitespace-nowrap select-none cursor-grab active:cursor-grabbing ${
+                    insertIndicator === i ? "border-l-2 border-orange-500" : ""
+                  } ${insertIndicator === i + 1 && i === selectedColumns.length - 1 ? "border-r-2 border-orange-500" : ""}`}
                 >
-                  <DragHandle />
-                  <span className="text-sm text-gray-800 flex-1">{col}</span>
-                  <button
-                    onClick={() => onRemove(col)}
-                    className="text-xs text-gray-400 hover:text-red-600"
-                  >
-                    Remove
-                  </button>
-                </li>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs italic text-gray-400 font-serif">fx</span>
+                    <span>{col}</span>
+                    <SortArrow />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemove(col);
+                      }}
+                      className="ml-1 text-gray-300 opacity-0 group-hover:opacity-100 hover:text-red-600"
+                      aria-label={`Remove ${col}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </th>
               ))}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      {selectedColumns.length > 0 && (
-        <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-          <div className="px-4 py-2 border-b border-gray-100 text-xs text-gray-500">
-            Preview · {dataSet.label}
-          </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100">
-                {selectedColumns.map((c) => (
-                  <th key={c} className="px-3 py-2 text-left text-xs font-semibold text-gray-500">
-                    {c}
-                  </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((rowIndex) => (
+              <tr key={rowIndex} className="border-b border-gray-100 last:border-0">
+                {selectedColumns.map((col) => (
+                  <td key={col} className="px-4 py-3 align-top text-gray-700 max-w-[420px]">
+                    {mockValueFor(col, rowIndex)}
+                  </td>
                 ))}
               </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td colSpan={selectedColumns.length} className="px-3 py-6 text-center text-xs text-gray-400">
-                  No data yet. Save and run the report to see records.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
+}
+
+function SortArrow() {
+  return (
+    <svg className="w-3 h-3 text-gray-400" viewBox="0 0 12 12" fill="currentColor">
+      <path d="M6 3 L9 7 L3 7 Z" />
+    </svg>
+  );
+}
+
+// ─── Mock data helpers ───────────────────────────────────────────────────────
+
+const MOCK_PEOPLE = ["James Schuster", "", "", "Maria Chen", "Tom Albright", "Priya Singh", "Jordan Lee"];
+const MOCK_COMPANIES = [
+  "Michael Baker Engineering,",
+  "Sitescapes LLC",
+  "Smith & Jennings, Inc.",
+  "Smith & Jennings, Inc.",
+  "Smith & Jennings, Inc.",
+  "Michael Baker Engineering,",
+  "Acme Electrical Co.",
+];
+const MOCK_COMMENTS = [
+  "",
+  "Took out 4 courses of block around collar where grid needed to be re-laid. Compacted screenings around pipe and re-laid geogrid. Michael Baker ran compaction test and achieved 100% compaction.",
+  "Set both risers on structure C17. Finished undercut on footing on retaining wall. Started backfill on footer with surge stone and fabric. First section of undercut was 22' x 14'.",
+  "No work too wet from rain    on Thursday the fifth",
+  "Excavating for retaining wall and filling in sediment basin on Huntley Street    and filling in last three-quarter section of Luray Drive",
+  "Did a proof roll on Hudgens Drive from Huntley Street to    Freeman Mill    proof roll failed ,    did test on Luray Drive material was a little wet recommended drying it out before we do a compaction test, inspecting",
+  "Continued formwork on west elevator pit. Rebar inspection scheduled for tomorrow morning.",
+];
+const MOCK_LOCATIONS = ["Bldg A - L2", "Site Entry", "Retaining Wall", "Luray Drive", "Hudgens Drive", "Pit 3", "Roof Deck"];
+const MOCK_COST_CODES = ["03-30-00", "02-41-13", "26-05-19", "31-23-16", "33-41-00", "04-22-00", "07-92-00"];
+const MOCK_STATUSES = ["Open", "Closed", "Approved", "Draft", "Pending", "Submitted", "Void"];
+const MOCK_TRADES = ["Concrete", "Earthwork", "Steel", "Electrical", "Plumbing", "Masonry", "Roofing"];
+const MOCK_DELAY_TYPES = ["Weather", "Material", "Owner", "Inspection", "Labor", "Subcontractor", "Other"];
+const MOCK_SUBJECTS = [
+  "Slab pour at Level 2",
+  "Underground utility coordination",
+  "Concrete delivery delay",
+  "Anchor bolt layout",
+  "RFI 102 follow-up",
+  "Punch list walkthrough",
+  "Pre-installation meeting",
+];
+
+const MOCK_DATES = [
+  "2026-03-04",
+  "2026-03-05",
+  "2026-03-06",
+  "2026-03-09",
+  "2026-03-10",
+  "2026-03-11",
+  "2026-03-12",
+];
+
+const MOCK_TIMES = ["07:15", "08:30", "10:00", "12:45", "14:20", "15:50", "17:05"];
+const MOCK_NUMBERS_SMALL = [4, 6, 12, 3, 8, 10, 2];
+const MOCK_NUMBERS_HOURS = [8, 7.5, 9, 4, 10, 6, 8];
+const MOCK_AMOUNTS = ["$1,250.00", "$8,420.00", "$320.00", "$15,000.00", "$2,750.00", "$640.00", "$4,180.00"];
+const MOCK_DURATIONS = [2, 4, 1.5, 0.5, 3, 2.5, 1];
+
+function pick<T>(arr: T[], i: number): T {
+  return arr[i % arr.length];
+}
+
+function mockValueFor(column: string, rowIndex: number): React.ReactNode {
+  const c = column.toLowerCase();
+  if (c === "created by" || c === "inspector" || c === "received by" || c === "assignee" || c === "ball in court" || c === "assigned to" || c === "owner" || c === "operator") {
+    return pick(MOCK_PEOPLE, rowIndex);
+  }
+  if (c === "company" || c === "company involved" || c === "vendor" || c === "hauler" || c === "inspecting entity") {
+    return pick(MOCK_COMPANIES, rowIndex);
+  }
+  if (c === "comments" || c === "notes" || c === "description" || c === "weather summary") {
+    return pick(MOCK_COMMENTS, rowIndex);
+  }
+  if (c === "location" || c === "inspection area" || c === "disposal site" || c === "delivery from") {
+    return pick(MOCK_LOCATIONS, rowIndex);
+  }
+  if (c === "cost code" || c === "budget code") {
+    return pick(MOCK_COST_CODES, rowIndex);
+  }
+  if (c === "status" || c === "is issue") {
+    return pick(MOCK_STATUSES, rowIndex);
+  }
+  if (c === "trade" || c === "discipline") {
+    return pick(MOCK_TRADES, rowIndex);
+  }
+  if (c === "delay type" || c === "waste type" || c === "equipment type" || c === "inspection type" || c === "type" || c === "category" || c === "change reason") {
+    return pick(MOCK_DELAY_TYPES, rowIndex);
+  }
+  if (c === "subject" || c === "title" || c === "item" || c === "safety notice") {
+    return pick(MOCK_SUBJECTS, rowIndex);
+  }
+  if (
+    c === "date" ||
+    c === "created at" ||
+    c === "submitted at" ||
+    c === "approved at" ||
+    c === "closed at" ||
+    c === "uploaded at" ||
+    c === "issued date" ||
+    c === "taken at" ||
+    c === "received" ||
+    c === "issued" ||
+    c === "due date" ||
+    c === "completed at" ||
+    c === "pickup time" ||
+    c === "compliance due" ||
+    c === "start" ||
+    c === "finish"
+  ) {
+    return pick(MOCK_DATES, rowIndex);
+  }
+  if (c === "time" || c === "time observed" || c === "start time" || c === "end time") {
+    return pick(MOCK_TIMES, rowIndex);
+  }
+  if (c === "hours" || c === "hours used" || c === "overtime") {
+    return pick(MOCK_NUMBERS_HOURS, rowIndex);
+  }
+  if (c === "duration" || c === "duration (hrs)") {
+    return pick(MOCK_DURATIONS, rowIndex);
+  }
+  if (c === "workers" || c === "quantity" || c === "size" || c === "planned quantity" || c === "installed quantity" || c === "attendees count" || c === "attachments count" || c === "revision" || c === "uid") {
+    return pick(MOCK_NUMBERS_SMALL, rowIndex);
+  }
+  if (
+    c === "amount" ||
+    c === "original amount" ||
+    c === "revised amount" ||
+    c === "approved cos" ||
+    c === "pending cos" ||
+    c === "rom amount" ||
+    c === "this period" ||
+    c === "to date" ||
+    c === "retainage" ||
+    c === "billed to date" ||
+    c === "default retainage"
+  ) {
+    return pick(MOCK_AMOUNTS, rowIndex);
+  }
+  if (c === "attachments") {
+    const n = pick(MOCK_NUMBERS_SMALL, rowIndex);
+    return n === 0 ? "" : `${n} file${n === 1 ? "" : "s"}`;
+  }
+  if (c === "% complete") {
+    return `${pick([10, 25, 50, 75, 90, 100, 0], rowIndex)}%`;
+  }
+  if (c === "uom") {
+    return pick(["CY", "EA", "LF", "SF", "TN", "HR", "LB"], rowIndex);
+  }
+  if (c === "executed" || c === "active" || c === "present") {
+    return pick(["Yes", "No", "Yes", "Yes", "No", "Yes", "No"], rowIndex);
+  }
+  if (c === "scope") {
+    return pick(["In Scope", "Out of Scope", "TBD Scope", "In Scope", "In Scope", "Out of Scope", "TBD Scope"], rowIndex);
+  }
+  if (c === "set") {
+    return pick(["Current", "Bid", "IFC", "Permit", "Current", "Current", "IFC"], rowIndex);
+  }
+  if (c === "section" || c === "number" || c === "rfi #" || c === "submittal #" || c === "task #" || c === "item #" || c === "invoice #") {
+    return `${String(100 + rowIndex).padStart(3, "0")}`;
+  }
+  if (c === "predecessors" || c === "resources" || c === "assignees" || c === "attendee" || c === "set" || c === "discipline") {
+    return pick(["FS 12,15", "SS 8", "FF 22", "", "FS 4", "FS 30, FF 33", ""], rowIndex);
+  }
+  if (c === "tracking number") {
+    return pick(["1Z 999 1A1 23 4567 8901", "FX 7720 4488 1023", "", "UPS 1Z 8765 4321", "DHL 9924 1188 7733", "", "USPS 9505 0011 2233"], rowIndex);
+  }
+  if (c === "contents") {
+    return pick(["#5 rebar bundles", "Anchor bolts (200 ct)", "Concrete forms", "PVC fittings", "Glazing crates", "Lighting fixtures", "Roof membrane rolls"], rowIndex);
+  }
+  if (c === "severity") {
+    return pick(["Low", "Medium", "High", "Low", "Low", "Medium", "High"], rowIndex);
+  }
+  if (c === "priority") {
+    return pick(["Low", "Medium", "High", "Urgent", "Medium", "Low", "High"], rowIndex);
+  }
+  if (c === "sky") {
+    return pick(["Sunny", "Partly Cloudy", "Overcast", "Rain", "Clear", "Cloudy", "Snow"], rowIndex);
+  }
+  if (c === "temperature" || c === "temp") {
+    return pick(["72°F", "65°F", "58°F", "81°F", "49°F", "77°F", "55°F"], rowIndex);
+  }
+  if (c === "wind") {
+    return pick(["5 mph NE", "Calm", "12 mph W", "8 mph S", "15 mph NW", "Calm", "6 mph E"], rowIndex);
+  }
+  if (c === "precipitation" || c === "avg precipitation") {
+    return pick(["0.0 in", "0.3 in", "1.2 in", "0.0 in", "0.0 in", "0.1 in", "2.4 in"], rowIndex);
+  }
+  if (c === "ground/sea" || c === "ground sea") {
+    return pick(["Dry", "Damp", "Wet", "Flooded", "Dry", "Damp", "Snow"], rowIndex);
+  }
+  if (c === "calamity") {
+    return pick(["No", "No", "Yes", "No", "No", "Yes", "No"], rowIndex);
+  }
+  if (c === "from" || c === "to" || c === "caller" || c === "receiver") {
+    return pick(MOCK_PEOPLE, rowIndex);
+  }
+  if (c === "contract" || c === "contract name") {
+    return pick(["SC-001 Site Concrete", "SC-014 Glazing", "PO-220 Lighting", "SC-007 Earthwork", "SC-019 Roofing", "PO-115 Steel", "SC-031 Plumbing"], rowIndex);
+  }
+  if (c === "album") {
+    return pick(["Site Progress", "Foundations", "Steel Erection", "Interior Finishes", "Roof", "Sitework", "MEP"], rowIndex);
+  }
+  if (c === "accounting method") {
+    return pick(["Amount Based", "Amount Based", "Unit/Quantity Based", "Amount Based", "Amount Based", "Amount Based", "Unit/Quantity Based"], rowIndex);
+  }
+  if (c === "erp status") {
+    return pick(["Not Synced", "Synced", "Pending", "Synced", "Not Synced", "Synced", "Synced"], rowIndex);
+  }
+  if (c === "period") {
+    return pick(["Mar 2026", "Feb 2026", "Jan 2026", "Mar 2026", "Apr 2026", "Feb 2026", "Mar 2026"], rowIndex);
+  }
+  return "";
 }
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
