@@ -21,6 +21,12 @@ export type StoredReport = {
     fieldLabel: string;
     format?: "currency" | "date" | "text";
   }[];
+  singleToolTabs?: {
+    id: string;
+    name: string;
+    dataSetId: string | null;
+    selectedColumns: string[];
+  }[];
   lastRunRecordCount?: number;
 };
 

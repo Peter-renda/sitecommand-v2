@@ -53,6 +53,7 @@ type SavedReport = {
   lastDistributedAt?: string;
   promotedToCompanyAt?: string;
   promotedBy?: string;
+  hasSingleToolTabs?: boolean;
 };
 
 type CalculatedColumnType = "basic" | "date-variance";
@@ -2240,10 +2241,17 @@ export default function ReportingClient({
       return;
     }
 
-    // Only match a template definition when we can identify it precisely —
-    // by its stored template value or by an exact label prefix match on the
-    // saved name. Anything looser was silently swapping templates (e.g. a
-    // Manpower report opening as Commitments Summary).
+    // Reports created via the drag-and-drop Single Tool builder persist their
+    // tabs/datasets/columns to localStorage. Route those back to the builder
+    // so the saved configuration is rebuilt exactly as the user left it.
+    if (saved.hasSingleToolTabs || saved.reportType === "Single Tool Report") {
+      router.push(`/projects/${projectId}/reporting/single-tool/${saved.id}`);
+      return;
+    }
+
+    // Otherwise it's a template-based saved report — look up the exact
+    // template by its stored value or by an exact label prefix match on the
+    // saved name. Anything looser was silently swapping templates.
     const def =
       (saved.templateValue ? REPORT_TYPES.find((r) => r.value === saved.templateValue) : undefined) ??
       REPORT_TYPES.find((r) => {
@@ -2307,6 +2315,7 @@ export default function ReportingClient({
           updatedAt: p.updatedAt,
           sharedWith: p.sharedWith ?? [],
           lastRunRecordCount: p.lastRunRecordCount,
+          hasSingleToolTabs: (p.singleToolTabs?.length ?? 0) > 0,
         }));
       return [...additions, ...prev];
     });
