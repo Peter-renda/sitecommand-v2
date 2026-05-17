@@ -6,6 +6,7 @@ export type StoredReport = {
   id: string;
   name: string;
   reportType: string;
+  templateValue?: string;
   description: string;
   createdBy: string;
   createdAt: string;

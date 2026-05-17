@@ -38,6 +38,7 @@ type SavedReport = {
   id: string;
   name: string;
   reportType: string;
+  templateValue?: string;
   description: string;
   createdBy: string;
   createdAt: string;
@@ -934,10 +935,12 @@ function RunReportModal({
       return;
     }
 
+    const reportType = reportDef.group === "Daily Log" ? "Daily Log Report" : "Single Tool Report";
     const saved: SavedReport = {
       id: crypto.randomUUID(),
       name: reportName,
       reportType,
+      templateValue: reportDef.value,
       description: reportDef.description,
       createdBy: "Me",
       createdAt: new Date().toISOString(),
@@ -2188,6 +2191,7 @@ export default function ReportingClient({
     }
 
     const def =
+      (saved.templateValue ? REPORT_TYPES.find((r) => r.value === saved.templateValue) : undefined) ??
       REPORT_TYPES.find((r) => {
         const expectedType = r.group === "Daily Log" ? "Daily Log Report" : "Single Tool Report";
         return expectedType === saved.reportType && r.label === saved.name.split(" - ")[0];
@@ -2201,7 +2205,10 @@ export default function ReportingClient({
       setActiveReport(def);
       setActiveSavedReport(saved);
       setActiveCalculatedColumns(saved.calculatedColumns ?? []);
+      return;
     }
+
+    router.push(`/projects/${projectId}/reporting/360/${saved.id}`);
   }
 
   function handleSaveReport(report: SavedReport) {
@@ -2226,6 +2233,7 @@ export default function ReportingClient({
           id: p.id,
           name: p.name,
           reportType: p.reportType,
+          templateValue: p.templateValue,
           description: p.description,
           createdBy: p.createdBy,
           createdAt: p.createdAt,
@@ -2871,6 +2879,7 @@ export default function ReportingClient({
               id: crypto.randomUUID(),
               name: rec.name,
               reportType: isDailyLog ? "Daily Log Report" : "Single Tool Report",
+              templateValue: rec.def.value,
               description: rec.description,
               createdBy: currentUserName || "Assist",
               createdAt: now,
@@ -2893,6 +2902,7 @@ export default function ReportingClient({
               id: stored.id,
               name: stored.name,
               reportType: stored.reportType,
+              templateValue: stored.templateValue,
               description: stored.description,
               createdBy: stored.createdBy,
               createdAt: stored.createdAt,
