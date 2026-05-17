@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
-import { saveReport } from "../../saved-reports-store";
+import { loadSavedReports, saveReport } from "../../saved-reports-store";
 
 // ─── Catalog ─────────────────────────────────────────────────────────────────
 
@@ -365,10 +365,12 @@ export default function SingleToolReportBuilderClient({
   projectId,
   currentUserName,
   currentUserEmail,
+  reportId,
 }: {
   projectId: string;
   currentUserName: string;
   currentUserEmail: string;
+  reportId?: string;
 }) {
   const router = useRouter();
   const [reportName, setReportName] = useState("");
@@ -380,6 +382,18 @@ export default function SingleToolReportBuilderClient({
     { id: crypto.randomUUID(), name: "Tab 1", dataSetId: null, selectedColumns: [] },
   ]);
   const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0]?.id ?? "");
+
+  useEffect(() => {
+    if (!reportId) return;
+    const existing = loadSavedReports(projectId).find((r) => r.id === reportId);
+    if (!existing) return;
+    setReportName(existing.name);
+    setReportDescription(existing.description ?? "");
+    if (existing.singleToolTabs && existing.singleToolTabs.length > 0) {
+      setTabs(existing.singleToolTabs);
+      setActiveTabId(existing.singleToolTabs[0].id);
+    }
+  }, [projectId, reportId]);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
 
@@ -483,16 +497,18 @@ export default function SingleToolReportBuilderClient({
     const firstWithData = tabs.find((t) => t.dataSetId);
     const ds = firstWithData ? allDataSets.find((d) => d.id === firstWithData.dataSetId) ?? null : null;
     const now = new Date().toISOString();
+    const existing = reportId ? loadSavedReports(projectId).find((r) => r.id === reportId) : null;
     saveReport(projectId, {
-      id: crypto.randomUUID(),
+      id: reportId ?? crypto.randomUUID(),
       name: reportName.trim(),
       reportType: "Single Tool Report",
       description: reportDescription.trim() || (ds ? `Single tool report on ${ds.label}.` : "Single tool report."),
-      createdBy: currentUserName || currentUserEmail,
-      createdAt: now,
+      createdBy: existing?.createdBy ?? (currentUserName || currentUserEmail),
+      createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-      sharedWith: [],
-      lastRunRecordCount: 0,
+      sharedWith: existing?.sharedWith ?? [],
+      singleToolTabs: tabs,
+      lastRunRecordCount: existing?.lastRunRecordCount ?? 0,
     });
     router.push(`/projects/${projectId}/reporting`);
   }
