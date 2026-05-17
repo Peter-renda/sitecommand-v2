@@ -2240,15 +2240,15 @@ export default function ReportingClient({
       return;
     }
 
+    // Only match a template definition when we can identify it precisely —
+    // by its stored template value or by an exact label prefix match on the
+    // saved name. Anything looser was silently swapping templates (e.g. a
+    // Manpower report opening as Commitments Summary).
     const def =
       (saved.templateValue ? REPORT_TYPES.find((r) => r.value === saved.templateValue) : undefined) ??
       REPORT_TYPES.find((r) => {
         const expectedType = r.group === "Daily Log" ? "Daily Log Report" : "Single Tool Report";
         return expectedType === saved.reportType && r.label === saved.name.split(" - ")[0];
-      }) ??
-      REPORT_TYPES.find((r) => {
-        const expectedType = r.group === "Daily Log" ? "Daily Log Report" : "Single Tool Report";
-        return expectedType === saved.reportType;
       });
 
     if (def) {
@@ -2261,8 +2261,25 @@ export default function ReportingClient({
     router.push(`/projects/${projectId}/reporting/360/${saved.id}`);
   }
 
+  function persistSavedReport(report: SavedReport) {
+    if (typeof window === "undefined") return;
+    saveReport(projectId, {
+      id: report.id,
+      name: report.name,
+      reportType: report.reportType,
+      templateValue: report.templateValue,
+      description: report.description,
+      createdBy: report.createdBy,
+      createdAt: report.createdAt,
+      updatedAt: report.updatedAt,
+      sharedWith: report.sharedWith,
+      lastRunRecordCount: report.lastRunRecordCount,
+    });
+  }
+
   function handleSaveReport(report: SavedReport) {
     setMyReports((prev) => [report, ...prev]);
+    persistSavedReport(report);
   }
 
   function deleteReport(id: string) {
@@ -2296,7 +2313,14 @@ export default function ReportingClient({
   }, [projectId]);
 
   function updateSavedReport(reportId: string, patch: Partial<SavedReport>) {
-    setMyReports((prev) => prev.map((r) => (r.id === reportId ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r)));
+    setMyReports((prev) =>
+      prev.map((r) => {
+        if (r.id !== reportId) return r;
+        const next = { ...r, ...patch, updatedAt: new Date().toISOString() };
+        persistSavedReport(next);
+        return next;
+      })
+    );
   }
 
   function distributeSnapshot(payload: { reportId: string; recipients: string[]; format: "pdf" | "csv" | "xlsx"; schedule: SnapshotSchedule }) {
@@ -2338,6 +2362,7 @@ export default function ReportingClient({
       calculatedColumns: report.calculatedColumns,
     };
     setMyReports((prev) => [clone, ...prev]);
+    persistSavedReport(clone);
     setStatusBanner(`Copy created: ${clone.name}`);
   }
 
