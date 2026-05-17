@@ -3,19 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
-import { deleteSavedReport, loadSavedReports, type StoredReport } from "./saved-reports-store";
+import { deleteSavedReport, loadSavedReports, saveReport, type StoredReport } from "./saved-reports-store";
 import { Pill } from "@/components/design-system/Primitives";
+import { REPORT_TYPES, type ReportDef } from "./report-types";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-type ReportDef = {
-  label: string;
-  value: string;
-  group: string;
-  description: string;
-  columns: { key: string; label: string }[];
-  hasDateRange: boolean;
-};
 
 type VisualType = "table" | "bar" | "horizontal-bar" | "line" | "donut" | "stacked-bar" | "scorecard";
 
@@ -105,278 +97,6 @@ type SavedDashboard = {
 type SnapshotSchedule = "one-time" | "daily" | "weekly" | "monthly";
 type AggregateFunction = "none" | "count" | "sum" | "min" | "max" | "avg";
 
-// ─── Report definitions ───────────────────────────────────────────────────────
-
-const REPORT_TYPES: ReportDef[] = [
-  {
-    label: "Delays",
-    value: "daily-delays",
-    group: "Daily Log",
-    description: "All delay entries logged in the daily log, including type, duration and location.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "delay_type", label: "Delay Type" },
-      { key: "start_time", label: "Start Time" },
-      { key: "end_time", label: "End Time" },
-      { key: "duration_hours", label: "Duration (hrs)" },
-      { key: "location", label: "Location" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Manpower",
-    value: "daily-manpower",
-    group: "Daily Log",
-    description: "Workforce entries per company, including worker counts, hours and cost codes.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "company", label: "Company" },
-      { key: "workers", label: "Workers" },
-      { key: "hours", label: "Hours" },
-      { key: "location", label: "Location" },
-      { key: "cost_code", label: "Cost Code" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Weather Observations",
-    value: "daily-weather",
-    group: "Daily Log",
-    description: "Weather conditions recorded each day, including sky, temperature, wind and precipitation.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "time_observed", label: "Time" },
-      { key: "sky", label: "Sky" },
-      { key: "temperature", label: "Temp" },
-      { key: "wind", label: "Wind" },
-      { key: "avg_precipitation", label: "Precipitation" },
-      { key: "ground_sea", label: "Ground/Sea" },
-      { key: "delay", label: "Delay?" },
-      { key: "calamity", label: "Calamity" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Safety Violations",
-    value: "daily-safety",
-    group: "Daily Log",
-    description: "Safety notices issued on site, including subject, recipient and compliance due date.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "time", label: "Time" },
-      { key: "subject", label: "Subject" },
-      { key: "safety_notice", label: "Safety Notice" },
-      { key: "issued_to", label: "Issued To" },
-      { key: "compliance_due", label: "Compliance Due" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Accidents",
-    value: "daily-accidents",
-    group: "Daily Log",
-    description: "Accident and incident records logged in the daily log.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "time", label: "Time" },
-      { key: "party_involved", label: "Party Involved" },
-      { key: "company_involved", label: "Company" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Inspections",
-    value: "daily-inspections",
-    group: "Daily Log",
-    description: "Site inspection records including type, inspector, and location details.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "inspection_type", label: "Type" },
-      { key: "inspecting_entity", label: "Entity" },
-      { key: "inspector_name", label: "Inspector" },
-      { key: "start_time", label: "Start" },
-      { key: "end_time", label: "End" },
-      { key: "location", label: "Location" },
-      { key: "inspection_area", label: "Area" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Deliveries",
-    value: "daily-deliveries",
-    group: "Daily Log",
-    description: "Material and equipment deliveries tracked in the daily log.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "time", label: "Time" },
-      { key: "delivery_from", label: "Delivery From" },
-      { key: "tracking_number", label: "Tracking #" },
-      { key: "contents", label: "Contents" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Visitors",
-    value: "daily-visitors",
-    group: "Daily Log",
-    description: "Visitor log entries including arrival/departure times.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "visitor", label: "Visitor" },
-      { key: "start_time", label: "Start" },
-      { key: "end_time", label: "End" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Notes & Issues",
-    value: "daily-notes",
-    group: "Daily Log",
-    description: "General notes and flagged issues recorded during daily log entries.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "is_issue", label: "Issue?" },
-      { key: "location", label: "Location" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Commitments Summary",
-    value: "commitments-summary",
-    group: "Financial Management",
-    description: "All purchase orders and subcontracts with status, contract amounts, approved change orders, and remaining balances.",
-    hasDateRange: false,
-    columns: [
-      { key: "number", label: "#" },
-      { key: "type", label: "Type" },
-      { key: "contract_company", label: "Company" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "sov_accounting_method", label: "Accounting Method" },
-      { key: "original_contract_amount", label: "Original Amount" },
-      { key: "approved_change_orders", label: "Approved COs" },
-      { key: "pending_change_orders", label: "Pending COs" },
-      { key: "erp_status", label: "ERP Status" },
-    ],
-  },
-  {
-    label: "Change Events",
-    value: "change-events",
-    group: "Financial Management",
-    description: "Change events log with scope classification, ROM amounts, and linkage to change orders.",
-    hasDateRange: false,
-    columns: [
-      { key: "number", label: "#" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "scope", label: "Scope" },
-      { key: "rom_amount", label: "ROM Amount" },
-      { key: "created_at", label: "Created" },
-    ],
-  },
-  {
-    label: "Commitment Change Orders",
-    value: "commitment-change-orders",
-    group: "Financial Management",
-    description: "All commitment change orders across the project, including status, amount, and linked contracts.",
-    hasDateRange: false,
-    columns: [
-      { key: "number", label: "#" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "contract_company", label: "Company" },
-      { key: "contract_name", label: "Contract" },
-      { key: "amount", label: "Amount" },
-      { key: "change_reason", label: "Change Reason" },
-      { key: "due_date", label: "Due Date" },
-    ],
-  },
-  {
-    label: "Budget Summary",
-    value: "budget-summary",
-    group: "Financial Management",
-    description: "Budget line items showing original budget, committed costs, and variance by cost code.",
-    hasDateRange: false,
-    columns: [
-      { key: "cost_code", label: "Cost Code" },
-      { key: "description", label: "Description" },
-      { key: "original_budget", label: "Original Budget" },
-      { key: "committed_costs", label: "Committed Costs" },
-      { key: "variance", label: "Variance" },
-    ],
-  },
-  {
-    label: "RFIs",
-    value: "rfis",
-    group: "Project Tools",
-    description: "All Requests for Information on the project, with status and due dates.",
-    hasDateRange: false,
-    columns: [
-      { key: "rfi_number", label: "RFI #" },
-      { key: "subject", label: "Subject" },
-      { key: "status", label: "Status" },
-      { key: "due_date", label: "Due Date" },
-      { key: "created_at", label: "Created" },
-    ],
-  },
-  {
-    label: "Submittals",
-    value: "submittals",
-    group: "Project Tools",
-    description: "Submittal log including type, status, submission and issue dates.",
-    hasDateRange: false,
-    columns: [
-      { key: "submittal_number", label: "Submittal #" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "submittal_type", label: "Type" },
-      { key: "submit_by", label: "Submit By" },
-      { key: "received_date", label: "Received" },
-      { key: "issue_date", label: "Issued" },
-      { key: "cost_code", label: "Cost Code" },
-    ],
-  },
-  {
-    label: "Tasks",
-    value: "tasks",
-    group: "Project Tools",
-    description: "Open and closed tasks assigned to the project team.",
-    hasDateRange: false,
-    columns: [
-      { key: "task_number", label: "Task #" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "category", label: "Category" },
-      { key: "created_at", label: "Created" },
-    ],
-  },
-  {
-    label: "Punch List",
-    value: "punch-list",
-    group: "Project Tools",
-    description: "Punch list items with type, trade, priority and location details.",
-    hasDateRange: false,
-    columns: [
-      { key: "item_number", label: "Item #" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "type", label: "Type" },
-      { key: "trade", label: "Trade" },
-      { key: "priority", label: "Priority" },
-      { key: "due_date", label: "Due Date" },
-      { key: "location", label: "Location" },
-    ],
-  },
-];
 
 const GROUPS = Array.from(new Set(REPORT_TYPES.map((r) => r.group)));
 
@@ -2058,49 +1778,133 @@ function PromoteReportModal({
   );
 }
 
+type AssistRecommendation = {
+  reportType: string;
+  columns: string[];
+  name: string;
+  description: string;
+  reasoning?: string;
+  def: ReportDef;
+};
+
 function AssistReportModal({
+  projectId,
   onClose,
   onCreate,
 }: {
+  projectId: string;
   onClose: () => void;
-  onCreate: (reportDef: ReportDef) => void;
+  onCreate: (rec: AssistRecommendation) => void;
 }) {
   const [prompt, setPrompt] = useState("");
-  const [recommendation, setRecommendation] = useState<ReportDef | null>(null);
+  const [recommendation, setRecommendation] = useState<AssistRecommendation | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function suggest() {
-    const q = prompt.toLowerCase();
-    const match =
-      REPORT_TYPES.find((r) => q.includes("rfi") && r.value === "rfis") ||
-      REPORT_TYPES.find((r) => q.includes("submittal") && r.value === "submittals") ||
-      REPORT_TYPES.find((r) => q.includes("task") && r.value === "tasks") ||
-      REPORT_TYPES.find((r) => q.includes("user") && r.value === "user-activity") ||
-      REPORT_TYPES[0];
-    setRecommendation(match ?? null);
+  async function suggest() {
+    const trimmed = prompt.trim();
+    if (!trimmed) {
+      setError("Enter a prompt describing the report you want.");
+      return;
+    }
+    setError(null);
+    setRecommendation(null);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/reports/assist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: trimmed }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(typeof payload.error === "string" ? payload.error : "Assist failed to generate a report.");
+        return;
+      }
+      const def = REPORT_TYPES.find((r) => r.value === payload.reportType);
+      if (!def) {
+        setError("Assist returned an unrecognized report type.");
+        return;
+      }
+      setRecommendation({
+        reportType: payload.reportType,
+        columns: Array.isArray(payload.columns) ? payload.columns : [],
+        name: typeof payload.name === "string" ? payload.name : def.label,
+        description: typeof payload.description === "string" ? payload.description : def.description,
+        reasoning: typeof payload.reasoning === "string" ? payload.reasoning : "",
+        def,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Assist failed to generate a report.");
+    } finally {
+      setLoading(false);
+    }
   }
+
+  const includedColumns =
+    recommendation?.def.columns.filter((c) => recommendation.columns.includes(c.key)) ?? [];
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-        <h2 className="text-base font-semibold text-gray-900">Get a Custom 360 Report from Assist</h2>
-        <p className="text-xs text-gray-500 mt-1">Describe the outcome you want and Assist will recommend a starting report.</p>
+        <h2 className="text-base font-semibold text-gray-900">Get a Custom Report from Assist</h2>
+        <p className="text-xs text-gray-500 mt-1">
+          Describe the report you want in plain language. Assist (powered by Gemini) will pick the right tool and
+          columns and create the report automatically.
+        </p>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={4}
-          placeholder="Example: Show overdue RFIs by status and responsible team..."
+          placeholder="Example: Can you generate a report that shows all of the manpower logs and who created them"
           className="mt-4 w-full px-3 py-2 border border-gray-200 rounded-md text-sm"
         />
         <div className="flex gap-2 mt-4">
-          <button onClick={suggest} className="px-4 py-2 bg-gray-900 text-white rounded-md text-sm">Generate Recommendation</button>
-          <button onClick={onClose} className="px-4 py-2 border border-gray-200 text-gray-600 rounded-md text-sm">Close</button>
+          <button
+            onClick={suggest}
+            disabled={loading}
+            className="px-4 py-2 bg-gray-900 text-white rounded-md text-sm disabled:opacity-50"
+          >
+            {loading ? "Generating…" : "Generate Recommendation"}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 border border-gray-200 text-gray-600 rounded-md text-sm">
+            Close
+          </button>
         </div>
+        {error && (
+          <div className="mt-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
+        )}
         {recommendation && (
           <div className="mt-4 rounded border border-gray-200 p-3">
-            <p className="text-sm font-medium text-gray-900">Recommended: {recommendation.label}</p>
+            <p className="text-xs uppercase tracking-wide text-gray-400">Recommended report</p>
+            <p className="text-sm font-medium text-gray-900 mt-1">{recommendation.name}</p>
             <p className="text-xs text-gray-500 mt-1">{recommendation.description}</p>
-            <button onClick={() => onCreate(recommendation)} className="mt-3 px-3 py-1.5 bg-gray-900 text-white rounded text-xs">
-              Create from Assist Suggestion
+            <p className="text-[11px] text-gray-400 mt-2">
+              Source: {recommendation.def.group} › {recommendation.def.label}
+            </p>
+            {includedColumns.length > 0 && (
+              <div className="mt-3">
+                <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Columns</p>
+                <div className="flex flex-wrap gap-1">
+                  {includedColumns.map((c) => (
+                    <span
+                      key={c.key}
+                      className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700"
+                    >
+                      {c.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {recommendation.reasoning && (
+              <p className="mt-3 text-[11px] text-gray-500 italic">{recommendation.reasoning}</p>
+            )}
+            <button
+              onClick={() => onCreate(recommendation)}
+              className="mt-3 px-3 py-1.5 bg-gray-900 text-white rounded text-xs"
+            >
+              Create Report
             </button>
           </div>
         )}
@@ -2323,7 +2127,13 @@ function Create360CategoryModal({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ReportingClient({ projectId }: { projectId: string }) {
+export default function ReportingClient({
+  projectId,
+  currentUserName,
+}: {
+  projectId: string;
+  currentUserName?: string;
+}) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"reports" | "templates" | "dashboards">("reports");
   const [search, setSearch] = useState("");
@@ -3051,10 +2861,47 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
 
       {showAssistModal && (
         <AssistReportModal
+          projectId={projectId}
           onClose={() => setShowAssistModal(false)}
-          onCreate={(reportDef) => {
+          onCreate={(rec) => {
             setShowAssistModal(false);
-            openTemplate(reportDef);
+            const now = new Date().toISOString();
+            const isDailyLog = rec.def.group === "Daily Log";
+            const stored: StoredReport = {
+              id: crypto.randomUUID(),
+              name: rec.name,
+              reportType: isDailyLog ? "Daily Log Report" : "Single Tool Report",
+              description: rec.description,
+              createdBy: currentUserName || "Assist",
+              createdAt: now,
+              updatedAt: now,
+              sharedWith: [],
+              category: rec.def.group,
+              selectedColumns: rec.columns.map((key) => {
+                const col = rec.def.columns.find((c) => c.key === key);
+                return {
+                  id: key,
+                  categoryLabel: rec.def.group,
+                  source: rec.def.label,
+                  fieldKey: key,
+                  fieldLabel: col?.label ?? key,
+                };
+              }),
+            };
+            saveReport(projectId, stored);
+            handleSaveReport({
+              id: stored.id,
+              name: stored.name,
+              reportType: stored.reportType,
+              description: stored.description,
+              createdBy: stored.createdBy,
+              createdAt: stored.createdAt,
+              updatedAt: stored.updatedAt,
+              sharedWith: stored.sharedWith,
+            });
+            setStatusBanner(`Assist created “${stored.name}”. It’s now in My Reports.`);
+            setSelectedSectionId("my-reports");
+            setActiveTab("reports");
           }}
         />
       )}
