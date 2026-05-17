@@ -379,6 +379,105 @@ const REPORT_TYPES: ReportDef[] = [
 ];
 
 const GROUPS = Array.from(new Set(REPORT_TYPES.map((r) => r.group)));
+
+// ─── Report sections (left-side tree on the Reports tab) ──────────────────────
+
+type SectionId =
+  | "my-reports"
+  | "assigned-reports"
+  | "popular-templates"
+  | "canned-erp"
+  | "canned-project"
+  | "canned-financial"
+  | "canned-schedule"
+  | "canned-daily-log";
+
+type SectionKind = "my-reports" | "assigned-reports" | "templates";
+
+type ReportSection = {
+  id: SectionId;
+  title: string;
+  description: string;
+  kind: SectionKind;
+  templateValues?: string[];
+};
+
+const POPULAR_TEMPLATE_VALUES = REPORT_TYPES.map((r) => r.value);
+const CANNED_ERP_VALUES = ["commitments-summary", "budget-summary"];
+const CANNED_PROJECT_VALUES = ["rfis", "submittals", "tasks", "punch-list"];
+const CANNED_FINANCIAL_VALUES = [
+  "commitments-summary",
+  "change-events",
+  "commitment-change-orders",
+  "budget-summary",
+];
+const CANNED_SCHEDULE_VALUES: string[] = [];
+const CANNED_DAILY_LOG_VALUES = REPORT_TYPES.filter((r) => r.group === "Daily Log").map((r) => r.value);
+
+const REPORT_SECTIONS: ReportSection[] = [
+  {
+    id: "my-reports",
+    title: "My Reports",
+    description:
+      "Custom reports you've made or were shared with you and any Assigned Reports you've customized. These are only viewable to you.",
+    kind: "my-reports",
+  },
+  {
+    id: "assigned-reports",
+    title: "Assigned Reports",
+    description:
+      "Reports assigned to you by the company. Data in Assigned Reports is relative to projects and permissions.",
+    kind: "assigned-reports",
+  },
+  {
+    id: "popular-templates",
+    title: "Popular Templates",
+    description:
+      "A selection of the most used Templates across Site Command. Templates are customizable, industry-standard reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: POPULAR_TEMPLATE_VALUES,
+  },
+  {
+    id: "canned-erp",
+    title: "Canned ERP Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_ERP_VALUES,
+  },
+  {
+    id: "canned-project",
+    title: "Canned Project Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_PROJECT_VALUES,
+  },
+  {
+    id: "canned-financial",
+    title: "Canned Financial Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_FINANCIAL_VALUES,
+  },
+  {
+    id: "canned-schedule",
+    title: "Canned Schedule Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_SCHEDULE_VALUES,
+  },
+  {
+    id: "canned-daily-log",
+    title: "Canned Daily Log Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_DAILY_LOG_VALUES,
+  },
+];
 const VIEWER_OPTIONS = ["Company Admins", "Project Managers", "Field Team", "Executives"];
 const VISUAL_TYPE_OPTIONS: { value: VisualType; label: string; description: string }[] = [
   { value: "table", label: "Tabular Report", description: "Detailed row and column output for audits and exports." },
@@ -648,6 +747,227 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
     >
       {label}
     </button>
+  );
+}
+
+function SectionCard({
+  section,
+  open,
+  onToggle,
+  onViewAll,
+  search,
+  myReports,
+  templates,
+  onOpenSaved,
+  onOpenTemplate,
+  onPreviewTemplate,
+  onAddVisual,
+  onEditReport,
+  onShareReport,
+  onDistribute,
+  onPreviewInDashboard,
+  onPromote,
+  onCloneReport,
+  onDeleteReport,
+}: {
+  section: ReportSection;
+  open: boolean;
+  onToggle: () => void;
+  onViewAll: () => void;
+  search: string;
+  myReports: SavedReport[];
+  templates: ReportDef[];
+  onOpenSaved: (r: SavedReport) => void;
+  onOpenTemplate: (r: ReportDef) => void;
+  onPreviewTemplate: (r: ReportDef) => void;
+  onAddVisual: (r: SavedReport) => void;
+  onEditReport: (id: string) => void;
+  onShareReport: (id: string) => void;
+  onDistribute: (id: string) => void;
+  onPreviewInDashboard: (id: string) => void;
+  onPromote: (id: string) => void;
+  onCloneReport: (r: SavedReport) => void;
+  onDeleteReport: (id: string) => void;
+}) {
+  const q = search.trim().toLowerCase();
+
+  const items = useMemo(() => {
+    if (section.kind === "my-reports") return myReports;
+    if (section.kind === "assigned-reports") {
+      return myReports.filter((r) => r.promotedToCompanyAt);
+    }
+    const allowed = new Set(section.templateValues ?? []);
+    const filtered = templates.filter((t) => allowed.has(t.value));
+    if (!q) return filtered;
+    return filtered.filter(
+      (t) =>
+        t.label.toLowerCase().includes(q) ||
+        t.group.toLowerCase().includes(q) ||
+        t.description.toLowerCase().includes(q)
+    );
+  }, [section, myReports, templates, q]);
+
+  const filteredSaved = useMemo(() => {
+    if (section.kind === "templates") return [];
+    if (!q) return items as SavedReport[];
+    return (items as SavedReport[]).filter(
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.reportType.toLowerCase().includes(q) ||
+        r.description.toLowerCase().includes(q)
+    );
+  }, [items, q, section.kind]);
+
+  const count =
+    section.kind === "templates"
+      ? (items as ReportDef[]).length
+      : filteredSaved.length;
+
+  return (
+    <div id={`section-${section.id}`} className="bg-white border border-gray-200 rounded-lg">
+      <div className="flex items-start justify-between px-4 pt-3 pb-2 gap-4">
+        <button
+          onClick={onToggle}
+          className="flex items-center gap-2 text-left flex-1 min-w-0 group"
+        >
+          <svg
+            className={`w-4 h-4 text-gray-500 transition-transform shrink-0 ${open ? "" : "-rotate-90"}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+          <h3 className="text-sm font-semibold text-gray-900 group-hover:text-gray-700">
+            {section.title} <span className="font-normal text-gray-500">({count})</span>
+          </h3>
+        </button>
+        <button
+          onClick={onViewAll}
+          className="px-3 py-1 text-xs border border-gray-200 rounded-md text-gray-600 hover:bg-gray-50 shrink-0"
+        >
+          View All
+        </button>
+      </div>
+      <p className="px-4 pb-3 pl-10 text-xs text-gray-500">{section.description}</p>
+
+      {open && (
+        <div className="border-t border-gray-100">
+          {section.kind === "templates" ? (
+            (items as ReportDef[]).length === 0 ? (
+              <div className="py-8 text-center text-xs text-gray-400">
+                {q
+                  ? "No templates match your search."
+                  : "No reports in this category yet."}
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-64">Report Name</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-44">Report Type</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500">Description</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(items as ReportDef[]).map((r) => (
+                    <tr
+                      key={r.value}
+                      className="hover:bg-gray-50 transition-colors cursor-pointer"
+                      onClick={() => onOpenTemplate(r)}
+                    >
+                      <td className="px-4 py-3 font-medium text-gray-900">{r.label}</td>
+                      <td className="px-4 py-3">
+                        <TypeBadge group={r.group} />
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500 max-w-sm">{r.description}</td>
+                      <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                        <RowMenu
+                          actions={[
+                            { label: "Preview Template", onClick: () => onPreviewTemplate(r) },
+                            { label: "Use Template", onClick: () => onOpenTemplate(r) },
+                          ]}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          ) : filteredSaved.length === 0 ? (
+            <div className="py-8 text-center text-xs text-gray-400">
+              {section.kind === "my-reports"
+                ? q
+                  ? "No saved reports match your search."
+                  : "No saved reports yet. Run a template and click “Save Report”."
+                : q
+                ? "No assigned reports match your search."
+                : "No reports have been assigned to you yet."}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-64">Report Name</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-44">Report Type</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500">Description</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-32">Created By</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-28">Date Created</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-28">Last Modified</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-20">Visuals</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-36">Last Snapshot</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-36">Company Level</th>
+                  <th className="w-10" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredSaved.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="hover:bg-gray-50 transition-colors cursor-pointer"
+                    onClick={() => onOpenSaved(r)}
+                  >
+                    <td className="px-4 py-3 font-medium text-gray-900">{r.name}</td>
+                    <td className="px-4 py-3">
+                      <SavedTypeBadge label={r.reportType} />
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{r.description}</td>
+                    <td className="px-4 py-3 text-gray-600">{r.createdBy}</td>
+                    <td className="px-4 py-3 text-gray-500">{fmtDate(r.createdAt)}</td>
+                    <td className="px-4 py-3 text-gray-500">{fmtDate(r.updatedAt)}</td>
+                    <td className="px-4 py-3 text-gray-500">{Math.max(1, r.visualCards?.length ?? 0)}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">
+                      {r.lastDistributedAt ? `${fmtDate(r.lastDistributedAt)} (${r.distributionCount ?? 1})` : "Never"}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500">
+                      {r.promotedToCompanyAt ? `Promoted ${fmtDate(r.promotedToCompanyAt)}` : "Project Only"}
+                    </td>
+                    <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                      <RowMenu
+                        actions={[
+                          { label: "Run Report", onClick: () => onOpenSaved(r) },
+                          { label: "Edit (Visuals & Layout)", onClick: () => onOpenSaved(r) },
+                          { label: "Add Visual", onClick: () => onAddVisual(r) },
+                          { label: "Edit Report", onClick: () => onEditReport(r.id) },
+                          { label: "Share Report", onClick: () => onShareReport(r.id) },
+                          { label: "Distribute Snapshot", onClick: () => onDistribute(r.id) },
+                          { label: "Preview in Dashboard", onClick: () => onPreviewInDashboard(r.id) },
+                          { label: "Promote to Company", onClick: () => onPromote(r.id) },
+                          { label: "Make a Copy", onClick: () => onCloneReport(r) },
+                          { label: "Delete", onClick: () => onDeleteReport(r.id), danger: true },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2005,11 +2325,13 @@ function Create360CategoryModal({
 
 export default function ReportingClient({ projectId }: { projectId: string }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"reports" | "dashboards">("reports");
+  const [activeTab, setActiveTab] = useState<"reports" | "templates" | "dashboards">("reports");
   const [search, setSearch] = useState("");
   const [myReports, setMyReports] = useState<SavedReport[]>([]);
-  const [myReportsOpen, setMyReportsOpen] = useState(true);
-  const [templatesOpen, setTemplatesOpen] = useState(true);
+  const [selectedSectionId, setSelectedSectionId] = useState<SectionId>("my-reports");
+  const [openSectionIds, setOpenSectionIds] = useState<Set<SectionId>>(
+    () => new Set<SectionId>(REPORT_SECTIONS.map((s) => s.id))
+  );
 
   const [dashboards, setDashboards] = useState<SavedDashboard[]>([]);
   const [showCreateDashboardModal, setShowCreateDashboardModal] = useState(false);
@@ -2266,7 +2588,7 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
     <div className="min-h-screen bg-gray-50">
       <ProjectNav projectId={projectId} />
 
-      <main className="max-w-7xl mx-auto px-6 py-6">
+      <main className="max-w-[1400px] mx-auto px-6 py-6">
         <div className="mb-5">
           <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)] mb-1">Reporting</h1>
           <p className="text-sm text-gray-500">360 Reporting — create reports, clone reports, then build and share dashboards from your visual library.</p>
@@ -2276,8 +2598,9 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
             <p className="text-xs text-gray-500 mt-2">Create reports, clone reports, then build and share dashboards from your visual library.</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Pill className="pill-open">{activeTab === "reports" ? "reports" : "dashboards"}</Pill>
+            <Pill className="pill-open">{activeTab === "reports" ? "reports" : activeTab === "templates" ? "templates" : "dashboards"}</Pill>
             <TabButton active={activeTab === "reports"} label="Reports" onClick={() => setActiveTab("reports")} />
+            <TabButton active={activeTab === "templates"} label="All Templates" onClick={() => setActiveTab("templates")} />
             <TabButton active={activeTab === "dashboards"} label="Dashboards" onClick={() => setActiveTab("dashboards")} />
             <button
               onClick={() => setShowSettingsModal(true)}
@@ -2291,7 +2614,7 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
             >
               Assist
             </button>
-            {activeTab === "reports" ? (
+            {activeTab !== "dashboards" ? (
               <div className="relative">
                 <button
                   onClick={() => setCreateMenuOpen((v) => !v)}
@@ -2362,7 +2685,7 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={activeTab === "reports" ? "Search reports/templates" : "Search dashboards"}
+            placeholder={activeTab === "reports" ? "Search reports" : activeTab === "templates" ? "Search templates" : "Search dashboards"}
             className="w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-1 focus:ring-gray-900"
           />
         </div>
@@ -2373,67 +2696,132 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
         )}
 
         {activeTab === "reports" && (
-          <>
-            <div className="mb-6">
-              <SectionHeader
-                title="My Reports"
-                count={filteredMyReports.length}
-                subtitle="Edit reports, distribute snapshots, clone copies, or permanently delete when no longer needed."
-                open={myReportsOpen}
-                onToggle={() => setMyReportsOpen((v) => !v)}
-              />
+          <div className="flex gap-6 items-start">
+            <aside className="w-56 shrink-0">
+              <nav className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <ul>
+                  {REPORT_SECTIONS.map((section) => {
+                    const selected = selectedSectionId === section.id;
+                    return (
+                      <li key={section.id}>
+                        <button
+                          onClick={() => {
+                            setSelectedSectionId(section.id);
+                            setOpenSectionIds((prev) => {
+                              const next = new Set(prev);
+                              next.add(section.id);
+                              return next;
+                            });
+                            if (typeof document !== "undefined") {
+                              const el = document.getElementById(`section-${section.id}`);
+                              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }
+                          }}
+                          className={`w-full text-left px-3 py-2 text-sm border-l-2 transition-colors ${
+                            selected
+                              ? "border-gray-900 bg-gray-50 text-gray-900 font-medium"
+                              : "border-transparent text-gray-600 hover:bg-gray-50"
+                          }`}
+                        >
+                          {section.title}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </nav>
+            </aside>
 
-              {myReportsOpen && (
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mt-3">
-                  {filteredMyReports.length === 0 ? (
-                    <div className="py-10 text-center">
-                      <p className="text-sm text-gray-400">
-                        {search ? "No saved reports match your search." : "No saved reports yet. Run a template and click “Save Report”."}
-                      </p>
-                    </div>
-                  ) : (
+            <div className="flex-1 min-w-0 space-y-4">
+              {REPORT_SECTIONS.map((section) => (
+                <SectionCard
+                  key={section.id}
+                  section={section}
+                  open={openSectionIds.has(section.id)}
+                  search={search}
+                  onToggle={() =>
+                    setOpenSectionIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(section.id)) next.delete(section.id);
+                      else next.add(section.id);
+                      return next;
+                    })
+                  }
+                  onViewAll={() => {
+                    setSelectedSectionId(section.id);
+                    setOpenSectionIds((prev) => {
+                      const next = new Set(prev);
+                      next.add(section.id);
+                      return next;
+                    });
+                  }}
+                  myReports={filteredMyReports}
+                  templates={REPORT_TYPES}
+                  onOpenSaved={openFromSaved}
+                  onOpenTemplate={openTemplate}
+                  onPreviewTemplate={setPreviewTemplate}
+                  onAddVisual={addVisualToReport}
+                  onEditReport={(id) => setEditReportId(id)}
+                  onShareReport={(id) => setShareReportId(id)}
+                  onDistribute={(id) => setDistributeReportId(id)}
+                  onPreviewInDashboard={(id) => setPreviewInDashboardReportId(id)}
+                  onPromote={(id) => setPromoteReportId(id)}
+                  onCloneReport={cloneReport}
+                  onDeleteReport={(id) => setDeleteReportId(id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "templates" && (
+          <div>
+            <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-900">
+              Templates are customizable, industry-standard reports. Preview a template, then save it as a new report in My Reports.
+            </div>
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-500">Filter Data Sets</label>
+                <select
+                  value={templateDatasetFilter}
+                  onChange={(e) => setTemplateDatasetFilter(e.target.value)}
+                  className="px-2.5 py-1.5 border border-gray-200 rounded text-xs bg-white"
+                >
+                  <option value="all">All</option>
+                  {GROUPS.map((group) => (
+                    <option key={group} value={group}>
+                      {group}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-gray-400">{filteredTemplates.length} templates</span>
+              </div>
+              {groupedTemplates.map(({ group, items }) => (
+                <div key={group}>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5 px-1">{group}</p>
+                  <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-gray-100">
                           <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-64">Report Name</th>
                           <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-44">Report Type</th>
                           <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500">Description</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-32">Created By</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-28">Date Created</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-28">Last Modified</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-20">Visuals</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-36">Last Snapshot</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-36">Company Level</th>
                           <th className="w-10" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {filteredMyReports.map((r) => (
-                          <tr key={r.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openFromSaved(r)}>
-                            <td className="px-4 py-3 font-medium text-gray-900">{r.name}</td>
+                        {items.map((r) => (
+                          <tr key={r.value} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openTemplate(r)}>
+                            <td className="px-4 py-3 font-medium text-gray-900">{r.label}</td>
                             <td className="px-4 py-3">
-                              <SavedTypeBadge label={r.reportType} />
+                              <TypeBadge group={r.group} />
                             </td>
-                            <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{r.description}</td>
-                            <td className="px-4 py-3 text-gray-600">{r.createdBy}</td>
-                            <td className="px-4 py-3 text-gray-500">{fmtDate(r.createdAt)}</td>
-                            <td className="px-4 py-3 text-gray-500">{fmtDate(r.updatedAt)}</td>
-                            <td className="px-4 py-3 text-gray-500">{Math.max(1, r.visualCards?.length ?? 0)}</td>
-                            <td className="px-4 py-3 text-xs text-gray-500">{r.lastDistributedAt ? `${fmtDate(r.lastDistributedAt)} (${r.distributionCount ?? 1})` : "Never"}</td>
-                            <td className="px-4 py-3 text-xs text-gray-500">{r.promotedToCompanyAt ? `Promoted ${fmtDate(r.promotedToCompanyAt)}` : "Project Only"}</td>
+                            <td className="px-4 py-3 text-xs text-gray-500 max-w-sm">{r.description}</td>
                             <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
                               <RowMenu
                                 actions={[
-                                  { label: "Run Report", onClick: () => openFromSaved(r) },
-                                  { label: "Edit (Visuals & Layout)", onClick: () => openFromSaved(r) },
-                                  { label: "Add Visual", onClick: () => addVisualToReport(r) },
-                                  { label: "Edit Report", onClick: () => setEditReportId(r.id) },
-                                  { label: "Share Report", onClick: () => setShareReportId(r.id) },
-                                  { label: "Distribute Snapshot", onClick: () => setDistributeReportId(r.id) },
-                                  { label: "Preview in Dashboard", onClick: () => setPreviewInDashboardReportId(r.id) },
-                                  { label: "Promote to Company", onClick: () => setPromoteReportId(r.id) },
-                                  { label: "Make a Copy", onClick: () => cloneReport(r) },
-                                  { label: "Delete", onClick: () => setDeleteReportId(r.id), danger: true },
+                                  { label: "Preview Template", onClick: () => setPreviewTemplate(r) },
+                                  { label: "Use Template", onClick: () => openTemplate(r) },
                                 ]}
                               />
                             </td>
@@ -2441,82 +2829,16 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
                         ))}
                       </tbody>
                     </table>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <SectionHeader
-                title="All Templates"
-                count={filteredTemplates.length}
-                subtitle="Search, filter, preview, and then save a template as a new report in My Reports."
-                open={templatesOpen}
-                onToggle={() => setTemplatesOpen((v) => !v)}
-              />
-
-              {templatesOpen && (
-                <div className="space-y-4 mt-3">
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-gray-500">Filter Data Sets</label>
-                    <select
-                      value={templateDatasetFilter}
-                      onChange={(e) => setTemplateDatasetFilter(e.target.value)}
-                      className="px-2.5 py-1.5 border border-gray-200 rounded text-xs bg-white"
-                    >
-                      <option value="all">All</option>
-                      {GROUPS.map((group) => (
-                        <option key={group} value={group}>
-                          {group}
-                        </option>
-                      ))}
-                    </select>
                   </div>
-                  {groupedTemplates.map(({ group, items }) => (
-                    <div key={group}>
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5 px-1">{group}</p>
-                      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-gray-100">
-                              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-64">Report Name</th>
-                              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-44">Report Type</th>
-                              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500">Description</th>
-                              <th className="w-10" />
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {items.map((r) => (
-                              <tr key={r.value} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openTemplate(r)}>
-                                <td className="px-4 py-3 font-medium text-gray-900">{r.label}</td>
-                                <td className="px-4 py-3">
-                                  <TypeBadge group={r.group} />
-                                </td>
-                                <td className="px-4 py-3 text-xs text-gray-500 max-w-sm">{r.description}</td>
-                                <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
-                                  <RowMenu
-                                    actions={[
-                                      { label: "Preview Template", onClick: () => setPreviewTemplate(r) },
-                                      { label: "Use Template", onClick: () => openTemplate(r) },
-                                    ]}
-                                  />
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ))}
-                  {groupedTemplates.length === 0 && (
-                    <div className="bg-white border border-gray-200 rounded-lg py-10 text-center">
-                      <p className="text-sm text-gray-400">No templates match your search.</p>
-                    </div>
-                  )}
+                </div>
+              ))}
+              {groupedTemplates.length === 0 && (
+                <div className="bg-white border border-gray-200 rounded-lg py-10 text-center">
+                  <p className="text-sm text-gray-400">No templates match your search.</p>
                 </div>
               )}
             </div>
-          </>
+          </div>
         )}
 
         {activeTab === "dashboards" && (
