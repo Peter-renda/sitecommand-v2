@@ -11,5 +11,11 @@ export default async function NewSingleToolReportPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <SingleToolReportBuilderClient projectId={id} />;
+  return (
+    <SingleToolReportBuilderClient
+      projectId={id}
+      currentUserName={session.username}
+      currentUserEmail={session.email}
+    />
+  );
 }
