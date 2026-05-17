@@ -823,7 +823,7 @@ export default function DashboardClient({ username, email, role, companyRole, us
                         : "Signals from your projects will surface here as work progresses."}
                     </p>
 
-                    {scopedTasks.length > 0 ? (
+                    {scopedTasks.length > 0 && (
                       <ul className="divide-y divide-gray-50 border hairline rounded-lg bg-white">
                         {scopedTasks.slice(0, 4).map((task) => (
                           <li key={task.id}>
@@ -854,8 +854,6 @@ export default function DashboardClient({ username, email, role, companyRole, us
                           </li>
                         ))}
                       </ul>
-                    ) : (
-                      <div className="text-xs text-gray-400 italic">You&rsquo;re all caught up.</div>
                     )}
 
                   </div>
@@ -1160,9 +1158,7 @@ export default function DashboardClient({ username, email, role, companyRole, us
             </div>
           </div>
 
-          {myOpenItems.length === 0 ? (
-            <div className="text-xs text-gray-400 italic">You&rsquo;re all caught up.</div>
-          ) : (
+          {myOpenItems.length > 0 && (
             <ul className="divide-y divide-gray-50 border hairline rounded-xl bg-white">
               {myOpenItems.map((item) => (
                 <li key={`${item.type}-${item.id}`}>
