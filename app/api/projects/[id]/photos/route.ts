@@ -15,7 +15,7 @@ export async function GET(
 
   let query = supabase
     .from("project_photos")
-    .select("*")
+    .select("*, location:project_locations(id,name,path)")
     .eq("project_id", projectId)
     .order("uploaded_at", { ascending: false });
 
@@ -40,7 +40,10 @@ export async function POST(
   const files = formData.getAll("file") as File[];
   if (!files.length) return NextResponse.json({ error: "No files provided" }, { status: 400 });
 
-  const created = [];
+  const takenAtRaw = formData.get("taken_at");
+  const takenAt = typeof takenAtRaw === "string" && takenAtRaw ? takenAtRaw : null;
+
+  const created: unknown[] = [];
 
   for (const file of files) {
     const timestamp = Date.now();
@@ -69,8 +72,9 @@ export async function POST(
         filename: file.name,
         uploaded_by_id: session.id,
         uploaded_by_name: session.username,
+        taken_at: takenAt,
       })
-      .select()
+      .select("*, location:project_locations(id,name,path)")
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -24,6 +24,18 @@ type ProjectPhoto = {
   uploaded_by_id: string | null;
   uploaded_by_name: string;
   uploaded_at: string;
+  trades: string[] | null;
+  location_id: string | null;
+  taken_at: string | null;
+  location?: { id: string; name: string; path: string } | null;
+};
+
+type ProjectLocation = {
+  id: string;
+  project_id: string;
+  parent_id: string | null;
+  name: string;
+  path: string;
 };
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
@@ -36,6 +48,79 @@ function formatDate(iso: string) {
     month: "short", day: "numeric", year: "numeric",
     hour: "numeric", minute: "2-digit",
   });
+}
+
+function formatMetadataDate(iso: string) {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+  return `${date} at ${time}`;
+}
+
+// Best-effort EXIF DateTimeOriginal extraction from a JPEG File.
+// Returns ISO string or null. Treats EXIF time as local time of the camera.
+async function extractExifDateTaken(file: File): Promise<string | null> {
+  if (!file.type.includes("jpeg") && !file.type.includes("jpg")) return null;
+  try {
+    const buf = await file.slice(0, 256 * 1024).arrayBuffer();
+    const view = new DataView(buf);
+    if (view.getUint16(0) !== 0xffd8) return null;
+    let offset = 2;
+    while (offset < view.byteLength) {
+      if (view.getUint8(offset) !== 0xff) return null;
+      const marker = view.getUint8(offset + 1);
+      const size = view.getUint16(offset + 2);
+      if (marker === 0xe1) {
+        const header = String.fromCharCode(
+          view.getUint8(offset + 4), view.getUint8(offset + 5),
+          view.getUint8(offset + 6), view.getUint8(offset + 7),
+        );
+        if (header !== "Exif") return null;
+        const tiff = offset + 10;
+        const little = view.getUint16(tiff) === 0x4949;
+        const get16 = (o: number) => view.getUint16(o, little);
+        const get32 = (o: number) => view.getUint32(o, little);
+        if (get16(tiff + 2) !== 0x002a) return null;
+        const ifd0 = tiff + get32(tiff + 4);
+        const numEntries = get16(ifd0);
+        let exifIfdOffset = 0;
+        for (let i = 0; i < numEntries; i++) {
+          const entry = ifd0 + 2 + i * 12;
+          if (get16(entry) === 0x8769) {
+            exifIfdOffset = tiff + get32(entry + 8);
+            break;
+          }
+        }
+        if (!exifIfdOffset) return null;
+        const exifEntries = get16(exifIfdOffset);
+        for (let i = 0; i < exifEntries; i++) {
+          const entry = exifIfdOffset + 2 + i * 12;
+          const tag = get16(entry);
+          if (tag === 0x9003 || tag === 0x9004 || tag === 0x0132) {
+            const count = get32(entry + 4);
+            const valueOffset = count > 4 ? tiff + get32(entry + 8) : entry + 8;
+            let str = "";
+            for (let j = 0; j < count - 1; j++) {
+              str += String.fromCharCode(view.getUint8(valueOffset + j));
+            }
+            const m = str.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+            if (m) {
+              const local = new Date(
+                Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+                Number(m[4]), Number(m[5]), Number(m[6]),
+              );
+              return local.toISOString();
+            }
+          }
+        }
+        return null;
+      }
+      offset += 2 + size;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 // ── Upload progress item ──────────────────────────────────────────────────────
@@ -60,6 +145,7 @@ export default function PhotosClient({
 }) {
   const [photos, setPhotos] = useState<ProjectPhoto[]>([]);
   const [albums, setAlbums] = useState<PhotoAlbum[]>([]);
+  const [locations, setLocations] = useState<ProjectLocation[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<ProjectPhoto | null>(null);
   const [activeTab, setActiveTab] = useState<"photos" | "albums">("photos");
   const [activeAlbumFilter, setActiveAlbumFilter] = useState<string | null>(null);
@@ -76,8 +162,18 @@ export default function PhotosClient({
   // Detail panel state
   const [editCaption, setEditCaption] = useState("");
   const [editAlbumId, setEditAlbumId] = useState<string>("");
+  const [editLocationId, setEditLocationId] = useState<string>("");
+  const [editTrades, setEditTrades] = useState<string[]>([]);
+  const [tradeInput, setTradeInput] = useState("");
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const [showNewLocationInput, setShowNewLocationInput] = useState(false);
+  const [newLocationName, setNewLocationName] = useState("");
+  const [creatingLocation, setCreatingLocation] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(true);
   const [savingDetail, setSavingDetail] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  const locationDropdownRef = useRef<HTMLDivElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -85,16 +181,19 @@ export default function PhotosClient({
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [photosRes, albumsRes] = await Promise.all([
+    const [photosRes, albumsRes, locationsRes] = await Promise.all([
       fetch(`/api/projects/${projectId}/photos`),
       fetch(`/api/projects/${projectId}/photo-albums`),
+      fetch(`/api/projects/${projectId}/locations`),
     ]);
-    const [photosData, albumsData] = await Promise.all([
+    const [photosData, albumsData, locationsData] = await Promise.all([
       photosRes.json(),
       albumsRes.json(),
+      locationsRes.json(),
     ]);
     setPhotos(Array.isArray(photosData) ? photosData : []);
     setAlbums(Array.isArray(albumsData) ? albumsData : []);
+    setLocations(Array.isArray(locationsData) ? locationsData : []);
     setLoading(false);
   }, [projectId]);
 
@@ -105,9 +204,28 @@ export default function PhotosClient({
     if (selectedPhoto) {
       setEditCaption(selectedPhoto.caption ?? "");
       setEditAlbumId(selectedPhoto.album_id ?? "");
+      setEditLocationId(selectedPhoto.location_id ?? "");
+      setEditTrades(selectedPhoto.trades ?? []);
+      setTradeInput("");
+      setShowLocationDropdown(false);
+      setShowNewLocationInput(false);
+      setNewLocationName("");
       setDeleteConfirm(false);
     }
   }, [selectedPhoto]);
+
+  // Close location dropdown when clicking outside
+  useEffect(() => {
+    if (!showLocationDropdown) return;
+    function handleClick(e: MouseEvent) {
+      if (locationDropdownRef.current && !locationDropdownRef.current.contains(e.target as Node)) {
+        setShowLocationDropdown(false);
+        setShowNewLocationInput(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showLocationDropdown]);
 
   // ── Upload ──────────────────────────────────────────────────────────────────
 
@@ -127,6 +245,8 @@ export default function PhotosClient({
         const item = items[i];
         const formData = new FormData();
         formData.append("file", f);
+        const takenAt = await extractExifDateTaken(f);
+        if (takenAt) formData.append("taken_at", takenAt);
 
         try {
           const res = await fetch(`/api/projects/${projectId}/photos`, {
@@ -215,6 +335,9 @@ export default function PhotosClient({
 
   async function saveDetail() {
     if (!selectedPhoto) return;
+    const trades = tradeInput.trim()
+      ? Array.from(new Set([...editTrades, tradeInput.trim()]))
+      : editTrades;
     setSavingDetail(true);
     const res = await fetch(`/api/projects/${projectId}/photos/${selectedPhoto.id}`, {
       method: "PATCH",
@@ -222,14 +345,48 @@ export default function PhotosClient({
       body: JSON.stringify({
         caption: editCaption || null,
         album_id: editAlbumId || null,
+        location_id: editLocationId || null,
+        trades,
       }),
     });
     if (res.ok) {
       const updated: ProjectPhoto = await res.json();
       setPhotos((prev) => prev.map((p) => p.id === updated.id ? updated : p));
       setSelectedPhoto(updated);
+      setTradeInput("");
     }
     setSavingDetail(false);
+  }
+
+  async function createLocation() {
+    const name = newLocationName.trim();
+    if (!name) return;
+    setCreatingLocation(true);
+    const res = await fetch(`/api/projects/${projectId}/locations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (res.ok) {
+      const location: ProjectLocation = await res.json();
+      setLocations((prev) => [...prev, location].sort((a, b) => a.path.localeCompare(b.path)));
+      setEditLocationId(location.id);
+      setNewLocationName("");
+      setShowNewLocationInput(false);
+      setShowLocationDropdown(false);
+    }
+    setCreatingLocation(false);
+  }
+
+  function addTrade(trade: string) {
+    const trimmed = trade.trim();
+    if (!trimmed) return;
+    setEditTrades((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+    setTradeInput("");
+  }
+
+  function removeTrade(trade: string) {
+    setEditTrades((prev) => prev.filter((t) => t !== trade));
   }
 
   async function deletePhoto() {
@@ -678,16 +835,169 @@ export default function PhotosClient({
                 </select>
               </div>
 
-              {/* Metadata */}
-              <div className="space-y-1 pt-1 border-t border-gray-100">
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-400">Uploaded by</span>
-                  <span className="text-gray-700 font-medium">{selectedPhoto.uploaded_by_name}</span>
+              {/* Trades */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Trades</label>
+                <div className="min-h-[38px] w-full border border-gray-200 rounded-lg px-2 py-1.5 flex flex-wrap gap-1 items-center focus-within:ring-2 focus-within:ring-blue-500">
+                  {editTrades.map((trade) => (
+                    <span
+                      key={trade}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 rounded-full text-xs text-blue-700"
+                    >
+                      {trade}
+                      <button
+                        type="button"
+                        onClick={() => removeTrade(trade)}
+                        className="hover:text-blue-900"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={tradeInput}
+                    onChange={(e) => setTradeInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === ",") {
+                        e.preventDefault();
+                        addTrade(tradeInput);
+                      } else if (e.key === "Backspace" && !tradeInput && editTrades.length) {
+                        removeTrade(editTrades[editTrades.length - 1]);
+                      }
+                    }}
+                    onBlur={() => tradeInput && addTrade(tradeInput)}
+                    placeholder={editTrades.length ? "" : "Select Trades"}
+                    className="flex-1 min-w-[80px] text-sm bg-transparent focus:outline-none px-1 py-0.5"
+                  />
                 </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-400">Date</span>
-                  <span className="text-gray-700">{formatDate(selectedPhoto.uploaded_at)}</span>
+              </div>
+
+              {/* Location */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Location</label>
+                <div className="relative" ref={locationDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowLocationDropdown((v) => !v)}
+                    className="w-full text-left text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white flex items-center justify-between"
+                  >
+                    <span className={editLocationId ? "text-gray-900" : "text-gray-400"}>
+                      {editLocationId
+                        ? locations.find((l) => l.id === editLocationId)?.path ?? "Select Location"
+                        : "Select Location"}
+                    </span>
+                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {showLocationDropdown && (
+                    <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                      {editLocationId && (
+                        <button
+                          type="button"
+                          onClick={() => { setEditLocationId(""); setShowLocationDropdown(false); }}
+                          className="w-full text-left px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 border-b border-gray-100"
+                        >
+                          Clear selection
+                        </button>
+                      )}
+                      {locations.length === 0 && (
+                        <div className="px-3 py-2 text-xs text-gray-400">No locations yet</div>
+                      )}
+                      {locations.map((loc) => (
+                        <button
+                          key={loc.id}
+                          type="button"
+                          onClick={() => { setEditLocationId(loc.id); setShowLocationDropdown(false); }}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 ${
+                            editLocationId === loc.id ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700"
+                          }`}
+                        >
+                          {loc.path}
+                        </button>
+                      ))}
+                      <div className="border-t border-gray-100">
+                        {showNewLocationInput ? (
+                          <div className="p-2 flex gap-2">
+                            <input
+                              type="text"
+                              value={newLocationName}
+                              onChange={(e) => setNewLocationName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); createLocation(); }
+                                if (e.key === "Escape") { setShowNewLocationInput(false); setNewLocationName(""); }
+                              }}
+                              autoFocus
+                              placeholder="Location name"
+                              className="flex-1 text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={createLocation}
+                              disabled={creatingLocation || !newLocationName.trim()}
+                              className="px-2 py-1 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowNewLocationInput(true)}
+                            className="w-full text-left px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                            </svg>
+                            Create a new location
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
+              </div>
+
+              {/* Photo Metadata */}
+              <div className="pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setMetadataOpen((v) => !v)}
+                  className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 hover:text-gray-900"
+                >
+                  <svg
+                    className={`w-3 h-3 transition-transform ${metadataOpen ? "rotate-0" : "-rotate-90"}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                  Photo Metadata
+                </button>
+                {metadataOpen && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <p className="text-xs text-gray-400">Taken On</p>
+                      <p className="text-sm text-gray-800">
+                        {formatMetadataDate(selectedPhoto.taken_at ?? selectedPhoto.uploaded_at)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400">Uploaded On</p>
+                      <p className="text-sm text-gray-800">{formatMetadataDate(selectedPhoto.uploaded_at)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400">Uploaded By</p>
+                      <p className="text-sm text-gray-800">{selectedPhoto.uploaded_by_name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400">File Name</p>
+                      <p className="text-sm text-gray-800 break-all">{selectedPhoto.filename}</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Actions */}
