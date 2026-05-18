@@ -138,13 +138,13 @@ export default function PrequalificationPage() {
             >
               Explore the Demo
             </Link>
-            <Link
-              href="/pricing"
+            <a
+              href="https://www.sitecommand.xyz/signup"
               className="px-6 py-3 text-sm font-medium rounded-lg border transition-colors hover:bg-white"
               style={{ color: "#111110", borderColor: "rgba(0,0,0,0.12)" }}
             >
-              See pricing
-            </Link>
+              Get started
+            </a>
           </div>
         </div>
       </section>
@@ -305,12 +305,12 @@ export default function PrequalificationPage() {
                 >
                   Explore the Demo
                 </Link>
-                <Link
-                  href="/pricing"
+                <a
+                  href="https://www.sitecommand.xyz/signup"
                   className="px-6 py-3 text-sm font-medium text-white border border-white/20 rounded-lg hover:bg-white/10 transition-colors"
                 >
-                  See pricing
-                </Link>
+                  Get started
+                </a>
               </div>
             </div>
           </div>

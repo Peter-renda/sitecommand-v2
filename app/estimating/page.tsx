@@ -124,7 +124,7 @@ export default function EstimatingPage() {
                 <span className="relative z-10">Explore the Demo</span>
                 <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-[0.08] transition-opacity" />
               </a>
-              <a href="/pricing" className="px-7 py-3.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-white transition-all">See pricing</a>
+              <a href="https://www.sitecommand.xyz/signup" className="px-7 py-3.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-white transition-all">Get started</a>
             </div>
           </div>
         </div>
@@ -234,7 +234,7 @@ export default function EstimatingPage() {
                   <span className="relative z-10">Explore the Demo</span>
                   <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-[0.08] transition-opacity" />
                 </a>
-                <a href="/pricing" className="px-7 py-3.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-all">See pricing</a>
+                <a href="https://www.sitecommand.xyz/signup" className="px-7 py-3.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-all">Get started</a>
               </div>
             </div>
           </div>
