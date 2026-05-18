@@ -358,9 +358,9 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
                   style={{ lineHeight: 1.6 }}
                 />
 
-                <p className="text-xs text-gray-500 mt-2">
-                  {audioMessage || "Tip: set ELEVENLABS_API_KEY on the server to enable audio transcription."}
-                </p>
+                {audioMessage && (
+                  <p className="text-xs text-gray-500 mt-2">{audioMessage}</p>
+                )}
               </>
             )}
           </section>
