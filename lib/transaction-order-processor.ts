@@ -150,6 +150,26 @@ function tryCheck(form: ReturnType<PDFDocument["getForm"]>, fieldName: string) {
   }
 }
 
+// Loads an image into a PDFDocument by sniffing magic bytes — the bundled
+// "signature.png" / "initials.png" assets are actually JFIF JPEGs, so calling
+// embedPng on them throws.
+async function embedImageAuto(doc: PDFDocument, bytes: Uint8Array) {
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    return doc.embedJpg(bytes);
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return doc.embedPng(bytes);
+  }
+  // Fall back to PNG and let pdf-lib throw a useful error.
+  return doc.embedPng(bytes);
+}
+
 export async function fillTransactionOrder(
   templateBytes: Uint8Array | Buffer,
   sourcePdf: Buffer,
@@ -172,7 +192,20 @@ export async function fillTransactionOrder(
   tryCheck(form, "Check Box1");
 
   // Flatten so the values bake in and won't disappear when merging.
-  form.flatten();
+  // Some templates have field widgets that pdf-lib can't flatten cleanly
+  // (no appearance dictionary, unusual encodings). If flatten() throws,
+  // fall back to baking the appearance streams only — copyPages() will
+  // still carry the widgets across.
+  try {
+    form.flatten();
+  } catch (err) {
+    console.warn("TO template flatten failed, falling back to updateFieldAppearances:", err);
+    try {
+      form.updateFieldAppearances();
+    } catch {
+      /* ignore — values may render via the viewer's default appearance */
+    }
+  }
 
   // ── Step 2: Overlay scope text + signature on TO page 1 ──────────────────
   const helvetica = await templateDoc.embedFont(StandardFonts.Helvetica);
@@ -190,18 +223,18 @@ export async function fillTransactionOrder(
 
   try {
     const sigBytes = await fs.readFile(SIGNATURE_PATH);
-    const sigImage = await templateDoc.embedPng(sigBytes);
+    const sigImage = await embedImageAuto(templateDoc, sigBytes);
     const sigW = 165;
     const sigH = (sigImage.height / sigImage.width) * sigW;
     toPage1.drawImage(sigImage, { x: 348, y: 78, width: sigW, height: Math.min(sigH, 28) });
-  } catch {
-    // No signature asset — skip silently.
+  } catch (err) {
+    console.warn("Could not embed signature image:", err);
   }
 
   // ── Step 3: Annotate the source PDF (initials + date + APPROVED stamp) ──
   const sourceDoc = await PDFDocument.load(sourcePdf);
   const initialsBytes = await fs.readFile(INITIALS_PATH).catch(() => null);
-  const initialsImage = initialsBytes ? await sourceDoc.embedPng(initialsBytes) : null;
+  const initialsImage = initialsBytes ? await embedImageAuto(sourceDoc, initialsBytes) : null;
   const sourceHelvetica = await sourceDoc.embedFont(StandardFonts.Helvetica);
   const sourceBoldOblique = await sourceDoc.embedFont(StandardFonts.HelveticaBoldOblique);
 
