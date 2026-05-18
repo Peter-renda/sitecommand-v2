@@ -110,6 +110,7 @@ export const TOOL_NAME_TO_SLUG: Record<string, string> = {
   "Commitments": "commitments",
   "Change Orders": "change-orders",
   "Change Events": "change-events",
+  "Transaction Orders": "transaction-orders",
   "RFIs": "rfis",
   "Submittals": "submittals",
   "Transmittals": "transmittals",

@@ -19,6 +19,9 @@ function isToolEnabled(slug: string, enabledFeatures: string[] | null | undefine
   if (slug === "admin") return true;
   // Assist is a core tool, available on every project regardless of feature allowlist.
   if (slug === "assist") return true;
+  // Accounting → Transaction Orders launched after existing company allowlists
+  // were created, so it shows everywhere by default until allowlists are updated.
+  if (slug === "transaction-orders") return true;
   if (!enabledFeatures) return true;
   if (enabledFeatures.includes(slug)) return true;
   // Backward compatibility: existing companies with feature allowlists often enabled
