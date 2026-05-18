@@ -22,10 +22,41 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
   const [error, setError] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTypeName, setNewTypeName] = useState("");
+  const [customTypes, setCustomTypes] = useState<Record<TemplateCategory, string[]>>({
+    company: [],
+    invitee: [],
+  });
+
+  // Load any custom user types the Super Admin has previously saved so they
+  // remain selectable in the dropdown after navigating away and back.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/company/permission-templates/types")
+      .then(async (r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.customTypes) return;
+        setCustomTypes({
+          company: Array.isArray(data.customTypes.company) ? data.customTypes.company : [],
+          invitee: Array.isArray(data.customTypes.invitee) ? data.customTypes.invitee : [],
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function handleCategoryChange(next: TemplateCategory) {
     setCategory(next);
     setUserType(next === "company" ? "super_admin" : "subcontractor");
+  }
+
+  function humanizeUserType(value: string): string {
+    return value
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
   }
 
   // Load template whenever (category, user type) changes.
@@ -56,7 +87,12 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
     };
   }, [category, userType]);
 
-  const userTypeOptions = category === "company" ? COMPANY_USER_TYPES : INVITEE_USER_TYPES;
+  const builtinUserTypeOptions = category === "company" ? COMPANY_USER_TYPES : INVITEE_USER_TYPES;
+  const builtinValues = new Set(builtinUserTypeOptions.map((t) => t.value));
+  const customUserTypeOptions = customTypes[category]
+    .filter((value) => !builtinValues.has(value))
+    .map((value) => ({ value, label: humanizeUserType(value) }));
+  const userTypeOptions = [...builtinUserTypeOptions, ...customUserTypeOptions];
   const createOptionValue = "__create_new_template__";
 
   function setLevel(tool: string, level: PermissionLevel) {
@@ -206,6 +242,13 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
                       setError("Please enter a user type name");
                       return;
                     }
+                    setCustomTypes((prev) => {
+                      const existing = prev[category];
+                      if (existing.includes(normalized) || builtinValues.has(normalized)) {
+                        return prev;
+                      }
+                      return { ...prev, [category]: [...existing, normalized].sort() };
+                    });
                     setUserType(normalized);
                     setLevels(Object.fromEntries(TEMPLATE_TOOLS.map((tool) => [tool, "none"])) as Record<string, PermissionLevel>);
                     setShowCreateModal(false);
