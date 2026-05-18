@@ -10,7 +10,8 @@
     "lint": "next lint",
     "dev:vite": "tsx server.ts",
     "seed:demo": "npx ts-node --project tsconfig.json scripts/seed-demo.ts",
-    "seed:arbors-rfis": "npx ts-node --project tsconfig.json scripts/seed-arbors-rfis.ts"
+    "seed:arbors-rfis": "npx ts-node --project tsconfig.json scripts/seed-arbors-rfis.ts",
+    "seed:arbors-submittals": "npx ts-node --project tsconfig.json scripts/seed-arbors-submittals.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
