@@ -584,7 +584,9 @@ async function insertChangeHistory(
   }));
 
   const { error } = await supabase.from("submittal_change_history").insert(inserts);
-  if (error) throw new Error(`History insert failed: ${error.message}`);
+  if (error) {
+    console.warn(`  ! Skipped change history (${error.message}) — submittal row still created.`);
+  }
 }
 
 async function main() {
