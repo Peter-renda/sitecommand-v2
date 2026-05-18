@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { TOOL_SECTIONS } from "@/lib/tool-sections";
 import {
   PERMISSION_LEVELS,
   PERMISSION_LEVEL_LABEL,
+  TEMPLATE_TOOLS,
   type PermissionLevel,
 } from "@/lib/permission-templates";
 
@@ -15,6 +15,8 @@ type Member = {
   email: string;
   company_role: string;
 };
+
+type TemplateOption = { value: string; label: string; builtin: boolean };
 
 function templateBadgeClass(role: string) {
   if (role === "super_admin") return "bg-amber-50 text-amber-700";
@@ -30,25 +32,25 @@ function templateLabel(role: string) {
 
 export default function MemberToolAccessClient({
   member,
-  initialToolLevels,
-  defaultLevel,
   isSuperAdmin,
   currentUserId,
 }: {
   member: Member;
-  initialToolLevels: Record<string, PermissionLevel>;
-  defaultLevel: PermissionLevel;
   isSuperAdmin: boolean;
   currentUserId: string;
 }) {
   const router = useRouter();
   const isSuperAdminMember = member.company_role === "super_admin";
 
-  const [toolLevels, setToolLevels] =
-    useState<Record<string, PermissionLevel>>(initialToolLevels);
+  const [availableTemplates, setAvailableTemplates] = useState<TemplateOption[]>([]);
+  const [currentTemplate, setCurrentTemplate] = useState<string>("");
+  const [templateLevels, setTemplateLevels] = useState<Record<string, PermissionLevel>>({});
+  const [levels, setLevels] = useState<Record<string, PermissionLevel>>({});
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   // Project access
   type ProjectRow = { id: string; name: string; status: string; hasAccess: boolean };
@@ -65,6 +67,109 @@ export default function MemberToolAccessClient({
       .catch(() => setProjectError("Failed to load projects"))
       .finally(() => setProjectsLoading(false));
   }, [member.id]);
+
+  // Initial load: templates, current template, levels
+  useEffect(() => {
+    if (isSuperAdminMember) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setLoadError("");
+    fetch(`/api/company/members/${member.id}/tools`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load");
+        return r.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setAvailableTemplates(data.availableTemplates || []);
+        setCurrentTemplate(data.currentTemplate || "");
+        setTemplateLevels(data.templateLevels || {});
+        setLevels(data.levels || {});
+      })
+      .catch((e) => {
+        if (!cancelled) setLoadError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [member.id, isSuperAdminMember]);
+
+  const canEdit =
+    (isSuperAdmin || member.company_role === "member") &&
+    !isSuperAdminMember &&
+    member.id !== currentUserId;
+
+  const isCustom = useMemo(() => {
+    if (!templateLevels || Object.keys(templateLevels).length === 0) return false;
+    for (const tool of TEMPLATE_TOOLS) {
+      if (levels[tool] !== templateLevels[tool]) return true;
+    }
+    return false;
+  }, [levels, templateLevels]);
+
+  const currentTemplateLabel = useMemo(() => {
+    const opt = availableTemplates.find((t) => t.value === currentTemplate);
+    return opt ? opt.label : currentTemplate;
+  }, [availableTemplates, currentTemplate]);
+
+  async function handleTemplateChange(nextTemplate: string) {
+    if (nextTemplate === currentTemplate) return;
+    setSaved(false);
+    setError("");
+    // Load the new template's baseline levels and replace the matrix with them.
+    try {
+      const res = await fetch(
+        `/api/company/permission-templates?category=company&type=${encodeURIComponent(nextTemplate)}`
+      );
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load template");
+      const data = await res.json();
+      const newLevels = (data.levels || {}) as Record<string, PermissionLevel>;
+      setCurrentTemplate(nextTemplate);
+      setTemplateLevels(newLevels);
+      setLevels({ ...newLevels });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to switch template");
+    }
+  }
+
+  function setLevel(tool: string, level: PermissionLevel) {
+    setSaved(false);
+    setLevels((prev) => ({ ...prev, [tool]: level }));
+  }
+
+  function resetToTemplate() {
+    setSaved(false);
+    setLevels({ ...templateLevels });
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError("");
+    setSaved(false);
+
+    const res = await fetch(`/api/company/members/${member.id}/tools`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template: currentTemplate, levels }),
+    });
+
+    setSaving(false);
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.error || "Failed to save");
+      return;
+    }
+
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  }
 
   async function applyProjectAccess(updated: ProjectRow[]) {
     setProjectSaving(true);
@@ -97,59 +202,6 @@ export default function MemberToolAccessClient({
       p.id === projectId ? { ...p, hasAccess: false } : p
     );
     await applyProjectAccess(updated);
-  }
-
-  const canEdit =
-    (isSuperAdmin || member.company_role === "member") &&
-    !isSuperAdminMember &&
-    member.id !== currentUserId;
-
-  function levelFor(slug: string): PermissionLevel {
-    return toolLevels[slug] ?? defaultLevel;
-  }
-
-  function setLevel(slug: string, level: PermissionLevel) {
-    setSaved(false);
-    setToolLevels((prev) => ({ ...prev, [slug]: level }));
-  }
-
-  function resetSection(slugs: string[]) {
-    setSaved(false);
-    setToolLevels((prev) => {
-      const next = { ...prev };
-      for (const slug of slugs) delete next[slug];
-      return next;
-    });
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    setError("");
-    setSaved(false);
-
-    const res = await fetch(`/api/company/members/${member.id}/tools`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolLevels }),
-    });
-
-    setSaving(false);
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error || "Failed to save");
-      return;
-    }
-
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
-  }
-
-  function levelBadgeClass(level: PermissionLevel): string {
-    if (level === "none") return "text-gray-400";
-    if (level === "read_only") return "text-gray-600";
-    if (level === "standard") return "text-gray-900";
-    return "text-gray-900 font-medium";
   }
 
   return (
@@ -249,7 +301,23 @@ export default function MemberToolAccessClient({
         {/* Tool Access */}
         <div className="bg-white rounded-xl border border-gray-100 px-6 py-5">
           <div className="flex items-center justify-between mb-1">
-            <h2 className="text-sm font-semibold text-gray-900">Tool Access</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-gray-900">Tool Access</h2>
+              {!isSuperAdminMember && !loading && (
+                <span
+                  className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                    isCustom ? "bg-orange-50 text-orange-700" : "bg-gray-100 text-gray-700"
+                  }`}
+                  title={
+                    isCustom
+                      ? `Customized from the ${currentTemplateLabel} template`
+                      : `On the ${currentTemplateLabel} template`
+                  }
+                >
+                  {isCustom ? "Custom" : currentTemplateLabel}
+                </span>
+              )}
+            </div>
             {isSuperAdminMember && (
               <span className="text-xs text-gray-400">Super Admins have full access</span>
             )}
@@ -257,7 +325,7 @@ export default function MemberToolAccessClient({
           {!isSuperAdminMember && (
             <p className="text-xs text-gray-400 mb-5">
               {canEdit
-                ? `Set a permission level per tool. Unset tools use the ${PERMISSION_LEVEL_LABEL[defaultLevel]} default for this role.`
+                ? "Choose a permission template, then adjust any tool individually. Saving will persist the customized levels."
                 : "You don't have permission to change this user's tool access."}
             </p>
           )}
@@ -267,73 +335,83 @@ export default function MemberToolAccessClient({
               Super Admins always have access to all tools.
             </p>
           ) : (
-            <div className="space-y-6">
-              {TOOL_SECTIONS.map((section) => {
-                const slugs = section.items.map((i) => i.slug);
-                const hasOverrides = slugs.some((s) => s in toolLevels);
+            <>
+              {/* Template selector */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Permission Template
+                </label>
+                <select
+                  value={currentTemplate}
+                  onChange={(e) => handleTemplateChange(e.target.value)}
+                  disabled={!canEdit || loading}
+                  className="w-full sm:w-1/2 px-3 py-2 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+                >
+                  {availableTemplates.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                  {currentTemplate && !availableTemplates.some((t) => t.value === currentTemplate) && (
+                    <option value={currentTemplate}>{currentTemplate}</option>
+                  )}
+                </select>
+                {canEdit && isCustom && (
+                  <button
+                    onClick={resetToTemplate}
+                    className="ml-3 text-xs font-medium text-gray-400 hover:text-gray-700 transition-colors"
+                  >
+                    Reset to template
+                  </button>
+                )}
+              </div>
 
-                return (
-                  <div key={section.label}>
-                    {/* Section header */}
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                        {section.label}
-                      </span>
-                      {canEdit && hasOverrides && (
-                        <button
-                          onClick={() => resetSection(slugs)}
-                          className="text-xs font-medium text-gray-400 hover:text-gray-700 transition-colors"
-                        >
-                          Reset to default
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Individual tool rows */}
-                    <div className="space-y-0.5">
-                      {section.items.map((tool) => {
-                        const level = levelFor(tool.slug);
-                        const isOverride = tool.slug in toolLevels;
+              {loading ? (
+                <p className="text-sm text-gray-400 py-6 text-center">Loading…</p>
+              ) : loadError ? (
+                <p className="text-sm text-red-600 py-6 text-center">{loadError}</p>
+              ) : (
+                <div className="border border-gray-100 rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-xs font-medium text-gray-500">
+                        <th className="text-left px-3 py-2 w-1/3">Tool</th>
+                        {PERMISSION_LEVELS.map((lvl) => (
+                          <th key={lvl} className="text-center px-3 py-2">
+                            {PERMISSION_LEVEL_LABEL[lvl]}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {TEMPLATE_TOOLS.map((tool, i) => {
+                        const current = levels[tool] ?? "none";
                         return (
-                          <div
-                            key={tool.slug}
-                            className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50"
+                          <tr
+                            key={tool}
+                            className={i % 2 === 0 ? "bg-white" : "bg-gray-50/40"}
                           >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className={`text-sm ${level === "none" ? "text-gray-400" : "text-gray-900"}`}>
-                                {tool.name}
-                              </span>
-                              {!isOverride && level !== "none" && (
-                                <span className="text-[10px] uppercase tracking-wide text-gray-300">
-                                  default
-                                </span>
-                              )}
-                            </div>
-                            {canEdit ? (
-                              <select
-                                value={level}
-                                onChange={(e) => setLevel(tool.slug, e.target.value as PermissionLevel)}
-                                className="text-sm border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200"
-                              >
-                                {PERMISSION_LEVELS.map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {PERMISSION_LEVEL_LABEL[opt]}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <span className={`text-sm ${levelBadgeClass(level)}`}>
-                                {PERMISSION_LEVEL_LABEL[level]}
-                              </span>
-                            )}
-                          </div>
+                            <td className="px-3 py-2 text-gray-900">{tool}</td>
+                            {PERMISSION_LEVELS.map((lvl) => (
+                              <td key={lvl} className="text-center px-3 py-2">
+                                <input
+                                  type="radio"
+                                  name={`tool-${tool}`}
+                                  checked={current === lvl}
+                                  disabled={!canEdit}
+                                  onChange={() => setLevel(tool, lvl)}
+                                  className="cursor-pointer accent-orange-500 disabled:cursor-not-allowed"
+                                />
+                              </td>
+                            ))}
+                          </tr>
                         );
                       })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -344,7 +422,7 @@ export default function MemberToolAccessClient({
             {saved && <p className="text-xs text-green-600">Saved</p>}
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || loading}
               className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save changes"}
