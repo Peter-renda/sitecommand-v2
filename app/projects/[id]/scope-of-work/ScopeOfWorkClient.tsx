@@ -3,7 +3,100 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ProjectNav from "@/components/ProjectNav";
 import AppHeader from "@/app/components/AppHeader";
-import { FileText, Plus, Pencil, Trash2, Sparkles, Download, ChevronDown, ChevronUp } from "lucide-react";
+import { FileText, Plus, Pencil, Trash2, Sparkles, Download, ChevronDown, ChevronUp, Paperclip, ExternalLink, Loader2 } from "lucide-react";
+
+// ─── PDF/DOCX text extraction (client-side) ──────────────────────────────────
+
+let pdfJsLoaded = false;
+async function ensurePdfJs() {
+  if (pdfJsLoaded) return;
+  if (typeof (Promise as { withResolvers?: unknown }).withResolvers !== "function") {
+    (Promise as { withResolvers?: unknown }).withResolvers = function <T>() {
+      let resolve!: (value: T | PromiseLike<T>) => void;
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+      return { promise, resolve, reject };
+    };
+  }
+  if (typeof URL.parse !== "function") {
+    (URL as unknown as { parse: (url: string, base?: string) => URL | null }).parse = (url, base) => {
+      try { return new URL(url, base); } catch { return null; }
+    };
+  }
+  const { GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  pdfJsLoaded = true;
+}
+
+async function extractPdfText(file: File): Promise<string> {
+  await ensurePdfJs();
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data: bytes, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise;
+  const pages: string[] = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const text = content.items
+      .map((item: unknown) => ((item as { str?: string }).str ?? ""))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text) pages.push(text);
+  }
+  await pdf.destroy();
+  return pages.join("\n\n");
+}
+
+async function extractDocxText(file: File): Promise<string> {
+  const JSZipMod = await import("jszip");
+  const JSZip = JSZipMod.default;
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const docXml = zip.file("word/document.xml");
+  if (!docXml) throw new Error("Not a valid .docx file");
+  const xml = await docXml.async("string");
+  // Paragraphs are <w:p>...</w:p> with text in <w:t>...</w:t>; <w:br/> = line break.
+  const paragraphs: string[] = [];
+  const pRegex = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+  let match: RegExpExecArray | null;
+  while ((match = pRegex.exec(xml)) !== null) {
+    const inner = match[1]
+      .replace(/<w:br\s*\/?\s*>/g, "\n")
+      .replace(/<w:tab\s*\/?\s*>/g, "\t");
+    const tRegex = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
+    const parts: string[] = [];
+    let m2: RegExpExecArray | null;
+    while ((m2 = tRegex.exec(inner)) !== null) {
+      parts.push(
+        m2[1]
+          .replace(/&amp;/g, "&")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&apos;/g, "'")
+      );
+    }
+    paragraphs.push(parts.join(""));
+  }
+  return paragraphs.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+async function extractAttachmentText(file: File): Promise<string> {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".pdf") || file.type === "application/pdf") {
+    return extractPdfText(file);
+  }
+  if (
+    lower.endsWith(".docx") ||
+    file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
+    return extractDocxText(file);
+  }
+  if (lower.endsWith(".doc")) {
+    throw new Error("Legacy .doc files are not supported — please save as .docx or PDF.");
+  }
+  throw new Error("Only PDF and Word (.docx) files are supported.");
+}
 
 // ─── CSI MasterFormat Divisions ───────────────────────────────────────────────
 const CSI_DIVISIONS = [
@@ -78,6 +171,17 @@ interface EditFormState {
   error: string;
 }
 
+interface ScopeAttachment {
+  id: string;
+  divisionCode: string;
+  filename: string;
+  fileType: string | null;
+  fileSize: number | null;
+  extractedText: string;
+  uploadedAt: string;
+  url: string | null;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function ScopeOfWorkClient({ projectId, username }: { projectId: string; username?: string }) {
   const [items, setItems] = useState<ScopeItem[]>([]);
@@ -88,6 +192,12 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [projectName, setProjectName] = useState("Project");
+  const [attachments, setAttachments] = useState<ScopeAttachment[]>([]);
+  const [uploadingDivision, setUploadingDivision] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<{ division: string; message: string } | null>(null);
+  const [expandedAttachment, setExpandedAttachment] = useState<string | null>(null);
+  const [deletingAttachment, setDeletingAttachment] = useState<string | null>(null);
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
 
   // Fetch scope items
@@ -124,6 +234,99 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
+
+  // Fetch attachments
+  const fetchAttachments = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/scope/attachments`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const list: ScopeAttachment[] = data?.attachments || [];
+      setAttachments(list);
+      // Auto-activate any division that has attachments so they're visible.
+      if (list.length > 0) {
+        setActiveDivisions((prev) => {
+          const next = new Set(prev);
+          list.forEach((a) => next.add(a.divisionCode));
+          return next;
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    fetchAttachments();
+  }, [fetchAttachments]);
+
+  async function handleAttachmentUpload(divisionCode: string, file: File) {
+    setUploadError(null);
+    setUploadingDivision(divisionCode);
+    try {
+      const extractedText = await extractAttachmentText(file);
+
+      const urlRes = await fetch(
+        `/api/projects/${projectId}/scope/attachments/upload-url?filename=${encodeURIComponent(file.name)}&divisionCode=${encodeURIComponent(divisionCode)}`
+      );
+      if (!urlRes.ok) {
+        const err = await urlRes.json().catch(() => ({}));
+        throw new Error(err.error || "Could not create upload URL");
+      }
+      const { signedUrl, storagePath } = await urlRes.json();
+
+      const putRes = await fetch(signedUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+      });
+      if (!putRes.ok) throw new Error("Upload failed");
+
+      const registerRes = await fetch(`/api/projects/${projectId}/scope/attachments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          divisionCode,
+          filename: file.name,
+          storagePath,
+          fileType: file.type || null,
+          fileSize: file.size,
+          extractedText,
+        }),
+      });
+      if (!registerRes.ok) {
+        const err = await registerRes.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to save attachment");
+      }
+      const { attachment } = await registerRes.json();
+      setAttachments((prev) => [attachment, ...prev]);
+      setExpandedAttachment(attachment.id);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to attach file";
+      setUploadError({ division: divisionCode, message });
+    } finally {
+      setUploadingDivision(null);
+    }
+  }
+
+  async function handleAttachmentDelete(attachmentId: string) {
+    setDeletingAttachment(attachmentId);
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/scope/attachments/${attachmentId}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) return;
+      setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
+      if (expandedAttachment === attachmentId) setExpandedAttachment(null);
+    } finally {
+      setDeletingAttachment(null);
+    }
+  }
+
+  function attachmentsForDivision(code: string) {
+    return attachments.filter((a) => a.divisionCode === code);
+  }
 
   // Toggle division active state
   function toggleDivision(code: string) {
@@ -476,6 +679,10 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
           {CSI_DIVISIONS.filter((d) => activeDivisions.has(d.code)).map((division) => {
             const divItems = itemsForDivision(division.code);
             const isAddingHere = addForm?.divisionCode === division.code;
+            const divAttachments = attachmentsForDivision(division.code);
+            const isUploadingHere = uploadingDivision === division.code;
+            const divUploadError =
+              uploadError?.division === division.code ? uploadError.message : null;
 
             return (
               <section
@@ -490,34 +697,143 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
                     </span>
                     {division.name}
                   </h2>
-                  <button
-                    onClick={() => {
-                      if (isAddingHere) {
-                        setAddForm(null);
-                      } else {
-                        openAddForm(division.code);
-                      }
-                    }}
-                    className="flex items-center gap-1.5 text-xs text-orange-500 hover:text-orange-600 font-medium transition-colors"
-                  >
-                    {isAddingHere ? (
-                      <>
-                        <ChevronUp className="w-3.5 h-3.5" />
-                        Cancel
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="w-3.5 h-3.5" />
-                        Add Item
-                      </>
-                    )}
-                  </button>
+                  <div className="flex items-center gap-4">
+                    <input
+                      ref={(el) => { fileInputRefs.current[division.code] = el; }}
+                      type="file"
+                      accept=".pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleAttachmentUpload(division.code, file);
+                        e.target.value = "";
+                      }}
+                    />
+                    <button
+                      onClick={() => fileInputRefs.current[division.code]?.click()}
+                      disabled={isUploadingHere}
+                      className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 font-medium transition-colors disabled:opacity-50"
+                    >
+                      {isUploadingHere ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Paperclip className="w-3.5 h-3.5" />
+                          Attach File
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (isAddingHere) {
+                          setAddForm(null);
+                        } else {
+                          openAddForm(division.code);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 text-xs text-orange-500 hover:text-orange-600 font-medium transition-colors"
+                    >
+                      {isAddingHere ? (
+                        <>
+                          <ChevronUp className="w-3.5 h-3.5" />
+                          Cancel
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3.5 h-3.5" />
+                          Add Item
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
+                {divUploadError && (
+                  <p className="text-xs text-red-500 mb-3">{divUploadError}</p>
+                )}
+
+                {/* Attachments */}
+                {divAttachments.length > 0 && (
+                  <div className="space-y-2 mb-3">
+                    {divAttachments.map((att) => {
+                      const isExpanded = expandedAttachment === att.id;
+                      const isDeleting = deletingAttachment === att.id;
+                      return (
+                        <div
+                          key={att.id}
+                          className="bg-white border border-gray-200 rounded-lg"
+                        >
+                          <div className="flex items-center gap-2 px-4 py-2.5">
+                            <FileText className="w-4 h-4 text-orange-500 shrink-0" />
+                            {att.url ? (
+                              <a
+                                href={att.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 text-sm text-gray-800 hover:text-orange-600 truncate flex items-center gap-1.5"
+                              >
+                                {att.filename}
+                                <ExternalLink className="w-3 h-3 text-gray-400" />
+                              </a>
+                            ) : (
+                              <span className="flex-1 text-sm text-gray-800 truncate">
+                                {att.filename}
+                              </span>
+                            )}
+                            <button
+                              onClick={() =>
+                                setExpandedAttachment(isExpanded ? null : att.id)
+                              }
+                              disabled={!att.extractedText}
+                              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 transition-colors disabled:opacity-40"
+                            >
+                              {isExpanded ? (
+                                <>
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                  Collapse
+                                </>
+                              ) : (
+                                <>
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                  Expand
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleAttachmentDelete(att.id)}
+                              disabled={isDeleting}
+                              className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 transition-colors disabled:opacity-40"
+                              title="Remove attachment"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          {isExpanded && (
+                            <div className="border-t border-gray-100 px-4 py-3 max-h-80 overflow-y-auto bg-gray-50 rounded-b-lg">
+                              {att.extractedText ? (
+                                <pre className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap font-sans">
+                                  {att.extractedText}
+                                </pre>
+                              ) : (
+                                <p className="text-xs italic text-gray-400">
+                                  No text could be extracted from this file.
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {/* Existing items */}
-                {divItems.length === 0 && !isAddingHere && (
+                {divItems.length === 0 && !isAddingHere && divAttachments.length === 0 && (
                   <p className="text-xs text-gray-400 italic bg-white border border-dashed border-gray-200 rounded-lg px-4 py-3">
-                    No scope items yet. Click "Add Item" to get started.
+                    No scope items yet. Click &quot;Add Item&quot; or &quot;Attach File&quot; to get started.
                   </p>
                 )}
 
