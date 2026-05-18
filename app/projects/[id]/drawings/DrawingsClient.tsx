@@ -470,8 +470,9 @@ function DrawingPdfViewerModal({
         const page = await pdf.getPage(safeViewerPage);
         if (cancelled) return;
         const containerW = Math.max((containerRef.current?.clientWidth ?? 900) - 32, 200);
+        const containerH = Math.max((containerRef.current?.clientHeight ?? 700) - 32, 200);
         const baseVp = page.getViewport({ scale: 1 });
-        const scale = containerW / baseVp.width;
+        const scale = Math.min(containerW / baseVp.width, containerH / baseVp.height);
         const vp = page.getViewport({ scale });
         // Render to an offscreen canvas — never touched by React
         const offscreen = document.createElement("canvas");
@@ -926,7 +927,7 @@ function DrawingPdfViewerModal({
       </div>
 
       {/* PDF canvas + annotation overlay in a scrollable container */}
-      <div ref={containerRef} className="relative flex-1 overflow-auto bg-gray-950">
+      <div ref={containerRef} className="relative flex-1 overflow-auto bg-gray-950 min-h-0">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-950 z-10">
             <svg className="w-8 h-8 text-gray-500 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -935,10 +936,10 @@ function DrawingPdfViewerModal({
             </svg>
           </div>
         )}
-        <div className="flex justify-center p-4">
-          <div ref={previewSurfaceRef} className="relative inline-block">
+        <div className="flex justify-center items-center p-4 min-h-full">
+          <div ref={previewSurfaceRef} className="relative inline-block max-h-full">
             {pdfDataUrl && (
-              <img src={pdfDataUrl} alt={name} className="block max-w-full shadow-xl" draggable={false} />
+              <img src={pdfDataUrl} alt={name} className="block max-w-full max-h-full shadow-xl" draggable={false} />
             )}
             {!pdfDataUrl && !loading && (
               <div className="w-[min(92vw,1100px)] h-[80vh] bg-white rounded overflow-hidden shadow-xl border border-gray-300">
