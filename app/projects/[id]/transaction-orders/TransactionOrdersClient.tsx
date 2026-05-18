@@ -17,6 +17,54 @@ type TransactionOrder = {
   createdAt: string;
 };
 
+type AssignmentRecipient = {
+  contactId: string | null;
+  userId: string | null;
+  email: string;
+  name: string;
+  role: string;
+};
+
+type Assignment = {
+  id: string;
+  invoiceFilename: string;
+  url: string | null;
+  notes: string | null;
+  recipients: AssignmentRecipient[];
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+  assignedBy: string;
+};
+
+type ProjectLite = {
+  id: string;
+  name: string;
+};
+
+type DirectoryContact = {
+  id: string;
+  type: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  company: string | null;
+  group_name: string | null;
+};
+
+type ProjectManagerLite = {
+  contactId: string;
+  name: string;
+  email: string;
+};
+
+function contactDisplayName(c: DirectoryContact): string {
+  if (c.type === "company") return c.company || c.email || "";
+  if (c.type === "group" || c.type === "distribution_group") return c.group_name || "";
+  const full = [c.first_name, c.last_name].filter(Boolean).join(" ").trim();
+  return full || c.email || "";
+}
+
 type TemplateInfo = {
   id?: string;
   isDefault: boolean;
@@ -63,9 +111,13 @@ function formatDate(s: string | null): string {
 export default function TransactionOrdersClient({
   projectId,
   username,
+  userId,
+  canAssign,
 }: {
   projectId: string;
   username?: string;
+  userId?: string;
+  canAssign?: boolean;
 }) {
   const [orders, setOrders] = useState<TransactionOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,11 +133,34 @@ export default function TransactionOrdersClient({
   const [templateBusy, setTemplateBusy] = useState(false);
   const templateInputRef = useRef<HTMLInputElement>(null);
 
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(true);
+
+  const [showAssignModal, setShowAssignModal] = useState(false);
+
   useEffect(() => {
     void loadOrders();
     void loadTemplate();
+    void loadAssignments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  async function loadAssignments() {
+    setAssignmentsLoading(true);
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/transaction-orders/assignments`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAssignments(Array.isArray(data.assignments) ? data.assignments : []);
+      } else {
+        setAssignments([]);
+      }
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }
 
   async function loadOrders() {
     setLoading(true);
@@ -230,6 +305,35 @@ export default function TransactionOrdersClient({
     }
   }
 
+  async function handleCompleteAssignment(id: string) {
+    const res = await fetch(
+      `/api/projects/${projectId}/transaction-orders/assignments/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "completed" }),
+      },
+    );
+    if (res.ok) {
+      void loadAssignments();
+    } else {
+      window.alert("Failed to mark assignment complete");
+    }
+  }
+
+  async function handleDeleteAssignment(id: string) {
+    if (!window.confirm("Delete this assignment? The invoice file will be removed.")) return;
+    const res = await fetch(
+      `/api/projects/${projectId}/transaction-orders/assignments/${id}`,
+      { method: "DELETE" },
+    );
+    if (res.ok) {
+      setAssignments((prev) => prev.filter((a) => a.id !== id));
+    } else {
+      window.alert("Failed to delete assignment");
+    }
+  }
+
   async function handleDelete(id: string) {
     if (!window.confirm("Delete this Transaction Order? This cannot be undone.")) return;
     const res = await fetch(`/api/projects/${projectId}/transaction-orders/${id}`, {
@@ -335,6 +439,27 @@ export default function TransactionOrdersClient({
           </div>
 
           <div className="flex items-center gap-2">
+            {canAssign && (
+              <button
+                onClick={() => setShowAssignModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                Assign Invoice
+              </button>
+            )}
             <button
               onClick={openNewModal}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors"
@@ -426,6 +551,97 @@ export default function TransactionOrdersClient({
           </div>
         </section>
 
+        {/* Assigned Invoices */}
+        <section className="mb-8 rounded-xl border border-gray-100 bg-white overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Assigned Invoices</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Invoices routed to this project for someone here to turn into a Transaction Order.
+              </p>
+            </div>
+          </div>
+          {assignmentsLoading ? (
+            <div className="px-5 py-8 text-sm text-gray-400">Loading…</div>
+          ) : assignments.length === 0 ? (
+            <div className="px-5 py-8 text-sm text-gray-400">
+              No assigned invoices.
+              {canAssign && (
+                <>
+                  {" "}Use <span className="font-medium text-gray-700">Assign Invoice</span> to route one to another project.
+                </>
+              )}
+            </div>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {assignments.map((a) => {
+                const isMine = a.recipients.some(
+                  (r) => r.userId === userId,
+                );
+                return (
+                  <li key={a.id} className="px-5 py-4 flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`pill ${a.status === "open" ? "pill-warn" : "pill-success"} shrink-0`}
+                        >
+                          {a.status === "open" ? "Open" : "Completed"}
+                        </span>
+                        {a.url ? (
+                          <a
+                            href={a.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm font-medium text-gray-900 hover:underline truncate"
+                          >
+                            {a.invoiceFilename}
+                          </a>
+                        ) : (
+                          <span className="text-sm font-medium text-gray-900 truncate">
+                            {a.invoiceFilename}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Assigned by {a.assignedBy || "—"} on {new Date(a.createdAt).toLocaleDateString()}
+                        {" · "}
+                        {a.recipients.length} recipient{a.recipients.length !== 1 ? "s" : ""}
+                        {isMine && <span className="ml-2 text-gray-700 font-medium">· assigned to you</span>}
+                      </p>
+                      {a.notes && (
+                        <p className="text-xs text-gray-600 mt-2 whitespace-pre-wrap">
+                          {a.notes}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-400 mt-1">
+                        To: {a.recipients.map((r) => r.name || r.email).join(", ")}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {a.status === "open" && (
+                        <button
+                          onClick={() => void handleCompleteAssignment(a.id)}
+                          className="px-3 py-1.5 text-xs font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700"
+                        >
+                          Mark Complete
+                        </button>
+                      )}
+                      {canAssign && (
+                        <button
+                          onClick={() => void handleDeleteAssignment(a.id)}
+                          className="text-xs text-red-500 hover:text-red-700"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
         {/* Completed TO table */}
         <section className="rounded-xl border border-gray-100 bg-white overflow-hidden">
           <div className="overflow-x-auto">
@@ -495,6 +711,18 @@ export default function TransactionOrdersClient({
           </div>
         </section>
       </main>
+
+      {/* Assign Invoice modal */}
+      {showAssignModal && canAssign && (
+        <AssignInvoiceModal
+          currentProjectId={projectId}
+          onClose={() => setShowAssignModal(false)}
+          onAssigned={() => {
+            setShowAssignModal(false);
+            void loadAssignments();
+          }}
+        />
+      )}
 
       {/* New Transaction Order modal */}
       {showNewModal && (
@@ -633,6 +861,346 @@ export default function TransactionOrdersClient({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function AssignInvoiceModal({
+  currentProjectId,
+  onClose,
+  onAssigned,
+}: {
+  currentProjectId: string;
+  onClose: () => void;
+  onAssigned: () => void;
+}) {
+  const [projects, setProjects] = useState<ProjectLite[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [targetProjectId, setTargetProjectId] = useState<string>("");
+
+  const [pmContacts, setPmContacts] = useState<ProjectManagerLite[]>([]);
+  const [pmError, setPmError] = useState<string | null>(null);
+  const [pmLoading, setPmLoading] = useState(false);
+
+  const [directory, setDirectory] = useState<DirectoryContact[]>([]);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+
+  const [extraContactIds, setExtraContactIds] = useState<string[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setProjectsLoading(true);
+      try {
+        const res = await fetch("/api/projects");
+        const data = await res.json();
+        if (cancelled) return;
+        const list: ProjectLite[] = Array.isArray(data)
+          ? data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))
+          : [];
+        setProjects(list);
+      } finally {
+        if (!cancelled) setProjectsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!targetProjectId) {
+      setPmContacts([]);
+      setDirectory([]);
+      setExtraContactIds([]);
+      setPmError(null);
+      return;
+    }
+    let cancelled = false;
+    setPmLoading(true);
+    setPmError(null);
+    setDirectoryLoading(true);
+    setExtraContactIds([]);
+    (async () => {
+      try {
+        const [pmRes, dirRes] = await Promise.all([
+          fetch(`/api/projects/${targetProjectId}/project-manager`),
+          fetch(`/api/projects/${targetProjectId}/directory`),
+        ]);
+        if (cancelled) return;
+        if (pmRes.ok) {
+          const data = await pmRes.json();
+          setPmContacts(Array.isArray(data.projectManagers) ? data.projectManagers : []);
+        } else {
+          const data = await pmRes.json().catch(() => ({}));
+          setPmError(data?.error ?? "Could not load Project Manager");
+          setPmContacts([]);
+        }
+        if (dirRes.ok) {
+          const data: DirectoryContact[] = await dirRes.json();
+          setDirectory(Array.isArray(data) ? data : []);
+        } else {
+          setDirectory([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setPmLoading(false);
+          setDirectoryLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [targetProjectId]);
+
+  function toggleExtra(id: string) {
+    setExtraContactIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  const pmContactIds = new Set(pmContacts.map((p) => p.contactId));
+  const pickableContacts = directory.filter(
+    (c) =>
+      !pmContactIds.has(c.id) &&
+      (c.email || "").trim() !== "" &&
+      c.type !== "distribution_group",
+  );
+
+  async function handleSubmit() {
+    setError(null);
+    if (!targetProjectId) {
+      setError("Pick a project");
+      return;
+    }
+    if (!file) {
+      setError("Upload the invoice PDF");
+      return;
+    }
+    if (file.type && file.type !== "application/pdf") {
+      setError("Invoice must be a PDF");
+      return;
+    }
+
+    const recipients: { contactId: string; name: string; email: string; role: string }[] = [];
+    for (const pm of pmContacts) {
+      if (!pm.email) continue;
+      recipients.push({ contactId: pm.contactId, name: pm.name, email: pm.email, role: "Project Manager" });
+    }
+    for (const id of extraContactIds) {
+      const c = directory.find((d) => d.id === id);
+      if (!c || !c.email) continue;
+      recipients.push({
+        contactId: c.id,
+        name: contactDisplayName(c),
+        email: c.email,
+        role: "",
+      });
+    }
+    if (recipients.length === 0) {
+      setError("No recipients with an email on file — assign a Project Manager or add a recipient with an email");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const urlRes = await fetch(
+        `/api/projects/${targetProjectId}/transaction-orders/assignments/upload-url?filename=${encodeURIComponent(file.name)}`,
+      );
+      if (!urlRes.ok) {
+        const data = await urlRes.json().catch(() => ({}));
+        throw new Error(data?.error ?? "Could not request upload URL");
+      }
+      const { signedUrl, storagePath } = await urlRes.json();
+
+      const putRes = await fetch(signedUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": "application/pdf" },
+      });
+      if (!putRes.ok) {
+        const text = await putRes.text().catch(() => "");
+        throw new Error(`Upload failed (${putRes.status})${text ? `: ${text.slice(0, 200)}` : ""}`);
+      }
+
+      const createRes = await fetch(
+        `/api/projects/${targetProjectId}/transaction-orders/assignments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            storagePath,
+            notes,
+            recipients,
+          }),
+        },
+      );
+      if (!createRes.ok) {
+        const data = await createRes.json().catch(() => ({}));
+        throw new Error(data?.error ?? "Could not create assignment");
+      }
+
+      onAssigned();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to assign invoice");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[92vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Assign Invoice</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Route an invoice PDF to another project so its Project Manager can turn it into a Transaction Order.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="text-gray-400 hover:text-gray-700 disabled:opacity-50"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto p-6 flex-1 space-y-5">
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Project</span>
+            <select
+              value={targetProjectId}
+              onChange={(e) => setTargetProjectId(e.target.value)}
+              disabled={projectsLoading || submitting}
+              className="mt-1 block w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10 bg-white"
+            >
+              <option value="">{projectsLoading ? "Loading projects…" : "Select a project"}</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.id === currentProjectId ? " (this project)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {targetProjectId && (
+            <div>
+              <span className="text-sm font-medium text-gray-700">Project Manager</span>
+              {pmLoading ? (
+                <p className="mt-1 text-sm text-gray-400">Loading…</p>
+              ) : pmError ? (
+                <p className="mt-1 text-sm text-red-600">{pmError}</p>
+              ) : pmContacts.length === 0 ? (
+                <p className="mt-1 text-sm text-gray-400">
+                  No Project Manager assigned on this project. Add one from the project&apos;s Team panel, or pick recipients below.
+                </p>
+              ) : (
+                <ul className="mt-1 space-y-1">
+                  {pmContacts.map((pm) => (
+                    <li key={pm.contactId} className="text-sm text-gray-900">
+                      <span className="font-medium">{pm.name}</span>
+                      {pm.email ? <span className="text-gray-500"> · {pm.email}</span> : <span className="text-red-500"> · no email on file</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {targetProjectId && (
+            <div>
+              <span className="text-sm font-medium text-gray-700">Additional recipients</span>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Pick from the project directory. Only contacts with an email show up.
+              </p>
+              <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
+                {directoryLoading ? (
+                  <div className="px-3 py-2 text-sm text-gray-400">Loading directory…</div>
+                ) : pickableContacts.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-400">
+                    No additional directory contacts with an email.
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-gray-100">
+                    {pickableContacts.map((c) => (
+                      <li key={c.id} className="px-3 py-2 flex items-center gap-2">
+                        <input
+                          id={`pick-${c.id}`}
+                          type="checkbox"
+                          checked={extraContactIds.includes(c.id)}
+                          onChange={() => toggleExtra(c.id)}
+                          className="h-4 w-4"
+                        />
+                        <label htmlFor={`pick-${c.id}`} className="text-sm text-gray-900 cursor-pointer flex-1 min-w-0">
+                          <span className="truncate">{contactDisplayName(c)}</span>
+                          <span className="text-gray-500"> · {c.email}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Invoice PDF</span>
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="block mt-2 w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-gray-900 file:text-white hover:file:bg-gray-700"
+            />
+            {file && (
+              <p className="text-xs text-gray-500 mt-2">
+                Selected: <span className="text-gray-700">{file.name}</span>{" "}
+                ({Math.round(file.size / 1024)} KB)
+              </p>
+            )}
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Notes (optional)</span>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="mt-1 block w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10"
+              placeholder="What should the PM know about this invoice?"
+            />
+          </label>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100 bg-gray-50">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !targetProjectId || !file}
+            className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 disabled:opacity-50"
+          >
+            {submitting ? "Assigning…" : "Assign Invoice"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

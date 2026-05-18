@@ -28,7 +28,7 @@ type MyTask = {
 type MyOpenItem = {
   id: string;
   title: string;
-  type: "task" | "rfi" | "submittal" | "change_event" | "change_order" | "budget" | "commitment" | "prime_contract";
+  type: "task" | "rfi" | "submittal" | "change_event" | "change_order" | "budget" | "commitment" | "prime_contract" | "transaction_order_assignment";
   status: string;
   due_date: string | null;
   project_id: string;
@@ -206,6 +206,8 @@ function openItemHref(item: MyOpenItem): string {
       return `${projectBase}/commitments/${item.id}`;
     case "prime_contract":
       return `${projectBase}/prime-contracts/${item.id}`;
+    case "transaction_order_assignment":
+      return `${projectBase}/transaction-orders`;
     default:
       return projectBase;
   }
@@ -1167,7 +1169,9 @@ export default function DashboardClient({ username, email, role, companyRole, us
                     className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
                   >
                     <span className={`pill ${item.due_date && new Date(item.due_date) < new Date() ? "pill-danger" : "pill-warn"} shrink-0`}>
-                      {item.type.replace("_", " ")}
+                      {item.type === "transaction_order_assignment"
+                        ? "assigned invoice"
+                        : item.type.replace(/_/g, " ")}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm text-gray-900 truncate">{item.title}</p>

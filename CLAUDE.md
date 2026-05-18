@@ -1330,3 +1330,46 @@ The RFIs tool restricts every mutation that changes RFI state to users with **Ad
 - `DELETE /api/projects/[id]/rfis/[rfiId]/responses/[responseId]`: admin OR RFI creator OR response author. The route reads `rfis.created_by` and `rfi_responses.created_by` to evaluate the gate.
 - Client gates: `RFIDetailClient.tsx` derives `isAdmin = toolLevel === "admin"`, `isCreator = rfi.created_by === userId`, and `canManage = isAdmin || isCreator`. The header buttons, three-dot actions menu, Mark Official checkbox, Delete-Response button, and Related-Item add/remove all use `canManage`, so the RFI creator keeps the full management surface on records they own. `RFIsClient.tsx` keeps `isAdmin` for the New RFI button, the row Edit icon, the row selection checkboxes, and the bulk-edit toolbar (the list view does not have per-row creator context).
 - `app/projects/[id]/rfis/page.tsx` resolves `getToolLevel(..., "rfis")` and passes it to `RFIsClient`. The detail page does the same and forwards both `toolLevel` and `userId` to `RFIDetailClient`.
+
+## Transaction Orders – Assign Invoice Workflow
+
+### Overview
+A user with **Admin** tool level on Transaction Orders can route an invoice PDF to another project so its Project Manager (and any other directory contacts they pick) can convert it into a Transaction Order. Assigned invoices appear:
+- on the target project's **Transaction Orders** page in an **Assigned Invoices** section, and
+- on each recipient's dashboard under **My open items** as an "assigned invoice".
+
+Recipients are also notified by email at assignment time.
+
+### UI
+- Button: **Assign Invoice** (gray outline) is rendered left of **New Transaction Order** on the Transaction Orders page when `toolLevel === "admin"`. Page-level computation lives in `app/projects/[id]/transaction-orders/page.tsx`.
+- Modal: `AssignInvoiceModal` inside `TransactionOrdersClient.tsx`:
+  - Project selector (loads `/api/projects` — already scoped to projects the user can access; for Company Super Admin / Admin this is every company project).
+  - On project change, autoloads the project's **Project Manager** contact rows (`GET /api/projects/[id]/project-manager`) and the project directory.
+  - **Additional recipients**: checkbox list of directory contacts (excluding the PM contacts and distribution_group entries; only contacts with an email show).
+  - Invoice PDF picker + optional notes.
+- Assignments list on the target project: status pill (Open / Completed), filename link to signed PDF, assigner + date, recipient names, and per-assignment **Mark Complete** (any recipient, the assigner, or a TO admin) and **Delete** (TO admin or assigner).
+
+### API
+- `GET /api/projects/[id]/project-manager` — returns `{ projectManagers: [{ contactId, name, email }] }` resolved from `projects.project_roles["Project Manager"]` → `directory_contacts`. Requires `admin` on `transaction-orders` for the target project (don't leak PM identity to unrelated viewers).
+- `GET /api/projects/[id]/transaction-orders/assignments/upload-url?filename=…` — signed PUT URL into `project-drawings/{projectId}/_assignments/{ts}-{filename}`. Requires `admin` on Transaction Orders for the target project.
+- `GET /api/projects/[id]/transaction-orders/assignments` — list assignments for a project (signed download URLs included). Visible to anyone with at least `read_only` on Transaction Orders.
+- `POST /api/projects/[id]/transaction-orders/assignments` — admin-only on target project. Body: `{ filename, storagePath, notes?, recipients: [{ contactId, name, email, role }] }`. The route validates the storagePath is under `{projectId}/_assignments/`, backfills `userId` on recipients by matching `users.email`, persists the row, then fires `sendInvoiceAssignmentEmail` (non-fatal on failure).
+- `PATCH /api/projects/[id]/transaction-orders/assignments/[assignmentId]` — `{ status: "open" | "completed" }`. Allowed for: TO admin on the target project, the original assigner, or any current recipient (matched by `userId` or `email`). Sets `completed_at` / `completed_by` when moving to `completed`.
+- `DELETE /api/projects/[id]/transaction-orders/assignments/[assignmentId]` — TO admin or assigner only. Best-effort removes the storage file.
+
+### Storage / Schema
+- Table `transaction_order_assignments` (migration `130_transaction_order_assignments.sql`):
+  - `id`, `project_id` (target), `assigned_by`, `invoice_filename`, `invoice_storage_path`, `notes`, `recipients JSONB`, `status` (default `open`), `created_at`, `completed_at`, `completed_by`.
+  - `recipients` shape: `[{ contactId, userId | null, email, name, role }]`. `userId` is resolved at create time from `users.email` so the dashboard query can match efficiently.
+- Storage path: `project-drawings/{projectId}/_assignments/{ts}-{safeFilename}` (existing bucket, no new bucket needed).
+
+### Dashboard Open Items
+- `app/api/dashboard/my-tasks/route.ts` adds a new `OpenItem` type: `transaction_order_assignment`.
+- The route queries `transaction_order_assignments` where `status = 'open'` and filters in-memory to rows whose `recipients` include the current user (by `userId === session.id` or `email === session.email`).
+- `app/dashboard/DashboardClient.tsx`:
+  - `MyOpenItem.type` includes `transaction_order_assignment`.
+  - `openItemHref` routes to `${projectBase}/transaction-orders`.
+  - The pill label special-cases the long type to render as **"assigned invoice"**.
+
+### Email
+- `sendInvoiceAssignmentEmail({ to, projectName, invoiceFilename, notes, projectUrl, assignedBy })` in `lib/email.ts`. Uses Resend; no-ops without `RESEND_API_KEY`. The `to` is the full recipient list (CC is not used here since everyone in `to` is an intended recipient, not a copy).

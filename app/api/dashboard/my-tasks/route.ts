@@ -77,7 +77,8 @@ export async function GET() {
       | "change_order"
       | "budget"
       | "commitment"
-      | "prime_contract";
+      | "prime_contract"
+      | "transaction_order_assignment";
     status: string;
     due_date: string | null;
     project_id: string;
@@ -267,6 +268,37 @@ export async function GET() {
         type: "prime_contract",
         status: row.status || "",
         due_date: row.estimated_completion_date || null,
+        project_id: row.project_id,
+      });
+    }
+  } catch {}
+
+  // Open Transaction Order assignments where the current user is a
+  // recipient (matched by user_id or email).
+  try {
+    const { data } = await supabase
+      .from("transaction_order_assignments")
+      .select("id, invoice_filename, status, created_at, project_id, recipients")
+      .eq("status", "open")
+      .limit(200);
+
+    for (const row of data || []) {
+      const recipients = Array.isArray(row.recipients) ? row.recipients : [];
+      const matched = recipients.some((r: { userId?: string | null; email?: string | null }) => {
+        if (!r || typeof r !== "object") return false;
+        if (r.userId && r.userId === session.id) return true;
+        if (sessionEmail && typeof r.email === "string" && r.email.toLowerCase() === sessionEmail) {
+          return true;
+        }
+        return false;
+      });
+      if (!matched) continue;
+      openItems.push({
+        id: row.id,
+        title: row.invoice_filename || "Assigned invoice",
+        type: "transaction_order_assignment",
+        status: row.status || "open",
+        due_date: null,
         project_id: row.project_id,
       });
     }

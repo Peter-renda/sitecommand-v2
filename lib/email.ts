@@ -466,6 +466,47 @@ export async function sendCommitmentEmail({
   if (error) throw new Error(error.message);
 }
 
+export async function sendInvoiceAssignmentEmail({
+  to,
+  projectName,
+  invoiceFilename,
+  notes,
+  projectUrl,
+  assignedBy,
+}: {
+  to: string[];
+  projectName: string;
+  invoiceFilename: string;
+  notes: string;
+  projectUrl: string;
+  assignedBy: string;
+}) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return;
+  if (to.length === 0) return;
+
+  const resend = new Resend(apiKey);
+  const notesBlock = notes
+    ? `<p style="color:#555;font-size:13px;white-space:pre-wrap;">${notes}</p>`
+    : "";
+
+  const { error } = await resend.emails.send({
+    from: "SiteCommand <invites@sitecommand.xyz>",
+    to,
+    subject: `Invoice assigned: ${invoiceFilename}`,
+    html: `
+      <p style="font-size:14px;">${assignedBy} assigned an invoice to <strong>${projectName}</strong> for you to process into a Transaction Order.</p>
+      <p style="font-size:14px;"><strong>${invoiceFilename}</strong></p>
+      ${notesBlock}
+      <p>
+        <a href="${projectUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Open in SiteCommand</a>
+      </p>
+      <p style="color:#aaa;font-size:11px;">This will also appear under "My open items" on your SiteCommand dashboard. Sent via SiteCommand.</p>
+    `,
+  });
+  if (error) throw new Error(error.message);
+}
+
 export async function sendTransmittalCreatedEmail({
   to,
   recipientName,
