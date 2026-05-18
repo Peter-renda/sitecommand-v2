@@ -51,12 +51,43 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
     setUserType(next === "company" ? "super_admin" : "subcontractor");
   }
 
-  function humanizeUserType(value: string): string {
-    return value
-      .split("_")
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
+  async function createTemplate(rawName: string) {
+    const trimmed = rawName.trim();
+    if (!trimmed) {
+      setError("Please enter a user type name");
+      return;
+    }
+    const initialLevels = Object.fromEntries(
+      TEMPLATE_TOOLS.map((tool) => [tool, "none" as PermissionLevel])
+    ) as Record<string, PermissionLevel>;
+
+    setError("");
+    setSaving(true);
+    const res = await fetch("/api/company/permission-templates", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category, user_type: trimmed, levels: initialLevels }),
+    });
+    setSaving(false);
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.error || "Failed to create template");
+      return;
+    }
+
+    setCustomTypes((prev) => {
+      const existing = prev[category];
+      const builtins = new Set(
+        (category === "company" ? COMPANY_USER_TYPES : INVITEE_USER_TYPES).map((t) => t.value)
+      );
+      if (existing.includes(trimmed) || builtins.has(trimmed)) return prev;
+      return { ...prev, [category]: [...existing, trimmed].sort() };
+    });
+    setUserType(trimmed);
+    setLevels(initialLevels);
+    setShowCreateModal(false);
+    setNewTypeName("");
   }
 
   // Load template whenever (category, user type) changes.
@@ -91,7 +122,7 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
   const builtinValues = new Set(builtinUserTypeOptions.map((t) => t.value));
   const customUserTypeOptions = customTypes[category]
     .filter((value) => !builtinValues.has(value))
-    .map((value) => ({ value, label: humanizeUserType(value) }));
+    .map((value) => ({ value, label: value }));
   const userTypeOptions = [...builtinUserTypeOptions, ...customUserTypeOptions];
   const createOptionValue = "__create_new_template__";
 
@@ -160,7 +191,7 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
                 </option>
               ))}
               {!userTypeOptions.some((t) => t.value === userType) && (
-                <option value={userType}>{userType.replace(/_/g, " ")}</option>
+                <option value={userType}>{userType}</option>
               )}
               <option value={createOptionValue}>Create new template</option>
             </select>
@@ -236,27 +267,11 @@ export default function PermissionTemplatesTab({ canEdit }: { canEdit: boolean }
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    const normalized = newTypeName.trim().toLowerCase().replace(/\s+/g, "_");
-                    if (!normalized) {
-                      setError("Please enter a user type name");
-                      return;
-                    }
-                    setCustomTypes((prev) => {
-                      const existing = prev[category];
-                      if (existing.includes(normalized) || builtinValues.has(normalized)) {
-                        return prev;
-                      }
-                      return { ...prev, [category]: [...existing, normalized].sort() };
-                    });
-                    setUserType(normalized);
-                    setLevels(Object.fromEntries(TEMPLATE_TOOLS.map((tool) => [tool, "none"])) as Record<string, PermissionLevel>);
-                    setShowCreateModal(false);
-                    setNewTypeName("");
-                  }}
-                  className="px-3 py-2 text-sm bg-gray-900 text-white rounded-md"
+                  onClick={() => createTemplate(newTypeName)}
+                  disabled={saving}
+                  className="px-3 py-2 text-sm bg-gray-900 text-white rounded-md disabled:opacity-50"
                 >
-                  Create
+                  {saving ? "Creating…" : "Create"}
                 </button>
               </div>
             </div>
