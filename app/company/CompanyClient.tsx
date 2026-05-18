@@ -39,16 +39,16 @@ type Project = {
   archived_at: string | null;
 };
 
-function roleBadgeClass(role: string) {
+function templateBadgeClass(role: string) {
   if (role === "super_admin") return "bg-amber-50 text-amber-700";
   if (role === "admin") return "bg-gray-100 text-gray-700";
   return "bg-gray-50 text-gray-400";
 }
 
-function roleLabel(role: string) {
-  if (role === "super_admin") return "Owner";
+function templateLabel(role: string) {
+  if (role === "super_admin") return "Super Admin";
   if (role === "admin") return "Admin";
-  return "Member";
+  return "User";
 }
 
 export default function CompanyClient({
@@ -219,7 +219,7 @@ const seatCount = members.length;
           </div>
           {isSuperAdmin && (
             <p className="text-xs text-gray-400 mt-2">
-              You are the account owner and control billing for this organisation.
+              You are the Super Admin and control billing for this organisation.
             </p>
           )}
         </div>
@@ -293,17 +293,17 @@ const seatCount = members.length;
           </div>
 
           {members.length === 0 ? (
-            <p className="text-sm text-gray-400">No members yet.</p>
+            <p className="text-sm text-gray-400">No users yet.</p>
           ) : (
             <div className="space-y-1">
               {members.map((member) => {
-                const isOwner = member.company_role === "super_admin";
+                const isSuperAdminMember = member.company_role === "super_admin";
                 const isCurrentUser = member.id === currentUserId;
                 const canRemove =
                   !isCurrentUser &&
-                  !isOwner &&
+                  !isSuperAdminMember &&
                   (isSuperAdmin || member.company_role === "member");
-                const canToggleRole = isSuperAdmin && !isOwner && !isCurrentUser;
+                const canToggleRole = isSuperAdmin && !isSuperAdminMember && !isCurrentUser;
                 const newRole = member.company_role === "admin" ? "member" : "admin";
 
                 return (
@@ -315,8 +315,8 @@ const seatCount = members.length;
                     <div>
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-medium text-gray-900">{member.username}</p>
-                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${roleBadgeClass(member.company_role)}`}>
-                          {roleLabel(member.company_role)}
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${templateBadgeClass(member.company_role)}`}>
+                          {templateLabel(member.company_role)}
                         </span>
                       </div>
                       <p className="text-xs text-gray-400">{member.email}</p>
@@ -330,7 +330,7 @@ const seatCount = members.length;
                           }}
                           className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
                         >
-                          Make {newRole === "admin" ? "Admin" : "Member"}
+                          Assign {templateLabel(newRole)} template
                         </button>
                       )}
                       {canRemove && (
@@ -366,8 +366,8 @@ const seatCount = members.length;
                     <div>
                       <div className="flex items-center gap-2">
                         <p className="text-sm text-gray-500">{invite.email}</p>
-                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${roleBadgeClass(invite.invited_role)}`}>
-                          {roleLabel(invite.invited_role)}
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${templateBadgeClass(invite.invited_role)}`}>
+                          {templateLabel(invite.invited_role)}
                         </span>
                       </div>
                       <p className="text-xs text-gray-300">
@@ -574,15 +574,15 @@ const seatCount = members.length;
                 placeholder="colleague@company.com"
                 className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
               />
-              {/* Role selector — admins can only invite members; super_admin can invite admins too */}
+              {/* Permission template — admins can only invite Users; super_admin can invite Admins too */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Role</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Permission Template</label>
                 <select
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value as "member" | "admin")}
                   className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
                 >
-                  <option value="member">Member — standard access, can invite subcontractors</option>
+                  <option value="member">User — standard access, can invite subcontractors</option>
                   {isSuperAdmin && (
                     <option value="admin">Admin — manage users and invite subcontractors (no billing)</option>
                   )}
@@ -610,11 +610,11 @@ const seatCount = members.length;
         </div>
       )}
 
-      {/* Remove Member Confirmation Modal */}
+      {/* Remove User Confirmation Modal */}
       {removeConfirmMember && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h2 className="text-base font-semibold text-gray-900 mb-1">Remove member?</h2>
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Remove user?</h2>
             <p className="text-sm text-gray-500 mb-5">
               <span className="font-medium text-gray-700">{removeConfirmMember.username}</span> will
               lose access to all projects and be removed from the company. This cannot be undone.
@@ -667,23 +667,23 @@ const seatCount = members.length;
         </div>
       )}
 
-      {/* Role Change Confirmation Modal */}
+      {/* Permission Template Change Confirmation Modal */}
       {roleChangeConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h2 className="text-base font-semibold text-gray-900 mb-1">Change role?</h2>
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Change permission template?</h2>
             <p className="text-sm text-gray-500 mb-5">
               Change{" "}
               <span className="font-medium text-gray-700">{roleChangeConfirm.member.username}</span>{" "}
-              from{" "}
+              from the{" "}
               <span className="font-medium text-gray-700">
-                {roleLabel(roleChangeConfirm.member.company_role)}
+                {templateLabel(roleChangeConfirm.member.company_role)}
               </span>{" "}
-              to{" "}
+              template to the{" "}
               <span className="font-medium text-gray-700">
-                {roleLabel(roleChangeConfirm.newRole)}
-              </span>
-              ?
+                {templateLabel(roleChangeConfirm.newRole)}
+              </span>{" "}
+              template?
             </p>
             <div className="flex gap-2">
               <button
