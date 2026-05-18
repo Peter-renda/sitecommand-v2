@@ -1043,7 +1043,25 @@ async function main() {
     }
 
     await insertChangeHistory(rfiId, project.id, seed, contacts, usersByContactKey, inserted);
-    console.log(`  → ${inserted.length} responses + change history written.`);
+    console.log(`  → id=${rfiId}, ${inserted.length} responses + change history written.`);
+  }
+
+  // ── Verification: re-fetch what's actually in the DB so we can confirm the
+  //    rows landed under the expected project and would be returned by the
+  //    same query the RFI list page runs.
+  const { data: verifyRows, error: verifyErr } = await supabase
+    .from("rfis")
+    .select("id, rfi_number, subject, status, is_deleted, project_id")
+    .eq("project_id", project.id)
+    .or("is_deleted.is.null,is_deleted.eq.false")
+    .order("rfi_number", { ascending: true });
+  if (verifyErr) {
+    console.warn(`\nVerification query failed: ${verifyErr.message}`);
+  } else {
+    console.log(`\nVerification: ${verifyRows?.length ?? 0} RFI rows visible to the list query for project ${project.id}:`);
+    for (const r of verifyRows ?? []) {
+      console.log(`  #${r.rfi_number} [${r.status}] ${r.subject}`);
+    }
   }
 
   console.log("\nDone.");
