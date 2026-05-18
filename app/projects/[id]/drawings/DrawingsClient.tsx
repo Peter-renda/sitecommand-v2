@@ -343,6 +343,20 @@ function DrawingPdfViewerModal({
   const [loading, setLoading] = useState(true);
   const [renderError, setRenderError] = useState<string | null>(null);
 
+  // ── Zoom state ────────────────────────────────────────────────────────────
+  // 1 = fit-to-container (the size computed during render). Display size
+  // scales by this multiplier; the supersampled raster keeps things crisp.
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 8;
+  const ZOOM_STEP = 1.25;
+  const [zoom, setZoom] = useState(1);
+  const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+  const zoomIn = () => setZoom((z) => clampZoom(z * ZOOM_STEP));
+  const zoomOut = () => setZoom((z) => clampZoom(z / ZOOM_STEP));
+  const zoomReset = () => setZoom(1);
+  // Reset zoom whenever the rendered page changes
+  useEffect(() => { setZoom(1); }, [drawing.id, safeViewerPage]);
+
   // ── Annotation state ──────────────────────────────────────────────────────
   const [annotationMode, setAnnotationMode] = useState(false);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
@@ -944,7 +958,8 @@ function DrawingPdfViewerModal({
       </div>
 
       {/* PDF canvas + annotation overlay in a scrollable container */}
-      <div ref={containerRef} className="relative flex-1 overflow-auto bg-gray-950 min-h-0">
+      <div className="relative flex-1 min-h-0">
+      <div ref={containerRef} className="absolute inset-0 overflow-auto bg-gray-950">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-950 z-10">
             <svg className="w-8 h-8 text-gray-500 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -953,15 +968,19 @@ function DrawingPdfViewerModal({
             </svg>
           </div>
         )}
-        <div className="flex justify-center items-center p-4 min-h-full">
-          <div ref={previewSurfaceRef} className="relative inline-block max-h-full">
+        <div className="flex justify-center items-center p-4 min-h-full min-w-min">
+          <div ref={previewSurfaceRef} className="relative inline-block">
             {pdfDataUrl && (
               <img
                 src={pdfDataUrl}
                 alt={name}
-                className="block max-w-full max-h-full shadow-xl"
+                className="block shadow-xl"
                 draggable={false}
-                style={pdfDisplaySize ? { width: pdfDisplaySize.w, height: pdfDisplaySize.h } : undefined}
+                style={
+                  pdfDisplaySize
+                    ? { width: pdfDisplaySize.w * zoom, height: pdfDisplaySize.h * zoom }
+                    : undefined
+                }
               />
             )}
             {!pdfDataUrl && !loading && (
@@ -997,6 +1016,39 @@ function DrawingPdfViewerModal({
             )}
           </div>
         </div>
+      </div>
+        {/* Zoom controls — pinned to the bottom-left of the viewer area */}
+        {pdfDataUrl && (
+          <div className="absolute bottom-4 left-4 z-30 inline-flex items-center gap-1 rounded-md border border-gray-700 bg-gray-900/90 px-1.5 py-1 shadow-lg backdrop-blur">
+            <button
+              onClick={zoomOut}
+              disabled={zoom <= ZOOM_MIN + 1e-6}
+              title="Zoom out"
+              className="flex items-center justify-center w-7 h-7 rounded text-gray-200 hover:bg-gray-700 disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20 12H4" />
+              </svg>
+            </button>
+            <button
+              onClick={zoomReset}
+              title="Reset zoom"
+              className="px-2 h-7 text-xs font-medium text-gray-200 rounded hover:bg-gray-700 tabular-nums min-w-[3.25rem]"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              onClick={zoomIn}
+              disabled={zoom >= ZOOM_MAX - 1e-6}
+              title="Zoom in"
+              className="flex items-center justify-center w-7 h-7 rounded text-gray-200 hover:bg-gray-700 disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
