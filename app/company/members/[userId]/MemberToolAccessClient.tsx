@@ -11,16 +11,16 @@ type Member = {
   company_role: string;
 };
 
-function roleBadgeClass(role: string) {
+function templateBadgeClass(role: string) {
   if (role === "super_admin") return "bg-amber-50 text-amber-700";
   if (role === "admin") return "bg-gray-100 text-gray-700";
   return "bg-gray-50 text-gray-400";
 }
 
-function roleLabel(role: string) {
-  if (role === "super_admin") return "Owner";
+function templateLabel(role: string) {
+  if (role === "super_admin") return "Super Admin";
   if (role === "admin") return "Admin";
-  return "Member";
+  return "User";
 }
 
 export default function MemberToolAccessClient({
@@ -35,7 +35,7 @@ export default function MemberToolAccessClient({
   currentUserId: string;
 }) {
   const router = useRouter();
-  const isOwner = member.company_role === "super_admin";
+  const isSuperAdminMember = member.company_role === "super_admin";
 
   // null = all tools enabled (no restriction)
   // string[] = specific allowed tools
@@ -93,7 +93,7 @@ export default function MemberToolAccessClient({
     await applyProjectAccess(updated);
   }
 
-  const canEdit = (isSuperAdmin || member.company_role === "member") && !isOwner && member.id !== currentUserId;
+  const canEdit = (isSuperAdmin || member.company_role === "member") && !isSuperAdminMember && member.id !== currentUserId;
 
   // Whether a given slug is currently enabled
   function isEnabled(slug: string): boolean {
@@ -186,15 +186,15 @@ export default function MemberToolAccessClient({
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-1">
             <h1 className="font-display text-[24px] leading-tight text-[color:var(--ink)]">{member.username}</h1>
-            <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${roleBadgeClass(member.company_role)}`}>
-              {roleLabel(member.company_role)}
+            <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${templateBadgeClass(member.company_role)}`}>
+              {templateLabel(member.company_role)}
             </span>
           </div>
           <p className="text-sm text-gray-400">{member.email}</p>
         </div>
 
         {/* Project Access */}
-        {!isOwner && (
+        {!isSuperAdminMember && (
           <div className="bg-white rounded-xl border border-gray-100 px-6 py-5 mb-4">
             <h2 className="text-sm font-semibold text-gray-900 mb-1">Project Access</h2>
             <p className="text-xs text-gray-400 mb-5">
@@ -267,11 +267,11 @@ export default function MemberToolAccessClient({
         <div className="bg-white rounded-xl border border-gray-100 px-6 py-5">
           <div className="flex items-center justify-between mb-1">
             <h2 className="text-sm font-semibold text-gray-900">Tool Access</h2>
-            {isOwner && (
-              <span className="text-xs text-gray-400">Owners have full access</span>
+            {isSuperAdminMember && (
+              <span className="text-xs text-gray-400">Super Admins have full access</span>
             )}
           </div>
-          {!isOwner && (
+          {!isSuperAdminMember && (
             <p className="text-xs text-gray-400 mb-5">
               {canEdit
                 ? "Toggle which tools this user can access. Disabled tools are hidden from their navigation."
@@ -279,9 +279,9 @@ export default function MemberToolAccessClient({
             </p>
           )}
 
-          {isOwner ? (
+          {isSuperAdminMember ? (
             <p className="text-sm text-gray-500 py-4 text-center">
-              The account owner always has access to all tools.
+              Super Admins always have access to all tools.
             </p>
           ) : (
             <div className="space-y-6">
@@ -357,7 +357,7 @@ export default function MemberToolAccessClient({
         </div>
 
         {/* Save button */}
-        {canEdit && !isOwner && (
+        {canEdit && !isSuperAdminMember && (
           <div className="mt-5 flex items-center justify-end gap-3">
             {error && <p className="text-xs text-red-600">{error}</p>}
             {saved && <p className="text-xs text-green-600">Saved</p>}
