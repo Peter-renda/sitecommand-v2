@@ -1648,7 +1648,7 @@ export default function DrawingsClient({
 
   if (!loading && drawings.length === 0) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="h-screen bg-gray-50 flex flex-col">
         <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between shrink-0">
           <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
             SiteCommand
@@ -1705,7 +1705,7 @@ export default function DrawingsClient({
   // ── Main layout ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="h-screen bg-gray-50 flex flex-col">
       {/* Review extracted metadata after upload */}
       {reviewModal && (
         <ReviewExtractedModal
