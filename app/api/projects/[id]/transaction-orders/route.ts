@@ -27,7 +27,7 @@ export async function GET(
   const orders = await Promise.all(
     (rows ?? []).map(async (row) => {
       const { data: urlData } = await supabase.storage
-        .from("transaction-orders")
+        .from("project-drawings")
         .createSignedUrl(row.final_storage_path, SIGNED_URL_TTL_SECONDS);
       return {
         id: row.id,

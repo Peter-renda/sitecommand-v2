@@ -34,7 +34,7 @@ export async function GET(
   }
 
   const { data: urlData } = await supabase.storage
-    .from("transaction-orders")
+    .from("project-drawings")
     .createSignedUrl(row.storage_path, SIGNED_URL_TTL_SECONDS);
 
   return NextResponse.json({
@@ -81,7 +81,7 @@ export async function POST(
     .eq("project_id", projectId)
     .maybeSingle();
   if (existing?.storage_path && existing.storage_path !== storagePath) {
-    void supabase.storage.from("transaction-orders").remove([existing.storage_path]);
+    void supabase.storage.from("project-drawings").remove([existing.storage_path]);
   }
 
   const { data: upserted, error: upsertError } = await supabase
@@ -134,7 +134,7 @@ export async function DELETE(
   if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 });
 
   if (existing?.storage_path) {
-    void supabase.storage.from("transaction-orders").remove([existing.storage_path]);
+    void supabase.storage.from("project-drawings").remove([existing.storage_path]);
   }
 
   return NextResponse.json({ ok: true });

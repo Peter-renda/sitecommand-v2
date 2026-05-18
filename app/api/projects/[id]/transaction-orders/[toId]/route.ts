@@ -32,7 +32,7 @@ export async function DELETE(
   if (row.final_storage_path) toRemove.push(row.final_storage_path);
   if (row.source_storage_path) toRemove.push(row.source_storage_path);
   if (toRemove.length > 0) {
-    void supabase.storage.from("transaction-orders").remove(toRemove);
+    void supabase.storage.from("project-drawings").remove(toRemove);
   }
 
   return NextResponse.json({ ok: true });

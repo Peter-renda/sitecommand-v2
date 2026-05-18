@@ -18,7 +18,7 @@ export async function GET(
 
   const supabase = getSupabase();
   const { data, error } = await supabase.storage
-    .from("transaction-orders")
+    .from("project-drawings")
     .createSignedUploadUrl(storagePath);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

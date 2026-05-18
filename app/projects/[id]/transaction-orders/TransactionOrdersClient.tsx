@@ -177,7 +177,10 @@ export default function TransactionOrdersClient({
       const urlRes = await fetch(
         `/api/projects/${projectId}/transaction-orders/upload-url?filename=${encodeURIComponent(preview.filename)}`,
       );
-      if (!urlRes.ok) throw new Error("Could not request upload URL");
+      if (!urlRes.ok) {
+        const data = await urlRes.json().catch(() => ({}));
+        throw new Error(data?.error ?? "Could not request upload URL");
+      }
       const { signedUrl, storagePath } = await urlRes.json();
 
       const putRes = await fetch(signedUrl, {
@@ -185,7 +188,12 @@ export default function TransactionOrdersClient({
         body: preview.pdfBlob,
         headers: { "Content-Type": "application/pdf" },
       });
-      if (!putRes.ok) throw new Error("Could not upload the completed TO");
+      if (!putRes.ok) {
+        const text = await putRes.text().catch(() => "");
+        throw new Error(
+          `Upload failed (${putRes.status})${text ? `: ${text.slice(0, 200)}` : ""}`,
+        );
+      }
 
       const registerRes = await fetch(
         `/api/projects/${projectId}/transaction-orders`,
@@ -207,7 +215,7 @@ export default function TransactionOrdersClient({
       );
       if (!registerRes.ok) {
         const data = await registerRes.json().catch(() => ({}));
-        throw new Error(data?.error ?? "Could not register the completed TO");
+        throw new Error(data?.error ?? `Register failed (${registerRes.status})`);
       }
 
       if (preview.pdfBlobUrl) URL.revokeObjectURL(preview.pdfBlobUrl);

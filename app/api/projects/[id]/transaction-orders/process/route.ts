@@ -44,7 +44,7 @@ export async function POST(
 
   if (tmplRow?.storage_path) {
     const { data: tmplBlob, error: tmplErr } = await supabase.storage
-      .from("transaction-orders")
+      .from("project-drawings")
       .download(tmplRow.storage_path);
     if (tmplErr || !tmplBlob) {
       return NextResponse.json(
