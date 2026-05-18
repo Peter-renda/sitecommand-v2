@@ -56,6 +56,12 @@ export const TOOL_SECTIONS = [
       { name: "Change Events", slug: "change-events" },
     ],
   },
+  {
+    label: "Accounting",
+    items: [
+      { name: "Transaction Orders", slug: "transaction-orders" },
+    ],
+  },
 ];
 
 export type ToolSection = (typeof TOOL_SECTIONS)[number];
