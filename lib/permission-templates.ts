@@ -51,6 +51,7 @@ export const TEMPLATE_TOOLS: string[] = [
   "Commitments",
   "Change Orders",
   "Change Events",
+  "Transaction Orders",
   "RFIs",
   "Submittals",
   "Transmittals",
@@ -180,6 +181,7 @@ export const PERMISSION_TEMPLATES: Record<PermissionTemplateName, TemplateRow[]>
     },
     { tool: "Change Orders", level: "read_only" },
     { tool: "Change Events", level: "none" },
+    { tool: "Transaction Orders", level: "none" },
     { tool: "RFIs", level: "read_only" },
     { tool: "Submittals", level: "read_only" },
     { tool: "Transmittals", level: "none" },
@@ -213,6 +215,7 @@ export const PERMISSION_TEMPLATES: Record<PermissionTemplateName, TemplateRow[]>
     { tool: "Commitments", level: "none" },
     { tool: "Change Orders", level: "standard" },
     { tool: "Change Events", level: "none" },
+    { tool: "Transaction Orders", level: "none" },
     { tool: "RFIs", level: "standard" },
     {
       tool: "Submittals",
@@ -254,6 +257,7 @@ export const PERMISSION_TEMPLATES: Record<PermissionTemplateName, TemplateRow[]>
     { tool: "Commitments", level: "none" },
     { tool: "Change Orders", level: "standard" },
     { tool: "Change Events", level: "none" },
+    { tool: "Transaction Orders", level: "none" },
     { tool: "RFIs", level: "standard" },
     {
       tool: "Submittals",
