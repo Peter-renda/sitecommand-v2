@@ -666,19 +666,24 @@ const RFIS: RfiSeed[] = [
 // Seed
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Default to the live Arbors at South Crossing project UUID. Override with
+// PROJECT_ID=<uuid> npm run seed:arbors-rfis  or  npm run seed:arbors-rfis -- <uuid>
+const DEFAULT_PROJECT_ID = "39f3f9ca-8899-4b8d-88cc-3df490a27d6c";
+
 async function findProject(): Promise<{ id: string; name: string; company_id: string | null }> {
+  const cliArg = process.argv[2];
+  const projectId = cliArg || process.env.PROJECT_ID || DEFAULT_PROJECT_ID;
+
   const { data, error } = await supabase
     .from("projects")
     .select("id, name, company_id")
-    .ilike("name", "%Arbors%South Crossing%");
+    .eq("id", projectId)
+    .maybeSingle();
   if (error) throw new Error(`Project lookup failed: ${error.message}`);
-  if (!data || data.length === 0) {
-    throw new Error('No project found matching "Arbors at South Crossing". Update the lookup query or create the project first.');
+  if (!data) {
+    throw new Error(`No project found with id ${projectId}. Pass a different id via PROJECT_ID=<uuid> or as a CLI argument.`);
   }
-  if (data.length > 1) {
-    console.warn(`Multiple matching projects (${data.length}); using the first: ${data[0].id} ${data[0].name}`);
-  }
-  return data[0] as { id: string; name: string; company_id: string | null };
+  return data as { id: string; name: string; company_id: string | null };
 }
 
 async function ensureContacts(projectId: string): Promise<Map<string, ContactRow>> {
