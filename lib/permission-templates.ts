@@ -74,11 +74,36 @@ export const TEMPLATE_TOOLS: string[] = [
 ];
 
 /** Built-in defaults for company user types when no override is stored yet. */
-const COMPANY_DEFAULTS: Record<CompanyUserType, PermissionLevel> = {
+export const COMPANY_DEFAULTS: Record<CompanyUserType, PermissionLevel> = {
   super_admin: "admin",
   admin: "admin",
   member: "standard",
 };
+
+/** Resolves the default permission level for a given company role. */
+export function companyRoleDefaultLevel(role: string | null | undefined): PermissionLevel {
+  if (role && role in COMPANY_DEFAULTS) {
+    return COMPANY_DEFAULTS[role as CompanyUserType];
+  }
+  return "standard";
+}
+
+/**
+ * Effective company-member level for a given tool slug, applying the
+ * per-tool override if one is set and falling back to the role default
+ * otherwise.
+ */
+export function effectiveCompanyMemberLevel(
+  toolLevels: Record<string, string> | null | undefined,
+  companyRole: string | null | undefined,
+  slug: string
+): PermissionLevel {
+  if (toolLevels && slug in toolLevels) {
+    const v = toolLevels[slug];
+    if (isPermissionLevel(v)) return v;
+  }
+  return companyRoleDefaultLevel(companyRole);
+}
 
 /** Returns the built-in default level for a (category, type, tool). */
 export function defaultLevelFor(

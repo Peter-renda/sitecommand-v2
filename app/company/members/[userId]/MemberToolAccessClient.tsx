@@ -2,7 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { TOOL_SECTIONS, ALL_TOOL_SLUGS } from "@/lib/tool-sections";
+import { TOOL_SECTIONS } from "@/lib/tool-sections";
+import {
+  PERMISSION_LEVELS,
+  PERMISSION_LEVEL_LABEL,
+  type PermissionLevel,
+} from "@/lib/permission-templates";
 
 type Member = {
   id: string;
@@ -25,21 +30,22 @@ function templateLabel(role: string) {
 
 export default function MemberToolAccessClient({
   member,
-  initialAllowedTools,
+  initialToolLevels,
+  defaultLevel,
   isSuperAdmin,
   currentUserId,
 }: {
   member: Member;
-  initialAllowedTools: string[] | null;
+  initialToolLevels: Record<string, PermissionLevel>;
+  defaultLevel: PermissionLevel;
   isSuperAdmin: boolean;
   currentUserId: string;
 }) {
   const router = useRouter();
   const isSuperAdminMember = member.company_role === "super_admin";
 
-  // null = all tools enabled (no restriction)
-  // string[] = specific allowed tools
-  const [allowedTools, setAllowedTools] = useState<string[] | null>(initialAllowedTools);
+  const [toolLevels, setToolLevels] =
+    useState<Record<string, PermissionLevel>>(initialToolLevels);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -93,50 +99,26 @@ export default function MemberToolAccessClient({
     await applyProjectAccess(updated);
   }
 
-  const canEdit = (isSuperAdmin || member.company_role === "member") && !isSuperAdminMember && member.id !== currentUserId;
+  const canEdit =
+    (isSuperAdmin || member.company_role === "member") &&
+    !isSuperAdminMember &&
+    member.id !== currentUserId;
 
-  // Whether a given slug is currently enabled
-  function isEnabled(slug: string): boolean {
-    if (allowedTools === null) return true;
-    return allowedTools.includes(slug);
+  function levelFor(slug: string): PermissionLevel {
+    return toolLevels[slug] ?? defaultLevel;
   }
 
-  // Whether all items in a section are enabled
-  function isSectionEnabled(slugs: string[]): boolean {
-    return slugs.every((s) => isEnabled(s));
-  }
-
-  // Whether some (but not all) items in a section are enabled
-  function isSectionIndeterminate(slugs: string[]): boolean {
-    const enabled = slugs.filter((s) => isEnabled(s)).length;
-    return enabled > 0 && enabled < slugs.length;
-  }
-
-  function toggleTool(slug: string) {
+  function setLevel(slug: string, level: PermissionLevel) {
     setSaved(false);
-    setAllowedTools((prev) => {
-      // Expand null to full list first
-      const current = prev === null ? [...ALL_TOOL_SLUGS] : [...prev];
-      if (current.includes(slug)) {
-        return current.filter((s) => s !== slug);
-      } else {
-        return [...current, slug];
-      }
-    });
+    setToolLevels((prev) => ({ ...prev, [slug]: level }));
   }
 
-  function toggleSection(slugs: string[], enable: boolean) {
+  function resetSection(slugs: string[]) {
     setSaved(false);
-    setAllowedTools((prev) => {
-      const current = prev === null ? [...ALL_TOOL_SLUGS] : [...prev];
-      if (enable) {
-        const merged = Array.from(new Set([...current, ...slugs]));
-        // If all tools are now enabled, collapse back to null
-        if (ALL_TOOL_SLUGS.every((s) => merged.includes(s))) return null;
-        return merged;
-      } else {
-        return current.filter((s) => !slugs.includes(s));
-      }
+    setToolLevels((prev) => {
+      const next = { ...prev };
+      for (const slug of slugs) delete next[slug];
+      return next;
     });
   }
 
@@ -145,28 +127,29 @@ export default function MemberToolAccessClient({
     setError("");
     setSaved(false);
 
-    // If every tool is enabled, send null (unrestricted)
-    const payload =
-      allowedTools !== null && ALL_TOOL_SLUGS.every((s) => allowedTools.includes(s))
-        ? null
-        : allowedTools;
-
     const res = await fetch(`/api/company/members/${member.id}/tools`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ allowedTools: payload }),
+      body: JSON.stringify({ toolLevels }),
     });
 
     setSaving(false);
 
     if (!res.ok) {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       setError(data.error || "Failed to save");
       return;
     }
 
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
+  }
+
+  function levelBadgeClass(level: PermissionLevel): string {
+    if (level === "none") return "text-gray-400";
+    if (level === "read_only") return "text-gray-600";
+    if (level === "standard") return "text-gray-900";
+    return "text-gray-900 font-medium";
   }
 
   return (
@@ -274,7 +257,7 @@ export default function MemberToolAccessClient({
           {!isSuperAdminMember && (
             <p className="text-xs text-gray-400 mb-5">
               {canEdit
-                ? "Toggle which tools this user can access. Disabled tools are hidden from their navigation."
+                ? `Set a permission level per tool. Unset tools use the ${PERMISSION_LEVEL_LABEL[defaultLevel]} default for this role.`
                 : "You don't have permission to change this user's tool access."}
             </p>
           )}
@@ -287,26 +270,21 @@ export default function MemberToolAccessClient({
             <div className="space-y-6">
               {TOOL_SECTIONS.map((section) => {
                 const slugs = section.items.map((i) => i.slug);
-                const allOn = isSectionEnabled(slugs);
-                const someOn = isSectionIndeterminate(slugs);
+                const hasOverrides = slugs.some((s) => s in toolLevels);
 
                 return (
                   <div key={section.label}>
-                    {/* Section header with category toggle */}
+                    {/* Section header */}
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
                         {section.label}
                       </span>
-                      {canEdit && (
+                      {canEdit && hasOverrides && (
                         <button
-                          onClick={() => toggleSection(slugs, !allOn)}
-                          className={`text-xs font-medium transition-colors ${
-                            allOn
-                              ? "text-gray-400 hover:text-gray-600"
-                              : "text-orange-500 hover:text-orange-700"
-                          }`}
+                          onClick={() => resetSection(slugs)}
+                          className="text-xs font-medium text-gray-400 hover:text-gray-700 transition-colors"
                         >
-                          {allOn ? "Disable all" : someOn ? "Enable all" : "Enable all"}
+                          Reset to default
                         </button>
                       )}
                     </div>
@@ -314,36 +292,39 @@ export default function MemberToolAccessClient({
                     {/* Individual tool rows */}
                     <div className="space-y-0.5">
                       {section.items.map((tool) => {
-                        const enabled = isEnabled(tool.slug);
+                        const level = levelFor(tool.slug);
+                        const isOverride = tool.slug in toolLevels;
                         return (
                           <div
                             key={tool.slug}
                             className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50"
                           >
-                            <span className={`text-sm ${enabled ? "text-gray-900" : "text-gray-400"}`}>
-                              {tool.name}
-                            </span>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`text-sm ${level === "none" ? "text-gray-400" : "text-gray-900"}`}>
+                                {tool.name}
+                              </span>
+                              {!isOverride && level !== "none" && (
+                                <span className="text-[10px] uppercase tracking-wide text-gray-300">
+                                  default
+                                </span>
+                              )}
+                            </div>
                             {canEdit ? (
-                              <button
-                                onClick={() => toggleTool(tool.slug)}
-                                className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                  enabled ? "bg-gray-900" : "bg-gray-200"
-                                }`}
-                                role="switch"
-                                aria-checked={enabled}
+                              <select
+                                value={level}
+                                onChange={(e) => setLevel(tool.slug, e.target.value as PermissionLevel)}
+                                className="text-sm border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200"
                               >
-                                <span
-                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                    enabled ? "translate-x-4" : "translate-x-0"
-                                  }`}
-                                />
-                              </button>
+                                {PERMISSION_LEVELS.map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {PERMISSION_LEVEL_LABEL[opt]}
+                                  </option>
+                                ))}
+                              </select>
                             ) : (
-                              <span
-                                className={`inline-block h-5 w-9 rounded-full ${
-                                  enabled ? "bg-gray-900" : "bg-gray-200"
-                                }`}
-                              />
+                              <span className={`text-sm ${levelBadgeClass(level)}`}>
+                                {PERMISSION_LEVEL_LABEL[level]}
+                              </span>
                             )}
                           </div>
                         );

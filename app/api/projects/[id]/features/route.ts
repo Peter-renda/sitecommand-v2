@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { canAccessProject } from "@/lib/project-access";
 import { getSupabase } from "@/lib/supabase";
-import { TOOL_NAME_TO_SLUG } from "@/lib/permission-templates";
+import {
+  TOOL_NAME_TO_SLUG,
+  companyRoleDefaultLevel,
+  effectiveCompanyMemberLevel,
+} from "@/lib/permission-templates";
 
 export async function GET(
   _req: NextRequest,
@@ -31,8 +35,9 @@ export async function GET(
     return NextResponse.json({ enabled_features: null });
   }
 
-  // Fetch company-level enabled_features, org membership tool allowlist, and
-  // explicit project-level "none" tool permissions for this user in parallel.
+  // Fetch company-level enabled_features, the org member's tool_levels
+  // override (per-tool company-wide), and explicit project-level "none" rows
+  // for this user in parallel.
   const [{ data: company }, { data: membership }, { data: projectToolRows }] = await Promise.all([
     supabase
       .from("companies")
@@ -41,7 +46,7 @@ export async function GET(
       .single(),
     supabase
       .from("org_members")
-      .select("allowed_tools")
+      .select("role, tool_levels")
       .eq("user_id", session.id)
       .eq("org_id", project.company_id)
       .maybeSingle(),
@@ -54,37 +59,54 @@ export async function GET(
   ]);
 
   const companyFeatures: string[] | null = company?.enabled_features ?? null;
-  const userAllowed: string[] | null = membership?.allowed_tools ?? null;
+  const toolLevels = (membership?.tool_levels ?? null) as Record<string, string> | null;
+  const companyRole = membership?.role ?? null;
+  const roleDefault = companyRoleDefaultLevel(companyRole);
 
-  // Compute effective features:
-  //   null + null → null (all enabled)
-  //   null + array → user's list
-  //   array + null → company's list
-  //   array + array → intersection
-  let effective: string[] | null;
-  if (companyFeatures === null && userAllowed === null) {
-    effective = null;
-  } else if (companyFeatures === null) {
-    effective = userAllowed;
-  } else if (userAllowed === null) {
-    effective = companyFeatures;
-  } else {
-    effective = companyFeatures.filter((f) => userAllowed.includes(f));
+  // A tool is hidden from nav when the company-wide effective level is "none".
+  // If there are no overrides and the role default is something other than "none",
+  // nothing is hidden by the company-user layer.
+  const hiddenByUser = new Set<string>();
+  if (toolLevels) {
+    for (const slug of Object.keys(toolLevels)) {
+      if (effectiveCompanyMemberLevel(toolLevels, companyRole, slug) === "none") {
+        hiddenByUser.add(slug);
+      }
+    }
   }
 
+  const baseAllowed: string[] | null = companyFeatures;
+
+  // Start from the company allowlist (or "all known" if unrestricted).
+  let effective: string[];
+  if (baseAllowed === null) {
+    effective = Array.from(new Set(Object.values(TOOL_NAME_TO_SLUG))).filter(Boolean);
+  } else {
+    effective = [...baseAllowed];
+  }
+
+  // Drop tools hidden by the user's per-tool overrides.
+  if (hiddenByUser.size > 0) {
+    effective = effective.filter((slug) => !hiddenByUser.has(slug));
+  } else if (roleDefault === "none") {
+    // Role default "none" means everything is hidden unless explicitly set above.
+    effective = effective.filter(
+      (slug) => toolLevels && slug in toolLevels && !hiddenByUser.has(slug)
+    );
+  }
+
+  // Drop tools explicitly set to "none" at the project level.
   const deniedByProject = new Set(
     (projectToolRows ?? []).map((row) => TOOL_NAME_TO_SLUG[row.tool] ?? row.tool).filter(Boolean)
   );
-
-  // If company/org allowlists are unrestricted, only project-level "none" rows apply.
-  // We can't represent "all except a few" with null, so expand from the canonical
-  // allowlist source when needed.
-  if (effective === null && deniedByProject.size > 0) {
-    const allKnownSlugs = Array.from(new Set(Object.values(TOOL_NAME_TO_SLUG))).filter(Boolean);
-    effective = allKnownSlugs.filter((slug) => !deniedByProject.has(slug));
-  } else if (effective) {
+  if (deniedByProject.size > 0) {
     effective = effective.filter((slug) => !deniedByProject.has(slug));
   }
 
-  return NextResponse.json({ enabled_features: effective });
+  // If the company allowlist was originally null AND nothing else trimmed, preserve
+  // the historical "null = unrestricted" response so downstream code can treat it as a no-op.
+  const noTrim =
+    baseAllowed === null && hiddenByUser.size === 0 && deniedByProject.size === 0 && roleDefault !== "none";
+
+  return NextResponse.json({ enabled_features: noTrim ? null : effective });
 }
