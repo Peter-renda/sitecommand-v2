@@ -1582,9 +1582,6 @@ function VoiceLogModal({
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
             <h3 className="text-base font-semibold text-gray-900">Voice entry</h3>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Speak your daily log. ElevenLabs transcribes the recording, then Gemini maps it onto the form fields. Review and apply.
-            </p>
           </div>
           <button
             onClick={onClose}
