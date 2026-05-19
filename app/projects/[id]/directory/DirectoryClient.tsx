@@ -1208,7 +1208,7 @@ export default function DirectoryClient({
             onClick={() => setActiveTab("all")}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === "all" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"}`}
           >
-            All
+            Users
           </button>
           <button
             onClick={() => setActiveTab("companies")}
@@ -1227,14 +1227,14 @@ export default function DirectoryClient({
         {/* Count row */}
         {!loading && totalCount > 0 && (
           <p className="text-xs text-gray-500 mb-3">
-            Displaying 1 – {activeTab === "companies" ? companyEntries.length : activeTab === "groups" ? groups.length : totalCount} of {activeTab === "companies" ? companyEntries.length : activeTab === "groups" ? groups.length : totalCount}
+            Displaying 1 – {activeTab === "companies" ? companyEntries.length : activeTab === "groups" ? groups.length : users.length + companyEntries.length} of {activeTab === "companies" ? companyEntries.length : activeTab === "groups" ? groups.length : users.length + companyEntries.length}
           </p>
         )}
 
         {/* Table */}
         {loading ? (
           <p className="text-sm text-gray-400 py-8">Loading…</p>
-        ) : (activeTab === "all" ? totalCount === 0 : activeTab === "companies" ? companyEntries.length === 0 : groups.length === 0) ? (
+        ) : (activeTab === "all" ? users.length + companyEntries.length === 0 : activeTab === "companies" ? companyEntries.length === 0 : groups.length === 0) ? (
           <div className="bg-white border border-dashed border-gray-200 rounded-xl py-16 text-center">
             <svg className="w-10 h-10 text-gray-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
@@ -1296,11 +1296,23 @@ export default function DirectoryClient({
                       </svg>
                     </button>
                   </th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Job Title</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Email / Phone / Fax</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Address</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Company</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Permission Template</th>
+                  {activeTab === "groups" ? (
+                    <>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Description</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Members</th>
+                      <th className="px-3 py-2.5" />
+                      <th className="px-3 py-2.5" />
+                      <th className="px-3 py-2.5" />
+                    </>
+                  ) : (
+                    <>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Job Title</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Email / Phone / Fax</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Address</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Company</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Permission Template</th>
+                    </>
+                  )}
                   <th className="w-28 px-3 py-2.5" />
                 </tr>
               </thead>
@@ -1499,15 +1511,8 @@ export default function DirectoryClient({
                 )}
 
                 {/* Distribution groups */}
-                {(activeTab === "all" || activeTab === "groups") && groups.length > 0 && (
+                {activeTab === "groups" && groups.length > 0 && (
                   <>
-                    {activeTab === "all" && (
-                      <tr className="bg-gray-50 border-b border-gray-200">
-                        <td colSpan={9} className="px-3 py-2">
-                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Distribution Groups</span>
-                        </td>
-                      </tr>
-                    )}
                     {groups.map((c) => (
                       <tr key={c.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-3 py-3" />
@@ -1523,17 +1528,18 @@ export default function DirectoryClient({
                           <div className="flex items-center gap-2.5">
                             <button onClick={() => setEditTarget(c)} className="shrink-0 px-2 py-0.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition-colors">Edit</button>
                             <span className="font-medium text-gray-900 text-sm">{c.group_name}</span>
-                            {(c.member_contact_ids?.length ?? 0) > 0 && (
-                              <span className="text-xs text-gray-400">({c.member_contact_ids?.length} {c.member_contact_ids?.length === 1 ? "member" : "members"})</span>
-                            )}
                           </div>
                         </td>
-                        <td className="px-3 py-3 text-gray-500" />
                         <td className="px-3 py-3 text-xs text-gray-500">
                           {c.notes || <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="px-3 py-3 text-gray-500" />
-                        <td className="px-3 py-3 text-gray-500" />
+                        <td className="px-3 py-3 text-xs text-gray-500">
+                          {(c.member_contact_ids?.length ?? 0) > 0
+                            ? `${c.member_contact_ids?.length} ${c.member_contact_ids?.length === 1 ? "member" : "members"}`
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-3 py-3" />
+                        <td className="px-3 py-3" />
                         <td className="px-3 py-3" />
                         <td className="px-3 py-3">
                           <button
