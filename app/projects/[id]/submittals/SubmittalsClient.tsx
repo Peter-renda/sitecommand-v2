@@ -728,18 +728,21 @@ export function CreateSubmittalModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Cost Code</label>
-              {budgetCostCodes.length > 0 ? (
-                <select value={costCode} onChange={(e) => setCostCode(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
-                  <option value="">Select cost code...</option>
-                  {budgetCostCodes.map((item) => (
-                    <option key={item.code} value={item.code}>
-                      {item.code}{item.description ? ` – ${item.description}` : ""}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input type="text" value={costCode} onChange={(e) => setCostCode(e.target.value)} placeholder="Cost code" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-              )}
+              <select
+                value={costCode}
+                onChange={(e) => setCostCode(e.target.value)}
+                disabled={budgetCostCodes.length === 0}
+                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                <option value="">
+                  {budgetCostCodes.length === 0 ? "No budget cost codes available" : "Select cost code..."}
+                </option>
+                {budgetCostCodes.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.code}{item.description ? ` – ${item.description}` : ""}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Linked Drawings</label>
@@ -1521,7 +1524,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors disabled:opacity-50"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
-                {activeTab !== "items" ? "Create disabled" : creating ? "Creating..." : "New submittal"}
+                {activeTab !== "items" ? "Create disabled" : creating ? "Creating..." : "Create +"}
                 <svg className={`w-3.5 h-3.5 transition-transform ${showCreateMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 8l4 4 4-4" /></svg>
               </button>
               {showCreateMenu && (
