@@ -27,9 +27,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const counts = new Map<string, number>();
   const submittalIds = new Set<string>();
+  const submittalIdsByPackage = new Map<string, string[]>();
   for (const row of links ?? []) {
     counts.set(row.package_id, (counts.get(row.package_id) ?? 0) + 1);
     submittalIds.add(row.submittal_id);
+    const list = submittalIdsByPackage.get(row.package_id) ?? [];
+    list.push(row.submittal_id);
+    submittalIdsByPackage.set(row.package_id, list);
   }
 
   let distributedMap = new Map<string, number>();
@@ -52,6 +56,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       ...pkg,
       submittal_count: counts.get(pkg.id) ?? 0,
       distributed_count: distributedMap.get(pkg.id) ?? 0,
+      submittal_ids: submittalIdsByPackage.get(pkg.id) ?? [],
     }))
   );
 }
