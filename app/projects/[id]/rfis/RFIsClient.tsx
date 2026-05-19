@@ -17,6 +17,10 @@ type DirectoryContact = {
   email: string | null;
 };
 type Specification = { id: string; name: string; code: string | null };
+type BudgetItem = { id: string; cost_code: string; description: string };
+
+const RFI_STAGE_OPTIONS = ["Bidding", "Pre-Construction", "Course of Construction", "Warranty", "Post-Construction"] as const;
+const IMPACT_OPTIONS = ["Yes", "Yes (Unknown)", "No", "TBD", "N/A"] as const;
 
 type RFI = {
   id: string;
@@ -214,6 +218,7 @@ function CreateRFIModal({
   initiatedAt,
   directory,
   specifications,
+  budgetItems,
   onConfirm,
   onCancel,
 }: {
@@ -221,6 +226,7 @@ function CreateRFIModal({
   initiatedAt: string;
   directory: DirectoryContact[];
   specifications: Specification[];
+  budgetItems: BudgetItem[];
   onConfirm: (data: {
     rfi_number: number;
     subject: string;
@@ -265,7 +271,6 @@ function CreateRFIModal({
   const [scheduleImpact, setScheduleImpact] = useState("");
   const [costImpact, setCostImpact] = useState("");
   const [costCode, setCostCode] = useState("");
-  const [subJob, setSubJob] = useState("");
   const [rfiStage, setRfiStage] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
@@ -422,29 +427,43 @@ function CreateRFIModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Schedule Impact</label>
-              <input type="text" value={scheduleImpact} onChange={(e) => setScheduleImpact(e.target.value)} placeholder="Schedule impact" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
+              <select value={scheduleImpact} onChange={(e) => setScheduleImpact(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+                <option value="">Select...</option>
+                {IMPACT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Cost Impact</label>
-              <input type="text" value={costImpact} onChange={(e) => setCostImpact(e.target.value)} placeholder="Cost impact" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
+              <select value={costImpact} onChange={(e) => setCostImpact(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+                <option value="">Select...</option>
+                {IMPACT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Cost Code</label>
-              <input type="text" value={costCode} onChange={(e) => setCostCode(e.target.value)} placeholder="Cost code" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Sub Job</label>
-              <input type="text" value={subJob} onChange={(e) => setSubJob(e.target.value)} placeholder="Sub job" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Cost Code</label>
+            <select value={costCode} onChange={(e) => setCostCode(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+              <option value="">Select cost code...</option>
+              {budgetItems.map((b) => (
+                <option key={b.id} value={b.cost_code}>{b.cost_code}{b.description ? ` — ${b.description}` : ""}</option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 gap-4 items-end">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">RFI Stage</label>
-              <input type="text" value={rfiStage} onChange={(e) => setRfiStage(e.target.value)} placeholder="RFI stage" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
+              <select value={rfiStage} onChange={(e) => setRfiStage(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+                <option value="">Select stage...</option>
+                {RFI_STAGE_OPTIONS.map((stage) => (
+                  <option key={stage} value={stage}>{stage}</option>
+                ))}
+              </select>
             </div>
             <label className="inline-flex items-center gap-2 pb-2">
               <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="rounded border-gray-300 text-gray-900" />
@@ -455,7 +474,7 @@ function CreateRFIModal({
           <div className="flex gap-3 justify-end pt-4 border-t border-gray-100">
             {validationError && <p className="text-sm text-red-600 flex-1 self-center">{validationError}</p>}
             <button type="button" onClick={onCancel} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">Cancel</button>
-            <button type="button" onClick={() => onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "draft", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: subJob, rfi_stage: rfiStage, private: isPrivate, attachmentFiles })} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">Create as Draft</button>
+            <button type="button" onClick={() => onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "draft", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: "", rfi_stage: rfiStage, private: isPrivate, attachmentFiles })} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">Create as Draft</button>
             <button
               type="button"
               onClick={() => {
@@ -463,7 +482,7 @@ function CreateRFIModal({
                 if (!question.trim()) { setValidationError("Question is required."); return; }
                 if (assignees.length === 0) { setValidationError("At least one assignee is required."); return; }
                 setValidationError(null);
-                onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "open", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: subJob, rfi_stage: rfiStage, private: isPrivate, attachmentFiles });
+                onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "open", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: "", rfi_stage: rfiStage, private: isPrivate, attachmentFiles });
               }}
               className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors"
             >
@@ -633,6 +652,7 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
   const [rfis, setRfis] = useState<RFI[]>([]);
   const [directory, setDirectory] = useState<DirectoryContact[]>([]);
   const [specifications, setSpecifications] = useState<Specification[]>([]);
+  const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [createInitiatedAt, setCreateInitiatedAt] = useState<string | null>(null);
@@ -670,10 +690,12 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
       fetch(`/api/projects/${projectId}/rfis${activeTab === "recycle_bin" ? "?recycle_bin=true" : ""}`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/directory`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/specifications`).then((r) => r.json()),
-    ]).then(([rfisData, dirData, specData]) => {
+      fetch(`/api/projects/${projectId}/budget`).then((r) => r.json()),
+    ]).then(([rfisData, dirData, specData, budgetData]) => {
       setRfis(Array.isArray(rfisData) ? rfisData : []);
       setDirectory(Array.isArray(dirData) ? dirData : []);
       setSpecifications(Array.isArray(specData) ? specData : []);
+      setBudgetItems(Array.isArray(budgetData) ? budgetData : []);
       setLoading(false);
     });
   }, [projectId, activeTab]);
@@ -1182,6 +1204,7 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
           initiatedAt={createInitiatedAt ?? ""}
           directory={directory}
           specifications={specifications}
+          budgetItems={budgetItems}
           onConfirm={handleCreate}
           onCancel={() => setShowCreate(false)}
         />
