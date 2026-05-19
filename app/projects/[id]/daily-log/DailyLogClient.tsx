@@ -1352,6 +1352,404 @@ function PhotosSection({ projectId, entries, onAdd, onUpdate, albumOptions }: {
   );
 }
 
+// ── Voice-to-entries ─────────────────────────────────────────────────────────
+
+type ParsedVoiceEntries = {
+  weather?: Partial<Pick<LogForm, "weather_conditions" | "weather_temp" | "weather_wind" | "weather_humidity"> & {
+    conditions: string;
+    temperature: string;
+    wind: string;
+    humidity: string;
+  }>;
+  manpower?: Omit<ManpowerEntry, "id">[];
+  inspections?: Omit<InspectionEntry, "id">[];
+  deliveries?: Omit<DeliveryEntry, "id">[];
+  visitors?: Omit<VisitorEntry, "id">[];
+  safety_violations?: Omit<SafetyViolationEntry, "id">[];
+  accidents?: Omit<AccidentEntry, "id">[];
+  delays?: Omit<DelayEntry, "id">[];
+  note_entries?: Omit<NoteEntry, "id">[];
+};
+
+// Sections we can populate from parsed JSON, in display order.
+const VOICE_SECTIONS: {
+  key: keyof ParsedVoiceEntries;
+  formKey: keyof LogForm;
+  label: string;
+  summarize: (e: Record<string, unknown>) => string;
+}[] = [
+  {
+    key: "manpower", formKey: "manpower", label: "Manpower",
+    summarize: (e) => [
+      e.company, e.workers ? `${e.workers} workers` : "",
+      e.hours ? `${e.hours} hrs` : "", e.location, e.cost_code, e.comments,
+    ].filter(Boolean).join(" · "),
+  },
+  {
+    key: "inspections", formKey: "inspections", label: "Inspections",
+    summarize: (e) => [
+      e.inspection_type, e.start_time, e.inspecting_entity, e.inspector_name,
+      e.location, e.inspection_area, e.comments,
+    ].filter(Boolean).join(" · "),
+  },
+  {
+    key: "deliveries", formKey: "deliveries", label: "Deliveries",
+    summarize: (e) => [e.time, e.delivery_from, e.contents, e.tracking_number, e.comments].filter(Boolean).join(" · "),
+  },
+  {
+    key: "visitors", formKey: "visitors", label: "Visitors",
+    summarize: (e) => [e.visitor, e.start_time, e.end_time, e.comments].filter(Boolean).join(" · "),
+  },
+  {
+    key: "safety_violations", formKey: "safety_violations", label: "Safety Violations",
+    summarize: (e) => [e.subject, e.time, e.issued_to, e.safety_notice, e.compliance_due, e.comments].filter(Boolean).join(" · "),
+  },
+  {
+    key: "accidents", formKey: "accidents", label: "Accidents",
+    summarize: (e) => [e.time, e.party_involved, e.company_involved, e.comments].filter(Boolean).join(" · "),
+  },
+  {
+    key: "delays", formKey: "delays", label: "Delays",
+    summarize: (e) => [e.delay_type, e.start_time, e.end_time, e.location, e.comments].filter(Boolean).join(" · "),
+  },
+  {
+    key: "note_entries", formKey: "note_entries", label: "Notes",
+    summarize: (e) => [e.is_issue ? "ISSUE" : "", e.location, e.comments].filter(Boolean).join(" · "),
+  },
+];
+
+function VoiceLogModal({
+  projectId, companySuggestions, onClose, onApply,
+}: {
+  projectId: string;
+  companySuggestions: string[];
+  onClose: () => void;
+  onApply: (parsed: ParsedVoiceEntries, applyWeather: boolean, selections: Record<string, Set<number>>) => void;
+}) {
+  const [phase, setPhase] = useState<"idle" | "recording" | "transcribing" | "parsing" | "review" | "error">("idle");
+  const [error, setError] = useState<string>("");
+  const [transcript, setTranscript] = useState<string>("");
+  const [parsed, setParsed] = useState<ParsedVoiceEntries | null>(null);
+  const [applyWeather, setApplyWeather] = useState(true);
+  const [selections, setSelections] = useState<Record<string, Set<number>>>({});
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const [elapsed, setElapsed] = useState(0);
+  const elapsedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        try { recorderRef.current.stop(); } catch {}
+      }
+      if (elapsedTimer.current) {
+        clearInterval(elapsedTimer.current);
+        elapsedTimer.current = null;
+      }
+    };
+  }, []);
+
+  async function startRecording() {
+    setError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recorderRef.current = recorder;
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        recorder.stream.getTracks().forEach((t) => t.stop());
+        if (elapsedTimer.current) {
+          clearInterval(elapsedTimer.current);
+          elapsedTimer.current = null;
+        }
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        if (blob.size === 0) {
+          setPhase("error");
+          setError("No audio captured.");
+          return;
+        }
+        await transcribeAndParse(blob);
+      };
+      recorder.start();
+      setElapsed(0);
+      elapsedTimer.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+      setPhase("recording");
+    } catch {
+      setPhase("error");
+      setError("Microphone access was denied.");
+    }
+  }
+
+  function stopRecording() {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
+    }
+    setPhase("transcribing");
+  }
+
+  async function transcribeAndParse(blob: Blob) {
+    try {
+      setPhase("transcribing");
+      const formData = new FormData();
+      formData.append("audio", blob, "daily-log-audio.webm");
+      const tRes = await fetch("/api/integrations/elevenlabs/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+      const tData = await tRes.json();
+      if (!tRes.ok) {
+        setPhase("error");
+        setError(tData.error || "Transcription failed.");
+        return;
+      }
+      const text = (tData.text ?? "").trim();
+      if (!text) {
+        setPhase("error");
+        setError("No transcript text returned.");
+        return;
+      }
+      setTranscript(text);
+
+      setPhase("parsing");
+      const pRes = await fetch(`/api/projects/${projectId}/daily-log/parse-voice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: text, companySuggestions }),
+      });
+      const pData = await pRes.json();
+      if (!pRes.ok) {
+        setPhase("error");
+        setError(pData.error || "Could not parse the recording.");
+        return;
+      }
+      const parsedEntries = (pData.parsed ?? {}) as ParsedVoiceEntries;
+      setParsed(parsedEntries);
+
+      // Default: every parsed entry is checked.
+      const defaults: Record<string, Set<number>> = {};
+      for (const section of VOICE_SECTIONS) {
+        const list = parsedEntries[section.key] as Record<string, unknown>[] | undefined;
+        if (list && list.length > 0) {
+          defaults[section.key] = new Set(list.map((_, i) => i));
+        }
+      }
+      setSelections(defaults);
+
+      const wx = parsedEntries.weather;
+      const hasWeather = !!(wx && (wx.conditions || wx.temperature || wx.wind || wx.humidity));
+      setApplyWeather(hasWeather);
+      setPhase("review");
+    } catch {
+      setPhase("error");
+      setError("Something went wrong while processing your recording.");
+    }
+  }
+
+  function toggleSelection(sectionKey: string, index: number) {
+    setSelections((prev) => {
+      const next = { ...prev };
+      const set = new Set(next[sectionKey] ?? []);
+      if (set.has(index)) set.delete(index);
+      else set.add(index);
+      next[sectionKey] = set;
+      return next;
+    });
+  }
+
+  function handleApply() {
+    if (!parsed) return;
+    onApply(parsed, applyWeather, selections);
+    onClose();
+  }
+
+  const totalSelected = Object.values(selections).reduce((sum, s) => sum + s.size, 0)
+    + (applyWeather && parsed?.weather && (parsed.weather.conditions || parsed.weather.temperature || parsed.weather.wind || parsed.weather.humidity) ? 1 : 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="bg-white rounded-xl max-w-3xl w-full max-h-[88vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Voice entry</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Speak your daily log. ElevenLabs transcribes the recording, then Gemini maps it onto the form fields. Review and apply.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-gray-400 hover:text-gray-700"
+            aria-label="Close"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {phase === "idle" && (
+            <div className="text-center py-8">
+              <button
+                onClick={startRecording}
+                className="inline-flex items-center gap-2 px-5 py-3 bg-[color:var(--ink)] text-white text-sm font-semibold rounded-md hover:bg-black"
+              >
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                Start recording
+              </button>
+              <p className="text-xs text-gray-500 mt-3 max-w-md mx-auto">
+                Tip: name companies, times, and locations the way you would in writing. Example: &ldquo;Triangle Concrete had six guys onsite from 7 to 3:30 in section C. Rebar delivery at 2pm from ABC Supply. Weather sunny, 75 degrees.&rdquo;
+              </p>
+            </div>
+          )}
+
+          {phase === "recording" && (
+            <div className="text-center py-8">
+              <div className="text-3xl font-display tabular-nums text-gray-900">
+                {Math.floor(elapsed / 60).toString().padStart(2, "0")}:{(elapsed % 60).toString().padStart(2, "0")}
+              </div>
+              <p className="text-xs text-red-600 mt-1 flex items-center justify-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
+                Recording…
+              </p>
+              <button
+                onClick={stopRecording}
+                className="mt-5 px-5 py-3 bg-gray-900 text-white text-sm font-semibold rounded-md hover:bg-black"
+              >
+                Stop and transcribe
+              </button>
+            </div>
+          )}
+
+          {(phase === "transcribing" || phase === "parsing") && (
+            <div className="text-center py-10">
+              <svg className="w-6 h-6 animate-spin mx-auto text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v4m0 8v4m8-8h-4M8 12H4m13.66-5.66l-2.83 2.83m-5.66 5.66l-2.83 2.83m11.32 0l-2.83-2.83M9.17 9.17L6.34 6.34" />
+              </svg>
+              <p className="text-sm text-gray-600 mt-3">
+                {phase === "transcribing" ? "Transcribing with ElevenLabs…" : "Mapping speech to form fields…"}
+              </p>
+            </div>
+          )}
+
+          {phase === "error" && (
+            <div className="text-center py-8">
+              <p className="text-sm text-red-600">{error}</p>
+              <button
+                onClick={() => setPhase("idle")}
+                className="mt-4 px-4 py-2 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {phase === "review" && parsed && (
+            <>
+              {transcript && (
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                  <p className="mono-label mb-1">Transcript</p>
+                  <p className="text-xs text-gray-700 whitespace-pre-wrap">{transcript}</p>
+                </div>
+              )}
+
+              {parsed.weather && (parsed.weather.conditions || parsed.weather.temperature || parsed.weather.wind || parsed.weather.humidity) && (
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={applyWeather}
+                      onChange={(e) => setApplyWeather(e.target.checked)}
+                      className="mt-0.5 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Weather</p>
+                      <p className="text-sm text-gray-700 mt-0.5">
+                        {[parsed.weather.conditions, parsed.weather.temperature, parsed.weather.wind, parsed.weather.humidity].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              )}
+
+              {VOICE_SECTIONS.map((section) => {
+                const list = (parsed[section.key] ?? []) as Record<string, unknown>[];
+                if (!list || list.length === 0) return null;
+                const sel = selections[section.key] ?? new Set<number>();
+                return (
+                  <div key={section.key} className="border border-gray-200 rounded-lg">
+                    <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide px-3 pt-3">
+                      {section.label} <span className="text-gray-400 font-normal normal-case">({sel.size} of {list.length} selected)</span>
+                    </p>
+                    <div className="divide-y divide-gray-100">
+                      {list.map((entry, i) => {
+                        const summary = section.summarize(entry) || "(no details)";
+                        const checked = sel.has(i);
+                        return (
+                          <label
+                            key={i}
+                            className="flex items-start gap-2 cursor-pointer px-3 py-2 hover:bg-gray-50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleSelection(section.key, i)}
+                              className="mt-0.5 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+                            />
+                            <span className="text-sm text-gray-700 flex-1">{summary}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {!VOICE_SECTIONS.some((s) => ((parsed[s.key] ?? []) as unknown[]).length > 0) &&
+                !(parsed.weather && (parsed.weather.conditions || parsed.weather.temperature || parsed.weather.wind || parsed.weather.humidity)) && (
+                <p className="text-sm text-gray-500 text-center py-6">
+                  The model couldn&apos;t pull any structured entries out of this recording. Try again with more concrete details.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
+        {phase === "review" && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-gray-50/40">
+            <p className="text-xs text-gray-500">{totalSelected} item{totalSelected === 1 ? "" : "s"} will be added to the log.</p>
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="px-3 py-1.5 text-sm text-gray-700 border border-gray-200 bg-white rounded-md hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApply}
+                disabled={totalSelected === 0}
+                className="px-4 py-1.5 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Apply to log
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const DAILY_LOG_SECTIONS = [
@@ -1389,6 +1787,7 @@ export default function DailyLogClient({
   const [savedOnce, setSavedOnce] = useState(false);
   const [companySuggestions, setCompanySuggestions] = useState<string[]>([]);
   const [photoAlbums, setPhotoAlbums] = useState<PhotoAlbum[]>([]);
+  const [voiceOpen, setVoiceOpen] = useState(false);
 
   const formRef = useRef<LogForm>(emptyForm(initialDate));
   const logIdRef = useRef<string | null>(null);
@@ -1581,6 +1980,39 @@ export default function DailyLogClient({
     await saveFormData(form, logId);
   }
 
+  function applyVoiceEntries(
+    parsed: ParsedVoiceEntries,
+    applyWeather: boolean,
+    selections: Record<string, Set<number>>,
+  ) {
+    let next = formRef.current;
+    if (applyWeather && parsed.weather) {
+      const w = parsed.weather;
+      next = {
+        ...next,
+        weather_conditions: w.conditions || next.weather_conditions,
+        weather_temp: w.temperature || next.weather_temp,
+        weather_wind: w.wind || next.weather_wind,
+        weather_humidity: w.humidity || next.weather_humidity,
+      };
+    }
+    for (const section of VOICE_SECTIONS) {
+      const list = parsed[section.key] as Record<string, unknown>[] | undefined;
+      const picked = selections[section.key];
+      if (!list || !picked || picked.size === 0) continue;
+      const additions = list
+        .map((entry, i) => (picked.has(i) ? { id: uid(), ...entry } : null))
+        .filter((x): x is Record<string, unknown> & { id: string } => x !== null);
+      if (additions.length === 0) continue;
+      const current = (next[section.formKey] as unknown[]) ?? [];
+      next = { ...next, [section.formKey]: [...current, ...additions] };
+    }
+    setForm(next);
+    formRef.current = next;
+    setDirty(true);
+    void saveFormData(next, logIdRef.current);
+  }
+
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/";
@@ -1671,6 +2103,17 @@ export default function DailyLogClient({
                       Jump to today
                     </button>
                   )}
+                  <button
+                    onClick={() => setVoiceOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 bg-white rounded-md hover:bg-gray-50 transition-colors"
+                    title="Dictate entries with your voice"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 01-14 0v-2M12 19v4m-4 0h8" />
+                    </svg>
+                    Voice entry
+                  </button>
                   <button
                     onClick={handleSave}
                     disabled={saving || !dirty}
@@ -1861,6 +2304,15 @@ export default function DailyLogClient({
           </div>
         )}
       </main>
+
+      {voiceOpen && (
+        <VoiceLogModal
+          projectId={projectId}
+          companySuggestions={companySuggestions}
+          onClose={() => setVoiceOpen(false)}
+          onApply={applyVoiceEntries}
+        />
+      )}
     </div>
   );
 }
