@@ -3,6 +3,26 @@ import { getSupabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
 import { sendTaskCreatedEmail } from "@/lib/email";
 
+type ContactLite = { id?: string; email?: string | null };
+
+export function canViewTask(
+  task: {
+    is_private?: boolean | null;
+    created_by?: string | null;
+    assignees?: ContactLite[] | null;
+    distribution_list?: ContactLite[] | null;
+  },
+  session: { id: string; email: string; role?: string }
+): boolean {
+  if (!task.is_private) return true;
+  if (session.role === "admin") return true;
+  if (task.created_by && task.created_by === session.id) return true;
+  const email = (session.email || "").toLowerCase();
+  const inList = (list?: ContactLite[] | null) =>
+    (list ?? []).some((c) => (c.email ?? "").toLowerCase() === email);
+  return inList(task.assignees) || inList(task.distribution_list);
+}
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -17,7 +37,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .order("task_number", { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data || []);
+  const filtered = (data || []).filter((t) => canViewTask(t, session));
+  return NextResponse.json(filtered);
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -38,7 +59,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const autoNextNumber = (maxRow?.task_number ?? 0) + 1;
 
-  const { task_number, title, status, category, description, distribution_list, assignees, due_date } = await req.json();
+  const { task_number, title, status, category, description, distribution_list, assignees, due_date, is_private } = await req.json();
   if (!title?.trim()) return NextResponse.json({ error: "Title is required" }, { status: 400 });
 
   const resolvedTaskNumber = (typeof task_number === "number" && task_number > 0) ? task_number : autoNextNumber;
@@ -55,6 +76,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       distribution_list: distribution_list || [],
       assignees: assignees || [],
       due_date: due_date || null,
+      is_private: Boolean(is_private),
       created_by: session.id,
     })
     .select()

@@ -19,6 +19,7 @@ type Task = {
   distribution_list: DistributionContact[];
   assignees: DistributionContact[];
   due_date: string | null;
+  is_private: boolean;
   created_at: string;
 };
 
@@ -324,6 +325,7 @@ function NewTaskModal({
     distribution_list: DistributionContact[];
     assignees: DistributionContact[];
     due_date: string;
+    is_private: boolean;
     photoFile: File | null;
   }) => void;
   onCancel: () => void;
@@ -335,6 +337,7 @@ function NewTaskModal({
   const [description, setDescription] = useState("");
   const [distribution, setDistribution] = useState<DistributionContact[]>([]);
   const [assignees, setAssignees] = useState<DistributionContact[]>([]);
+  const [isPrivate, setIsPrivate] = useState(false);
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
@@ -348,15 +351,19 @@ function NewTaskModal({
     const file = e.target.files?.[0];
     if (!file) return;
     setPhotoFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setPhotoPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setPhotoPreview(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setPhotoPreview(null);
+    }
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
-    onConfirm({ task_number: taskNumber, title, status, category, description, distribution_list: distribution, assignees, due_date: dueDate, photoFile });
+    onConfirm({ task_number: taskNumber, title, status, category, description, distribution_list: distribution, assignees, due_date: dueDate, is_private: isPrivate, photoFile });
   }
 
   return (
@@ -472,19 +479,27 @@ function NewTaskModal({
             />
           </div>
 
-          {/* Photo attachment */}
+          {/* File attachment */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Photo Attachment</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Attachment</label>
             <input
               ref={photoInputRef}
               type="file"
-              accept="image/*"
               className="hidden"
               onChange={handlePhotoChange}
             />
-            {photoPreview ? (
+            {photoFile ? (
               <div className="relative">
-                <img src={photoPreview} alt="Preview" className="w-full h-40 object-cover rounded-lg border border-gray-200" />
+                {photoPreview ? (
+                  <img src={photoPreview} alt="Preview" className="w-full h-40 object-cover rounded-lg border border-gray-200" />
+                ) : (
+                  <div className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                    <svg className="w-6 h-6 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                    </svg>
+                    <span className="text-sm text-gray-700 truncate">{photoFile.name}</span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => { setPhotoFile(null); setPhotoPreview(null); if (photoInputRef.current) photoInputRef.current.value = ""; }}
@@ -502,11 +517,29 @@ function NewTaskModal({
                 className="w-full flex flex-col items-center justify-center gap-2 py-6 border-2 border-dashed border-gray-200 rounded-lg text-gray-400 hover:border-gray-300 hover:text-gray-500 transition-colors"
               >
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M4.5 19.5h15a.75.75 0 00.75-.75V6.75A.75.75 0 0019.5 6h-15a.75.75 0 00-.75.75v12c0 .414.336.75.75.75z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                 </svg>
-                <span className="text-xs">Click to attach a photo</span>
+                <span className="text-xs">Click to attach a file</span>
               </button>
             )}
+          </div>
+
+          {/* Private toggle */}
+          <div>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isPrivate}
+                onChange={(e) => setIsPrivate(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+              />
+              <span className="text-sm">
+                <span className="font-medium text-gray-900">Private</span>
+                <span className="block text-xs text-gray-500 mt-0.5">
+                  Only make visible to Assignees, Distribution List members, and Task Creator.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="flex gap-3 justify-end pt-1">
@@ -767,6 +800,7 @@ export default function TasksClient({
     distribution_list: DistributionContact[];
     assignees: DistributionContact[];
     due_date: string;
+    is_private: boolean;
     photoFile: File | null;
   }) {
     setShowNew(false);
@@ -784,6 +818,7 @@ export default function TasksClient({
         distribution_list: data.distribution_list,
         assignees: data.assignees,
         due_date: data.due_date || null,
+        is_private: data.is_private,
       }),
     });
 
@@ -942,6 +977,14 @@ export default function TasksClient({
                     <td className="px-4 py-3 text-sm text-gray-400 font-mono">{task.task_number}</td>
                     <td className="px-4 py-3">
                       <span className="text-sm font-medium text-gray-900">{task.title}</span>
+                      {task.is_private && (
+                        <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-medium align-middle">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c.828 0 1.5-.672 1.5-1.5S12.828 8 12 8s-1.5.672-1.5 1.5S11.172 11 12 11zm6-4V6a6 6 0 10-12 0v1a2 2 0 00-2 2v9a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2z" />
+                          </svg>
+                          Private
+                        </span>
+                      )}
                       {task.photo_url && (
                         <svg className="inline-block w-3.5 h-3.5 ml-1.5 text-gray-300 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />

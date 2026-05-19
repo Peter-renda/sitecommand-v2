@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
+import { canViewTask } from "../route";
 
 export async function GET(
   _req: NextRequest,
@@ -20,6 +21,7 @@ export async function GET(
     .single();
 
   if (error || !data) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  if (!canViewTask(data, session)) return NextResponse.json({ error: "Task not found" }, { status: 404 });
   return NextResponse.json(data);
 }
 
@@ -41,6 +43,7 @@ export async function PATCH(
   if (body.description !== undefined) update.description = body.description;
   if (body.distribution_list !== undefined) update.distribution_list = body.distribution_list;
   if (body.assignees !== undefined) update.assignees = body.assignees;
+  if (body.is_private !== undefined) update.is_private = Boolean(body.is_private);
 
   const supabase = getSupabase();
   const { data, error } = await supabase
