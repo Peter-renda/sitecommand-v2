@@ -764,31 +764,28 @@ export default function DashboardClient({ username, email, role, companyRole, us
           )}
           <div className="relative group shrink-0">
             <span
-              className="hidden sm:block text-sm text-gray-400 truncate max-w-[120px] cursor-default"
-              title="Account and Settings"
+              className="hidden sm:block text-sm text-gray-400 truncate max-w-[120px] cursor-default pb-2 -mb-2"
+              title="Settings and Logout"
             >
               {username}
             </span>
-            <div className="absolute right-0 top-full mt-1 hidden group-hover:block z-40">
+            <div className="absolute right-0 top-full hidden group-hover:block z-40">
               <div className="w-44 rounded-md border border-gray-200 bg-white py-1 shadow-lg">
                 <a
                   href="/settings/account"
                   className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
                 >
-                  Account
-                </a>
-                <a
-                  href="/settings"
-                  className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
-                >
                   Settings
                 </a>
+                <button
+                  onClick={handleLogout}
+                  className="block w-full text-left px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                >
+                  Logout
+                </button>
               </div>
             </div>
           </div>
-          <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors shrink-0">
-            Logout
-          </button>
         </div>
       </header>
 
