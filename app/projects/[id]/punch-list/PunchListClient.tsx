@@ -44,6 +44,25 @@ type PunchListItem = {
 
 
 const PRIORITIES = ["Low", "Medium", "High"];
+const PUNCH_LIST_FILTER_OPTIONS = [
+  "Assignee",
+  "Assignee Company",
+  "Assignee Response",
+  "Ball In Court",
+  "Closed By",
+  "Creator",
+  "Date Closed",
+  "Date Created",
+  "Date Notified",
+  "Due Date",
+  "Final Approver",
+  "Location",
+  "Priority",
+  "Punch Item Manager",
+  "Status",
+  "Trade",
+  "Type",
+];
 const STATUSES = ["open", "in_progress", "closed"];
 const STATUS_LABELS: Record<string, string> = { open: "Open", in_progress: "In Progress", closed: "Closed" };
 const STATUS_COLORS: Record<string, string> = {
@@ -461,6 +480,8 @@ export default function PunchListClient({ projectId, role, username, userId }: {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingItem, setEditingItem] = useState<PunchListItem | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const filterButtonRef = useRef<HTMLDivElement>(null);
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
@@ -583,6 +604,40 @@ export default function PunchListClient({ projectId, role, username, userId }: {
             )}
           </div>
           <div className="flex items-center gap-2">
+            {activeTab === "punch_lists" && (
+              <div className="relative" ref={filterButtonRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowFilters((open) => !open)}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border rounded-md transition-colors ${
+                    showFilters ? "border-gray-900 text-gray-900 bg-gray-50" : "text-gray-700 border-gray-200 bg-white hover:bg-gray-50"
+                  }`}
+                >
+                  <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  Filter
+                </button>
+                {showFilters && (
+                  <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded-md shadow-lg z-30 overflow-hidden">
+                    <div className="px-3 py-2 border-b border-gray-100">
+                      <span className="text-xs font-semibold uppercase tracking-[0.1em] text-gray-500">Filter by</span>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto py-1">
+                      {PUNCH_LIST_FILTER_OPTIONS.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <button onClick={() => exportPunchListPDF(displayedItems, directory)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors">
               <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
               Export as PDF
