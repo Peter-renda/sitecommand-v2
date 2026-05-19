@@ -1706,8 +1706,8 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                         }
                         className="mr-2"
                       />
-                      <a href={`/projects/${projectId}/submittals/${s.id}`} className="inline-flex p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      <a href={`/projects/${projectId}/submittals/${s.id}?edit=1`} className="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50 hover:text-gray-900 transition-colors">
+                        Edit
                       </a>
                     </td>
                     <td className="px-4 py-3 text-sm font-mono text-[color:var(--ink)] tabular-nums">#{s.submittal_number}</td>

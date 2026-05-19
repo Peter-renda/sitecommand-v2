@@ -542,6 +542,32 @@ export default function SubmittalDetailClient({
     setSelectedExportIds(["cover"]);
   }, [submittal]);
 
+  const autoEditAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!submittal || autoEditAppliedRef.current) return;
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("edit") !== "1") return;
+    if (submittal.created_by !== userId) return;
+    autoEditAppliedRef.current = true;
+    setEditValues({
+      title: submittal.title,
+      revision: submittal.revision,
+      submittal_type: submittal.submittal_type,
+      status: submittal.status,
+      submit_by: submittal.submit_by,
+      issue_date: submittal.issue_date,
+      cost_code: submittal.cost_code,
+      linked_drawings: submittal.linked_drawings,
+      description: submittal.description,
+    });
+    setIsEditing(true);
+    params.delete("edit");
+    const newSearch = params.toString();
+    const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
+    window.history.replaceState(null, "", newUrl);
+  }, [submittal, userId]);
+
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
       const target = e.target as Node;
