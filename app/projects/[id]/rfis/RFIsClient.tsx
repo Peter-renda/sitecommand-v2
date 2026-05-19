@@ -333,13 +333,13 @@ function CreateRFIModal({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Subject (max 200 characters)</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Subject <span className="text-red-500">*</span> (max 200 characters)</label>
             <input type="text" maxLength={200} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
             <p className="text-xs text-gray-400 mt-0.5">{subject.length}/200</p>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Question</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Question <span className="text-red-500">*</span></label>
             <textarea value={question} onChange={(e) => setQuestion(e.target.value)} rows={4} placeholder="Question..." className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 resize-none" />
           </div>
 
@@ -389,7 +389,7 @@ function CreateRFIModal({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Assignees</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Assignees <span className="text-red-500">*</span></label>
             <MultiContactPicker directory={directory} selected={assignees} onChange={setAssignees} filterType="user" placeholder="Select users..." />
           </div>
 
