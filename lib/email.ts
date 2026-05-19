@@ -364,23 +364,82 @@ export async function sendContractorInviteEmail(
   );
 }
 
-export async function sendDocumentTrackingEmail(
-  to: string,
-  documentName: string,
-  action: string,
-  details: string,
-  changedByName: string,
-) {
+export async function sendDocumentTrackingEmail({
+  to,
+  companyName,
+  projectName,
+  filePath,
+  fileName,
+  fileUrl,
+  event,
+  eventTime,
+  comment,
+  viewOnlineUrl,
+}: {
+  to: string;
+  companyName: string;
+  projectName: string;
+  filePath: string;
+  fileName: string;
+  fileUrl: string | null;
+  event: string;
+  eventTime: Date;
+  comment?: string | null;
+  viewOnlineUrl: string;
+}) {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const dateStr = `${eventTime.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "2-digit" })} at ${eventTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase()}`;
+  const fileCell = fileUrl
+    ? `<a href="${escape(fileUrl)}" style="color:#1d6fa5;text-decoration:underline;">${escape(fileName)}</a>`
+    : escape(fileName);
+
   await sendEmail("document-tracking", {
     to,
-    subject: `Document Update: ${action} — ${documentName}`,
+    subject: `${event}: ${fileName} — ${projectName}`,
     html: `
-      <p style="font-size:14px;">A document you are tracking has been updated on SiteCommand.</p>
-      <p style="font-size:16px;font-weight:600;">${documentName}</p>
-      <p style="font-size:13px;color:#555;"><strong>Action:</strong> ${action}</p>
-      <p style="font-size:13px;color:#555;">${details}</p>
-      <p style="font-size:13px;color:#555;"><strong>By:</strong> ${changedByName}</p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you enabled tracking on this document or folder.</p>
+      <div style="font-family:Helvetica,Arial,sans-serif;max-width:720px;margin:0 auto;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+          <tr>
+            <td style="background:#3b3b3b;color:#fff;padding:18px 24px;font-size:22px;font-weight:600;">
+              ${escape(companyName)}
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#d8d8d8;margin-bottom:16px;">
+          <tr>
+            <td style="padding:8px 16px;font-size:13px;color:#333;">
+              More details: <a href="${escape(viewOnlineUrl)}" style="color:#1d6fa5;text-decoration:underline;">View online</a>
+            </td>
+          </tr>
+        </table>
+        <h2 style="color:#d76027;font-weight:400;font-size:22px;line-height:1.3;margin:0 0 16px;">
+          The following 1 item has changed within the Documents Tool.
+        </h2>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#eee;color:#333;">
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;"></th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">File Path</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">File</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Current Version Comments</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Events</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(projectName)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(filePath)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${fileCell}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${comment ? escape(comment) : ""}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(event)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${dateStr}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="color:#888;font-size:11px;margin-top:18px;">You are receiving this because you enabled email notifications on this document or folder.</p>
+      </div>
     `,
   });
 }
