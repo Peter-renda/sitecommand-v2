@@ -344,6 +344,8 @@ export default function NewTransmittalClient({
   const [items, setItems] = useState<TransmittalItem[]>([]);
   const [newItemFormat, setNewItemFormat] = useState("");
   const [comments, setComments] = useState("");
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [attachedFileUrl, setAttachedFileUrl] = useState<string>("");
 
   useEffect(() => {
     Promise.all([
@@ -431,6 +433,17 @@ export default function NewTransmittalClient({
     setItems((prev) => prev.filter((item) => item.id !== id));
   }
 
+  function handleFileChange(file: File | null) {
+    if (attachedFileUrl) URL.revokeObjectURL(attachedFileUrl);
+    if (!file) {
+      setAttachedFile(null);
+      setAttachedFileUrl("");
+      return;
+    }
+    setAttachedFile(file);
+    setAttachedFileUrl(URL.createObjectURL(file));
+  }
+
   async function handleSave(sendEmail: boolean) {
     setSaveAction(sendEmail ? "email" : "create");
     const res = await fetch(`/api/projects/${projectId}/transmittals`, {
@@ -453,6 +466,7 @@ export default function NewTransmittalClient({
           copies: item.copies,
         })),
         comments,
+        attachments: attachedFile ? [{ name: attachedFile.name }] : [],
         send_email: sendEmail,
       }),
     });
@@ -556,7 +570,15 @@ export default function NewTransmittalClient({
               </select>
             </div>
             <div className="flex items-center gap-6">
-              <label className="text-sm text-gray-600 w-24 flex-shrink-0">Private:</label>
+              <label className="text-sm text-gray-600 w-24 flex-shrink-0 flex items-center gap-1.5">
+                <span>Private:</span>
+                <span
+                  title="Private transmittals can only be viewed by the person who created them."
+                  className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-400 text-[10px] leading-none text-gray-500 cursor-help"
+                >
+                  i
+                </span>
+              </label>
               <input
                 type="checkbox"
                 checked={isPrivate}
@@ -747,8 +769,31 @@ export default function NewTransmittalClient({
 
         {/* ── COMMENTS ────────────────────────────────────────────────────── */}
         <section className="mb-8">
-          <h2 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-3">Comments</h2>
-          <RichTextEditor onChange={setComments} placeholder="Add comments..." />
+          <h2 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-3">Description</h2>
+          <textarea
+            value={comments}
+            onChange={(e) => setComments(e.target.value)}
+            placeholder="Add description..."
+            rows={5}
+            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+          />
+          <div className="mt-3">
+            <label className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 cursor-pointer">
+              Attach file
+              <input
+                type="file"
+                className="hidden"
+                onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            {attachedFile && attachedFileUrl && (
+              <p className="mt-2 text-sm text-gray-700">
+                <a href={attachedFileUrl} download={attachedFile.name} className="text-orange-600 hover:text-orange-700 underline">
+                  {attachedFile.name}
+                </a>
+              </p>
+            )}
+          </div>
         </section>
 
         {/* Actions */}

@@ -36,6 +36,7 @@ export default async function TransmittalDetailPage({
     .single();
 
   if (error || !transmittal) notFound();
+  if (transmittal.private && transmittal.created_by !== session.id) notFound();
 
   const items = Array.isArray(transmittal.items) ? (transmittal.items as TransmittalItem[]) : [];
 
