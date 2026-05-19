@@ -28,6 +28,108 @@ type Contact = {
 
 const PERMISSIONS = PERMISSION_TEMPLATE_ORDER;
 
+// ── Export helpers ────────────────────────────────────────────────────────────
+
+function contactDisplayName(c: Contact): string {
+  if (c.type === "company") return c.company ?? "Unnamed Company";
+  if (c.type === "distribution_group") return c.group_name ?? "Unnamed Group";
+  const parts = [c.first_name, c.last_name].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : "Unnamed";
+}
+
+function contactTypeLabel(t: ContactType): string {
+  if (t === "user") return "Person";
+  if (t === "company") return "Company";
+  return "Distribution Group";
+}
+
+function exportDirectoryCSV(items: Contact[]) {
+  const headers = ["Name", "Type", "Email", "Phone", "Company", "Job Title", "Permission", "Address"];
+  const rows = items.map((c) => [
+    contactDisplayName(c),
+    contactTypeLabel(c.type),
+    c.email ?? "",
+    c.phone ?? "",
+    c.company ?? "",
+    c.job_title ?? "",
+    c.permission ?? "",
+    c.address ?? "",
+  ]);
+  const csv = [headers, ...rows]
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "directory.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function exportDirectoryPDF(items: Contact[]) {
+  const rows = items
+    .map((c) => `<tr>
+      <td>${escapeHtml(contactDisplayName(c))}</td>
+      <td>${escapeHtml(contactTypeLabel(c.type))}</td>
+      <td>${escapeHtml(c.email ?? "")}</td>
+      <td>${escapeHtml(c.phone ?? "")}</td>
+      <td>${escapeHtml(c.company ?? "")}</td>
+      <td>${escapeHtml(c.job_title ?? "")}</td>
+      <td>${escapeHtml(c.permission ?? "")}</td>
+    </tr>`)
+    .join("");
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Directory</title>
+    <style>
+      body { font-family: Arial, sans-serif; font-size: 10px; padding: 20px; }
+      h1 { font-size: 14px; margin-bottom: 12px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #f3f4f6; text-align: left; padding: 5px 6px; font-size: 9px;
+           text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280;
+           border-bottom: 1px solid #e5e7eb; }
+      td { padding: 5px 6px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+      tr:last-child td { border-bottom: none; }
+      @media print { body { padding: 0; } }
+    </style></head><body>
+    <h1>Directory</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th><th>Type</th><th>Email</th><th>Phone</th>
+          <th>Company</th><th>Job Title</th><th>Permission</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:0;height:0;border:0;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) { document.body.removeChild(iframe); return; }
+  doc.open();
+  doc.write(html);
+  doc.close();
+  setTimeout(() => {
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+    setTimeout(() => document.body.removeChild(iframe), 500);
+  }, 300);
+}
+
 // ── Avatar ────────────────────────────────────────────────────────────────────
 
 const AVATAR_COLORS = [
@@ -540,6 +642,16 @@ export default function DirectoryClient({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
 
+  function computeMenuPos(rect: DOMRect): { top: number; right: number } {
+    const estimatedHeight = 96;
+    const gap = 4;
+    const viewportH = window.innerHeight;
+    const top = rect.bottom + gap + estimatedHeight > viewportH
+      ? Math.max(8, rect.top - gap - estimatedHeight)
+      : rect.bottom + gap;
+    return { top, right: window.innerWidth - rect.right };
+  }
+
   // Invite state
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [invitedIds, setInvitedIds] = useState<Set<string>>(new Set());
@@ -547,6 +659,10 @@ export default function DirectoryClient({
   // Add menu dropdown
   const [showAddMenu, setShowAddMenu] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
+
+  // Export menu dropdown
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Active tab
   const [activeTab, setActiveTab] = useState<"all" | "companies">("all");
@@ -559,6 +675,7 @@ export default function DirectoryClient({
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) setShowAddMenu(false);
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) setShowExportMenu(false);
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
@@ -866,6 +983,38 @@ export default function DirectoryClient({
           {/* Spacer */}
           <div className="flex-1" />
 
+          {/* Export button */}
+          <div ref={exportMenuRef} className="relative">
+            <button
+              onClick={() => setShowExportMenu((o) => !o)}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded hover:bg-gray-50 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+              </svg>
+              Export
+              <svg className={`w-4 h-4 transition-transform ${showExportMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-100 rounded-lg shadow-lg py-1 z-20">
+                <button
+                  onClick={() => { exportDirectoryPDF(filtered); setShowExportMenu(false); }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Export as PDF
+                </button>
+                <button
+                  onClick={() => { exportDirectoryCSV(filtered); setShowExportMenu(false); }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Export as CSV
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Add button */}
           <div ref={addMenuRef} className="relative">
             <button
@@ -1032,7 +1181,7 @@ export default function DirectoryClient({
                           e.stopPropagation();
                           if (openMenuId === ce.id) { setOpenMenuId(null); setMenuPos(null); return; }
                           const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                          setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                          setMenuPos(computeMenuPos(rect));
                           setOpenMenuId(ce.id);
                         }}
                         className="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
@@ -1103,7 +1252,7 @@ export default function DirectoryClient({
                                 e.stopPropagation();
                                 if (openMenuId === companyEntry.id) { setOpenMenuId(null); setMenuPos(null); return; }
                                 const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                                setMenuPos(computeMenuPos(rect));
                                 setOpenMenuId(companyEntry.id);
                               }}
                               className="ml-auto p-1 text-gray-300 hover:text-gray-600 rounded hover:bg-gray-100 transition-colors"
@@ -1128,7 +1277,7 @@ export default function DirectoryClient({
                         openMenuId={openMenuId}
                         onInvite={handleSendInvite}
                         onMenuOpen={(id, rect) => {
-                          setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                          setMenuPos(computeMenuPos(rect));
                           setOpenMenuId(id);
                         }}
                         onMenuClose={() => { setOpenMenuId(null); setMenuPos(null); }}
@@ -1175,7 +1324,7 @@ export default function DirectoryClient({
                         openMenuId={openMenuId}
                         onInvite={handleSendInvite}
                         onMenuOpen={(id, rect) => {
-                          setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                          setMenuPos(computeMenuPos(rect));
                           setOpenMenuId(id);
                         }}
                         onMenuClose={() => { setOpenMenuId(null); setMenuPos(null); }}
@@ -1222,7 +1371,7 @@ export default function DirectoryClient({
                               e.stopPropagation();
                               if (openMenuId === c.id) { setOpenMenuId(null); setMenuPos(null); return; }
                               const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                              setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                              setMenuPos(computeMenuPos(rect));
                               setOpenMenuId(c.id);
                             }}
                             className="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
