@@ -1358,7 +1358,7 @@ Recipients are also notified by email at assignment time.
 - `DELETE /api/projects/[id]/transaction-orders/assignments/[assignmentId]` — TO admin or assigner only. Best-effort removes the storage file.
 
 ### Storage / Schema
-- Table `transaction_order_assignments` (migration `130_transaction_order_assignments.sql`):
+- Table `transaction_order_assignments` (migration `132_transaction_order_assignments.sql`):
   - `id`, `project_id` (target), `assigned_by`, `invoice_filename`, `invoice_storage_path`, `notes`, `recipients JSONB`, `status` (default `open`), `created_at`, `completed_at`, `completed_by`.
   - `recipients` shape: `[{ contactId, userId | null, email, name, role }]`. `userId` is resolved at create time from `users.email` so the dashboard query can match efficiently.
 - Storage path: `project-drawings/{projectId}/_assignments/{ts}-{safeFilename}` (existing bucket, no new bucket needed).
