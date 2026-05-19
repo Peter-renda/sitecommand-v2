@@ -23,6 +23,7 @@ type Contact = {
   notes: string | null;
   job_title: string | null;
   address: string | null;
+  member_contact_ids: string[] | null;
   created_at: string;
 };
 
@@ -364,25 +365,62 @@ function CompanyGroupModal({
   );
 }
 
-type DistributionGroupFormData = { group_name: string; email: string; notes: string };
+type DistributionGroupFormData = {
+  group_name: string;
+  notes: string;
+  member_contact_ids: string[];
+};
 
 function DistributionGroupModal({
   initial,
+  candidateMembers,
   onConfirm,
   onCancel,
 }: {
   initial?: Partial<DistributionGroupFormData>;
+  candidateMembers: Contact[];
   onConfirm: (data: DistributionGroupFormData) => void;
   onCancel: () => void;
 }) {
+  const isEdit = Boolean(initial);
   const [form, setForm] = useState<DistributionGroupFormData>({
     group_name: initial?.group_name ?? "",
-    email: initial?.email ?? "",
     notes: initial?.notes ?? "",
+    member_contact_ids: initial?.member_contact_ids ?? [],
   });
+  const [memberSearch, setMemberSearch] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
-  function set(field: keyof DistributionGroupFormData, value: string) {
+  function set<K extends keyof DistributionGroupFormData>(field: K, value: DistributionGroupFormData[K]) {
     setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  const memberContacts = form.member_contact_ids
+    .map((id) => candidateMembers.find((c) => c.id === id))
+    .filter((c): c is Contact => Boolean(c));
+
+  const suggestionPool = candidateMembers.filter((c) => !form.member_contact_ids.includes(c.id));
+  const q = memberSearch.trim().toLowerCase();
+  const suggestions = (q
+    ? suggestionPool.filter((c) => {
+        const parts = [c.first_name, c.last_name, c.company, c.email].filter(Boolean) as string[];
+        return parts.some((p) => p.toLowerCase().includes(q));
+      })
+    : suggestionPool
+  ).slice(0, 20);
+
+  function addMember(id: string) {
+    set("member_contact_ids", [...form.member_contact_ids, id]);
+    setMemberSearch("");
+    setShowSuggestions(false);
+  }
+
+  function removeMember(id: string) {
+    set("member_contact_ids", form.member_contact_ids.filter((m) => m !== id));
+  }
+
+  function removeAll() {
+    set("member_contact_ids", []);
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -391,39 +429,145 @@ function DistributionGroupModal({
     onConfirm(form);
   }
 
+  const groupLabel = form.group_name.trim() || "Group";
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-      <div className="bg-white rounded-xl w-full max-w-md shadow-xl">
+    <div className="fixed inset-0 bg-black/40 flex items-start justify-center z-50 px-4 py-10 overflow-y-auto">
+      <div className="bg-white rounded-xl w-full max-w-4xl shadow-xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-900">{initial ? "Edit Distribution Group" : "Add Distribution Group"}</h2>
+          <div>
+            <div className="text-xs text-gray-400 mb-0.5">
+              Directory <span className="mx-1">›</span> <span className="text-gray-600">{groupLabel}</span>
+            </div>
+            <h2 className="text-base font-semibold text-gray-900">{isEdit ? "Edit Distribution Group" : "Add Distribution Group"}</h2>
+          </div>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Group Name <span className="text-red-500">*</span></label>
-            <input type="text" value={form.group_name} onChange={(e) => set("group_name", e.target.value)} required
-              className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              placeholder="e.g. Project Managers" />
+        <form onSubmit={handleSubmit} className="px-6 py-5">
+          <div className="divide-y divide-gray-100 border-b border-gray-100">
+            <div className="grid grid-cols-[200px_1fr] gap-4 py-3 items-center">
+              <label className="text-sm font-medium text-gray-700">Name: <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                value={form.group_name}
+                onChange={(e) => set("group_name", e.target.value)}
+                required
+                autoFocus
+                className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              />
+            </div>
+            <div className="grid grid-cols-[200px_1fr] gap-4 py-3 items-center">
+              <label className="text-sm font-medium text-gray-700">Description:</label>
+              <input
+                type="text"
+                value={form.notes}
+                onChange={(e) => set("notes", e.target.value)}
+                className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              />
+            </div>
+            <div className="grid grid-cols-[200px_1fr] gap-4 py-3 items-start">
+              <label className="text-sm font-medium text-gray-700 pt-2">
+                Add User To {groupLabel}:
+              </label>
+              <div className="relative max-w-md">
+                <input
+                  type="text"
+                  value={memberSearch}
+                  onChange={(e) => { setMemberSearch(e.target.value); setShowSuggestions(true); }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  placeholder="search by first name, last name, or by company"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                />
+                {showSuggestions && suggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-64 overflow-y-auto z-10">
+                    {suggestions.map((c) => {
+                      const name = [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email || "Unnamed";
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); addMember(c.id); }}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors flex items-center justify-between gap-3"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Avatar first={c.first_name} last={c.last_name} />
+                            <span className="text-gray-900">{name}</span>
+                          </span>
+                          {c.company && <span className="text-xs text-gray-500 truncate">{c.company}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {showSuggestions && q && suggestions.length === 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg px-3 py-2 text-xs text-gray-400 z-10">
+                    No matching users in this project directory.
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Group Email</label>
-            <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              placeholder="group@example.com" />
-            <p className="text-xs text-gray-400 mt-1">Optional shared address for the group.</p>
+
+          <div className="pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-semibold text-gray-700">Members</span>
+              {memberContacts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={removeAll}
+                  className="text-xs text-red-600 hover:text-red-700 transition-colors flex items-center gap-1"
+                >
+                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                  </svg>
+                  Remove All
+                </button>
+              )}
+            </div>
+            <div className="bg-gray-50 border border-gray-200 rounded-md">
+              {memberContacts.length === 0 ? (
+                <div className="px-4 py-6 text-center text-xs text-gray-400">No members yet — add users from the project directory above.</div>
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {memberContacts.map((c) => {
+                    const name = [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email || "Unnamed";
+                    return (
+                      <li key={c.id} className="flex items-center justify-between gap-3 px-4 py-2">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Avatar first={c.first_name} last={c.last_name} />
+                          <div className="min-w-0">
+                            <div className="text-sm text-gray-900 truncate">{name}</div>
+                            <div className="text-xs text-gray-500 truncate">
+                              {[c.company, c.email].filter(Boolean).join(" • ") || ""}
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeMember(c.id)}
+                          className="text-gray-400 hover:text-red-600 transition-colors"
+                          aria-label="Remove member"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
-            <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2}
-              className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 resize-none" />
-          </div>
-          <div className="flex gap-3 justify-end pt-2">
+
+          <div className="flex gap-3 justify-end pt-5">
             <button type="button" onClick={onCancel}
-              className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">Cancel</button>
+              className="px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors">Cancel</button>
             <button type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors">{initial ? "Save Changes" : "Add Group"}</button>
+              className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors">{isEdit ? "Update" : "Add Group"}</button>
           </div>
         </form>
       </div>
@@ -665,7 +809,7 @@ export default function DirectoryClient({
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Active tab
-  const [activeTab, setActiveTab] = useState<"all" | "companies">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "companies" | "groups">("all");
 
   // Sort direction for company name column
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -747,7 +891,12 @@ export default function DirectoryClient({
     const res = await fetch(`/api/projects/${projectId}/directory`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "distribution_group", group_name: data.group_name, email: data.email, notes: data.notes }),
+      body: JSON.stringify({
+        type: "distribution_group",
+        group_name: data.group_name,
+        notes: data.notes,
+        member_contact_ids: data.member_contact_ids,
+      }),
     });
     if (res.ok) { const c = await res.json(); setContacts((prev) => [...prev, c]); }
   }
@@ -1067,24 +1216,36 @@ export default function DirectoryClient({
           >
             Companies
           </button>
+          <button
+            onClick={() => setActiveTab("groups")}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === "groups" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+          >
+            Distribution Groups
+          </button>
         </div>
 
         {/* Count row */}
         {!loading && totalCount > 0 && (
           <p className="text-xs text-gray-500 mb-3">
-            Displaying 1 – {activeTab === "companies" ? companyEntries.length : totalCount} of {activeTab === "companies" ? companyEntries.length : totalCount}
+            Displaying 1 – {activeTab === "companies" ? companyEntries.length : activeTab === "groups" ? groups.length : totalCount} of {activeTab === "companies" ? companyEntries.length : activeTab === "groups" ? groups.length : totalCount}
           </p>
         )}
 
         {/* Table */}
         {loading ? (
           <p className="text-sm text-gray-400 py-8">Loading…</p>
-        ) : (activeTab === "all" ? totalCount === 0 : companyEntries.length === 0) ? (
+        ) : (activeTab === "all" ? totalCount === 0 : activeTab === "companies" ? companyEntries.length === 0 : groups.length === 0) ? (
           <div className="bg-white border border-dashed border-gray-200 rounded-xl py-16 text-center">
             <svg className="w-10 h-10 text-gray-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
             </svg>
-            <p className="text-sm text-gray-400">{activeTab === "companies" ? `No companies${q ? " matching your search" : " yet"}` : `No contacts${q ? " matching your search" : " yet"}`}</p>
+            <p className="text-sm text-gray-400">
+              {activeTab === "companies"
+                ? `No companies${q ? " matching your search" : " yet"}`
+                : activeTab === "groups"
+                  ? `No distribution groups${q ? " matching your search" : " yet"}`
+                  : `No contacts${q ? " matching your search" : " yet"}`}
+            </p>
             {!q && <p className="text-xs text-gray-300 mt-1">Use the Add button to create your first contact</p>}
           </div>
         ) : (
@@ -1338,13 +1499,15 @@ export default function DirectoryClient({
                 )}
 
                 {/* Distribution groups */}
-                {activeTab === "all" && groups.length > 0 && (
+                {(activeTab === "all" || activeTab === "groups") && groups.length > 0 && (
                   <>
-                    <tr className="bg-gray-50 border-b border-gray-200">
-                      <td colSpan={9} className="px-3 py-2">
-                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Distribution Groups</span>
-                      </td>
-                    </tr>
+                    {activeTab === "all" && (
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <td colSpan={9} className="px-3 py-2">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Distribution Groups</span>
+                        </td>
+                      </tr>
+                    )}
                     {groups.map((c) => (
                       <tr key={c.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-3 py-3" />
@@ -1356,10 +1519,18 @@ export default function DirectoryClient({
                             onChange={() => toggleSelectContact(c.id)}
                           />
                         </td>
-                        <td className="px-3 py-3 font-medium text-gray-900">{c.group_name}</td>
-                        <td className="px-3 py-3 text-gray-500" />
                         <td className="px-3 py-3">
-                          {c.email && <a href={`mailto:${c.email}`} className="text-gray-600 hover:text-gray-900 text-xs transition-colors">{c.email}</a>}
+                          <div className="flex items-center gap-2.5">
+                            <button onClick={() => setEditTarget(c)} className="shrink-0 px-2 py-0.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition-colors">Edit</button>
+                            <span className="font-medium text-gray-900 text-sm">{c.group_name}</span>
+                            {(c.member_contact_ids?.length ?? 0) > 0 && (
+                              <span className="text-xs text-gray-400">({c.member_contact_ids?.length} {c.member_contact_ids?.length === 1 ? "member" : "members"})</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-gray-500" />
+                        <td className="px-3 py-3 text-xs text-gray-500">
+                          {c.notes || <span className="text-gray-300">—</span>}
                         </td>
                         <td className="px-3 py-3 text-gray-500" />
                         <td className="px-3 py-3 text-gray-500" />
@@ -1418,7 +1589,11 @@ export default function DirectoryClient({
         <CompanyGroupModal onConfirm={handleAddCompany} onCancel={() => setShowCompanyModal(false)} />
       )}
       {showGroupModal && (
-        <DistributionGroupModal onConfirm={handleAddDistributionGroup} onCancel={() => setShowGroupModal(false)} />
+        <DistributionGroupModal
+          candidateMembers={contacts.filter((c) => c.type === "user")}
+          onConfirm={handleAddDistributionGroup}
+          onCancel={() => setShowGroupModal(false)}
+        />
       )}
       {showBulkAddModal && (
         <BulkAddFromCompanyModal projectId={projectId} onConfirm={handleBulkAdd} onCancel={() => setShowBulkAddModal(false)} />
@@ -1440,7 +1615,12 @@ export default function DirectoryClient({
       )}
       {editTarget?.type === "distribution_group" && (
         <DistributionGroupModal
-          initial={{ group_name: editTarget.group_name ?? "", email: editTarget.email ?? "", notes: editTarget.notes ?? "" }}
+          initial={{
+            group_name: editTarget.group_name ?? "",
+            notes: editTarget.notes ?? "",
+            member_contact_ids: editTarget.member_contact_ids ?? [],
+          }}
+          candidateMembers={contacts.filter((c) => c.type === "user")}
           onConfirm={handleEdit}
           onCancel={() => setEditTarget(null)}
         />
