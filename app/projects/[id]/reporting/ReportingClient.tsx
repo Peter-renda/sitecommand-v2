@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
 import { deleteSavedReport, loadSavedReports, saveReport, type StoredReport } from "./saved-reports-store";
-import { Pill } from "@/components/design-system/Primitives";
 import { REPORT_TYPES, type ReportDef } from "./report-types";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -463,8 +462,8 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
-        active ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+      className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+        active ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"
       }`}
     >
       {label}
