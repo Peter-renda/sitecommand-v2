@@ -27,6 +27,7 @@ export const TOOL_SECTIONS = [
       { name: "Drawings", slug: "drawings" },
       { name: "BIM Viewer", slug: "bim" },
       { name: "Specifications", slug: "specifications" },
+      { name: "Permit Applications", slug: "permit-applications" },
     ],
   },
   {
