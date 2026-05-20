@@ -28,7 +28,7 @@ export async function GET(
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("assist_recurring_workflows")
-    .select("id, name, prompt, frequency, recipients, active, created_at, last_run_at")
+    .select("id, name, prompt, frequency, run_day_of_week, run_hour_et, recipients, active, created_at, last_run_at")
     .eq("project_id", projectId)
     .order("created_at", { ascending: false });
 
@@ -62,6 +62,8 @@ export async function GET(
     name: row.name,
     prompt: row.prompt,
     frequency: row.frequency,
+    runDayOfWeek: row.run_day_of_week,
+    runHourEt: row.run_hour_et,
     recipients: Array.isArray(row.recipients) ? (row.recipients as string[]) : [],
     active: row.active,
     createdAt: row.created_at,
@@ -93,6 +95,8 @@ export async function POST(
     name?: unknown;
     prompt?: unknown;
     frequency?: unknown;
+    runDayOfWeek?: unknown;
+    runHourEt?: unknown;
     recipients?: unknown;
   };
   try {
@@ -111,6 +115,15 @@ export async function POST(
       { error: "Frequency must be one of daily, weekly, monthly" },
       { status: 400 },
     );
+  }
+  const runDayOfWeek = typeof body.runDayOfWeek === "string" ? body.runDayOfWeek.trim().toLowerCase() : "";
+  const validDays = new Set(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]);
+  if (!validDays.has(runDayOfWeek)) {
+    return NextResponse.json({ error: "Day of week is required" }, { status: 400 });
+  }
+  const runHourEt = typeof body.runHourEt === "number" ? body.runHourEt : Number(body.runHourEt);
+  if (!Number.isInteger(runHourEt) || runHourEt < 0 || runHourEt > 23) {
+    return NextResponse.json({ error: "Run hour (ET) must be an integer between 0 and 23" }, { status: 400 });
   }
 
   const rawRecipients = Array.isArray(body.recipients) ? body.recipients : [];
@@ -133,9 +146,11 @@ export async function POST(
       name,
       prompt,
       frequency,
+      run_day_of_week: runDayOfWeek,
+      run_hour_et: runHourEt,
       recipients,
     })
-    .select("id, name, prompt, frequency, recipients, active, created_at, last_run_at")
+    .select("id, name, prompt, frequency, run_day_of_week, run_hour_et, recipients, active, created_at, last_run_at")
     .single();
 
   if (insertError) {
@@ -157,6 +172,8 @@ export async function POST(
       name: inserted.name,
       prompt: inserted.prompt,
       frequency: inserted.frequency,
+      runDayOfWeek: inserted.run_day_of_week,
+      runHourEt: inserted.run_hour_et,
       recipients: Array.isArray(inserted.recipients) ? (inserted.recipients as string[]) : [],
       active: inserted.active,
       createdAt: inserted.created_at,

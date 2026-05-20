@@ -14,6 +14,7 @@ type Message = {
 };
 
 type Frequency = "daily" | "weekly" | "monthly";
+type Weekday = "sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday";
 
 type WorkflowReport = {
   id: string;
@@ -28,6 +29,8 @@ type RecurringWorkflow = {
   name: string;
   prompt: string;
   frequency: Frequency;
+  runDayOfWeek: Weekday | null;
+  runHourEt: number | null;
   recipients: string[];
   active: boolean;
   createdAt: string;
@@ -40,6 +43,7 @@ const FREQUENCY_LABELS: Record<Frequency, string> = {
   weekly: "Weekly",
   monthly: "Monthly",
 };
+const WEEKDAY_OPTIONS: Weekday[] = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
 export default function AssistClient({ projectId }: { projectId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -54,6 +58,8 @@ export default function AssistClient({ projectId }: { projectId: string }) {
   const [wfPrompt, setWfPrompt] = useState("");
   const [wfFrequency, setWfFrequency] = useState<Frequency>("weekly");
   const [wfRecipients, setWfRecipients] = useState<string[]>([]);
+  const [wfRunDayOfWeek, setWfRunDayOfWeek] = useState<Weekday>("monday");
+  const [wfRunHourEt, setWfRunHourEt] = useState<number>(6);
   const [directoryRecipients, setDirectoryRecipients] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [wfSaving, setWfSaving] = useState(false);
   const [wfError, setWfError] = useState<string | null>(null);
@@ -184,7 +190,14 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       const res = await fetch(`/api/projects/${projectId}/assist/recurring-workflows`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, prompt, frequency: wfFrequency, recipients }),
+        body: JSON.stringify({
+          name,
+          prompt,
+          frequency: wfFrequency,
+          recipients,
+          runDayOfWeek: wfRunDayOfWeek,
+          runHourEt: wfRunHourEt,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Failed to save");
@@ -193,6 +206,8 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       setWfPrompt("");
       setWfFrequency("weekly");
       setWfRecipients([]);
+      setWfRunDayOfWeek("monday");
+      setWfRunHourEt(6);
     } catch (err) {
       setWfError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -390,6 +405,34 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                   <option value="monthly">Monthly</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Day of week</label>
+                <select
+                  value={wfRunDayOfWeek}
+                  onChange={(e) => setWfRunDayOfWeek(e.target.value as Weekday)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                >
+                  {WEEKDAY_OPTIONS.map((day) => (
+                    <option key={day} value={day}>
+                      {day[0].toUpperCase() + day.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Run hour (ET)</label>
+                <select
+                  value={String(wfRunHourEt)}
+                  onChange={(e) => setWfRunHourEt(Number(e.target.value))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                >
+                  {Array.from({ length: 24 }).map((_, h) => (
+                    <option key={h} value={h}>
+                      {h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div>
@@ -407,22 +450,23 @@ export default function AssistClient({ projectId }: { projectId: string }) {
               <label className="block text-xs font-medium text-gray-700 mb-1">
                 Recipients from Project Directory
               </label>
-              <select
-                multiple
-                value={wfRecipients}
-                onChange={(e) => {
-                  const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
-                  setWfRecipients(selected);
-                }}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-h-[110px]"
-              >
+              <div className="rounded-md border border-gray-300 px-3 py-2 max-h-[140px] overflow-y-auto space-y-1">
                 {directoryRecipients.map((recipient) => (
-                  <option key={recipient.id} value={recipient.email}>
-                    {recipient.name} ({recipient.email})
-                  </option>
+                  <label key={recipient.id} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={wfRecipients.includes(recipient.email)}
+                      onChange={(e) => {
+                        setWfRecipients((prev) =>
+                          e.target.checked ? [...prev, recipient.email] : prev.filter((v) => v !== recipient.email),
+                        );
+                      }}
+                    />
+                    <span>{recipient.name} ({recipient.email})</span>
+                  </label>
                 ))}
-              </select>
-              <p className="mt-1 text-[11px] text-gray-500">Hold Ctrl/Cmd to select multiple recipients.</p>
+              </div>
+              <p className="mt-1 text-[11px] text-gray-500">Select one or more recipients.</p>
             </div>
 
             {wfError && (
@@ -457,6 +501,16 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                       <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
                         {FREQUENCY_LABELS[w.frequency]}
                       </span>
+                      {w.runDayOfWeek && (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                          {w.runDayOfWeek[0].toUpperCase() + w.runDayOfWeek.slice(1)}
+                        </span>
+                      )}
+                      {typeof w.runHourEt === "number" && (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                          {w.runHourEt === 0 ? "12 AM ET" : w.runHourEt < 12 ? `${w.runHourEt} AM ET` : w.runHourEt === 12 ? "12 PM ET" : `${w.runHourEt - 12} PM ET`}
+                        </span>
+                      )}
                       {!w.active && (
                         <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
                           Paused
