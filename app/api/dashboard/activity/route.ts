@@ -42,11 +42,12 @@ export async function GET() {
 
   type ActivityItem = {
     id: string;
-    type: "rfi" | "submittal" | "document" | "daily_log" | "task" | "drawing";
+    type: "rfi" | "submittal" | "document" | "daily_log" | "task" | "drawing" | "quick_note" | "photo" | "transmittal";
     title: string;
     project_id: string;
     project_name: string;
     created_at: string;
+    changed_at: string;
     href: string;
   };
 
@@ -59,7 +60,7 @@ export async function GET() {
   try {
     const { data } = await supabase
       .from("rfis")
-      .select("id, rfi_number, subject, project_id, created_at")
+      .select("id, rfi_number, subject, project_id, created_at, updated_at")
       .in("project_id", projectIds)
       .gte("created_at", since)
       .order("created_at", { ascending: false })
@@ -74,6 +75,7 @@ export async function GET() {
           project_id: row.project_id,
           project_name: projectMap.get(row.project_id) ?? "",
           created_at: row.created_at,
+          changed_at: row.updated_at || row.created_at,
           href: `/projects/${row.project_id}/rfis/${row.id}`,
         });
       }
@@ -84,7 +86,7 @@ export async function GET() {
   try {
     const { data } = await supabase
       .from("submittals")
-      .select("id, submittal_number, title, project_id, created_at")
+      .select("id, submittal_number, title, project_id, created_at, updated_at")
       .in("project_id", projectIds)
       .gte("created_at", since)
       .order("created_at", { ascending: false })
@@ -99,6 +101,7 @@ export async function GET() {
           project_id: row.project_id,
           project_name: projectMap.get(row.project_id) ?? "",
           created_at: row.created_at,
+          changed_at: row.updated_at || row.created_at,
           href: `/projects/${row.project_id}/submittals/${row.id}`,
         });
       }
@@ -109,7 +112,7 @@ export async function GET() {
   try {
     const { data } = await supabase
       .from("documents")
-      .select("id, name, project_id, created_at")
+      .select("id, name, project_id, created_at, updated_at")
       .in("project_id", projectIds)
       .eq("type", "file")
       .gte("created_at", since)
@@ -125,6 +128,7 @@ export async function GET() {
           project_id: row.project_id,
           project_name: projectMap.get(row.project_id) ?? "",
           created_at: row.created_at,
+          changed_at: row.updated_at || row.created_at,
           href: `/projects/${row.project_id}/documents`,
         });
       }
@@ -135,7 +139,7 @@ export async function GET() {
   try {
     const { data } = await supabase
       .from("daily_logs")
-      .select("id, log_date, project_id, created_at")
+      .select("id, log_date, project_id, created_at, updated_at")
       .in("project_id", projectIds)
       .gte("created_at", since)
       .order("created_at", { ascending: false })
@@ -150,6 +154,7 @@ export async function GET() {
           project_id: row.project_id,
           project_name: projectMap.get(row.project_id) ?? "",
           created_at: row.created_at,
+          changed_at: row.updated_at || row.created_at,
           href: `/projects/${row.project_id}/daily-log?date=${encodeURIComponent(row.log_date)}`,
         });
       }
@@ -160,7 +165,7 @@ export async function GET() {
   try {
     const { data } = await supabase
       .from("tasks")
-      .select("id, title, project_id, created_at")
+      .select("id, title, project_id, created_at, updated_at")
       .in("project_id", projectIds)
       .gte("created_at", since)
       .order("created_at", { ascending: false })
@@ -175,6 +180,7 @@ export async function GET() {
           project_id: row.project_id,
           project_name: projectMap.get(row.project_id) ?? "",
           created_at: row.created_at,
+          changed_at: row.updated_at || row.created_at,
           href: `/projects/${row.project_id}/tasks/${row.id}`,
         });
       }
@@ -185,7 +191,7 @@ export async function GET() {
   try {
     const { data } = await supabase
       .from("drawings")
-      .select("id, name, project_id, created_at")
+      .select("id, name, project_id, created_at, updated_at")
       .in("project_id", projectIds)
       .gte("created_at", since)
       .order("created_at", { ascending: false })
@@ -200,15 +206,94 @@ export async function GET() {
           project_id: row.project_id,
           project_name: projectMap.get(row.project_id) ?? "",
           created_at: row.created_at,
+          changed_at: row.updated_at || row.created_at,
           href: `/projects/${row.project_id}/drawings`,
         });
       }
     }
   } catch {}
 
-  // 3. Merge and sort by created_at desc — return all within 30 days
+  // Quick Notes
+  try {
+    const { data } = await supabase
+      .from("quick_notes")
+      .select("id, title, content, project_id, created_at, updated_at")
+      .in("project_id", projectIds)
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (data) {
+      for (const row of data) {
+        allItems.push({
+          id: row.id,
+          type: "quick_note",
+          title: row.title || row.content?.slice(0, 80) || "Quick note",
+          project_id: row.project_id,
+          project_name: projectMap.get(row.project_id) ?? "",
+          created_at: row.created_at,
+          changed_at: row.updated_at || row.created_at,
+          href: `/projects/${row.project_id}/quick-notes`,
+        });
+      }
+    }
+  } catch {}
+
+  // Photos
+  try {
+    const { data } = await supabase
+      .from("photos")
+      .select("id, caption, project_id, created_at, updated_at")
+      .in("project_id", projectIds)
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (data) {
+      for (const row of data) {
+        allItems.push({
+          id: row.id,
+          type: "photo",
+          title: row.caption || "Photo uploaded",
+          project_id: row.project_id,
+          project_name: projectMap.get(row.project_id) ?? "",
+          created_at: row.created_at,
+          changed_at: row.updated_at || row.created_at,
+          href: `/projects/${row.project_id}/photos`,
+        });
+      }
+    }
+  } catch {}
+
+  // Transmittals
+  try {
+    const { data } = await supabase
+      .from("transmittals")
+      .select("id, subject, project_id, created_at, updated_at")
+      .in("project_id", projectIds)
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (data) {
+      for (const row of data) {
+        allItems.push({
+          id: row.id,
+          type: "transmittal",
+          title: row.subject || "Transmittal updated",
+          project_id: row.project_id,
+          project_name: projectMap.get(row.project_id) ?? "",
+          created_at: row.created_at,
+          changed_at: row.updated_at || row.created_at,
+          href: `/projects/${row.project_id}/transmittals/${row.id}`,
+        });
+      }
+    }
+  } catch {}
+
+  // 3. Merge and sort by changed_at desc — return all within 30 days
   allItems.sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    (a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime()
   );
 
   return NextResponse.json(allItems);

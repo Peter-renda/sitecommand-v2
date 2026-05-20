@@ -8,11 +8,12 @@ type Member = { id: string; username: string; email: string };
 
 type ActivityItem = {
   id: string;
-  type: "rfi" | "submittal" | "document" | "daily_log" | "task" | "drawing";
+  type: "rfi" | "submittal" | "document" | "daily_log" | "task" | "drawing" | "quick_note" | "photo" | "transmittal";
   title: string;
   project_id: string;
   project_name: string;
   created_at: string;
+  changed_at?: string;
   href: string;
 };
 
@@ -36,7 +37,7 @@ type MyOpenItem = {
   href?: string;
 };
 
-const ALL_TYPES = ["rfi", "submittal", "document", "daily_log", "task", "drawing"];
+const ALL_TYPES = ["rfi", "submittal", "document", "daily_log", "task", "drawing", "quick_note", "photo", "transmittal"];
 
 const TYPE_LABELS: Record<string, string> = {
   rfi: "RFIs",
@@ -45,6 +46,9 @@ const TYPE_LABELS: Record<string, string> = {
   daily_log: "Daily Logs",
   task: "Tasks",
   drawing: "Drawings",
+  quick_note: "Quick Notes",
+  photo: "Photos",
+  transmittal: "Transmittals",
 };
 
 function timeAgo(ts: string): string {
@@ -90,6 +94,21 @@ function ActivityIcon({ type }: { type: ActivityItem["type"] }) {
     drawing: (
       <svg className="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+      </svg>
+    ),
+    quick_note: (
+      <svg className="w-4 h-4 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h8M8 14h5m-7 7h12a2 2 0 002-2V5a2 2 0 00-2-2H6a2 2 0 00-2 2v14a2 2 0 002 2z" />
+      </svg>
+    ),
+    photo: (
+      <svg className="w-4 h-4 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16l4-4a3 3 0 014.243 0L15 15.757m-2-2.757l1-1a3 3 0 014.243 0L21 14m-2 7H5a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2z" />
+      </svg>
+    ),
+    transmittal: (
+      <svg className="w-4 h-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M22 2L11 13m11-11l-7 20-4-9-9-4 20-7z" />
       </svg>
     ),
   };
@@ -461,7 +480,7 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const updatesWhileAway =
     lastLoginAt === null
       ? []
-      : activities.filter((item) => new Date(item.created_at).getTime() > lastLoginAt);
+      : activities.filter((item) => new Date(item.changed_at || item.created_at).getTime() > lastLoginAt);
 
   async function loadProjects() {
     const res = await fetch("/api/projects");
@@ -875,9 +894,8 @@ export default function DashboardClient({ username, email, role, companyRole, us
                       onClick={() => whileAwayRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                       className="block text-left font-display text-[32px] sm:text-[40px] leading-[1.05] text-[color:var(--ink)] mb-6 hover:opacity-85 transition-opacity"
                     >
-                      <span className="tabular-nums">{updatesWhileAwayCount}</span>{" "}
-                      new or updated {updatesWhileAwayCount === 1 ? "document" : "documents"}{" "}
-                      <span className="serif-italic text-gray-500">while you were away</span>
+                      <span className="tabular-nums font-semibold">{updatesWhileAwayCount} {updatesWhileAwayCount === 1 ? "item" : "items"}</span>{" "}
+                      <span className="serif-italic text-gray-500">were updated while you were away</span>
                     </button>
 
                     {scopedTasks.length > 0 && (
