@@ -5,6 +5,15 @@ import { getSupabase } from "@/lib/supabase";
 
 const ALLOWED_FREQUENCIES = new Set(["daily", "weekly", "monthly"]);
 
+function isRecurringWorkflowTableMissing(errorMessage: string | null | undefined) {
+  if (!errorMessage) return false;
+  const normalized = errorMessage.toLowerCase();
+  return (
+    normalized.includes("assist_recurring_workflows") &&
+    (normalized.includes("schema cache") || normalized.includes("does not exist"))
+  );
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -19,21 +28,53 @@ export async function GET(
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("assist_recurring_workflows")
-    .select("id, name, prompt, frequency, recipients, active, created_at, last_run_at")
+    .select("id, name, prompt, frequency, run_day_of_week, run_hour_et, recipients, active, created_at, last_run_at")
     .eq("project_id", projectId)
     .order("created_at", { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (isRecurringWorkflowTableMissing(error.message)) {
+      return NextResponse.json({ workflows: [] });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const workflowIds = (data ?? []).map((row) => row.id as string);
+  const { data: reportRows } = workflowIds.length
+    ? await supabase
+        .from("assist_recurring_workflow_reports")
+        .select("id, workflow_id, file_name, file_url, file_type, created_at")
+        .in("workflow_id", workflowIds)
+        .order("created_at", { ascending: false })
+    : { data: [] as Array<Record<string, unknown>> };
+
+  const reportsByWorkflow = new Map<string, Array<Record<string, unknown>>>();
+  for (const report of reportRows ?? []) {
+    const workflowId = String(report.workflow_id ?? "");
+    if (!workflowId) continue;
+    const existing = reportsByWorkflow.get(workflowId) ?? [];
+    existing.push(report);
+    reportsByWorkflow.set(workflowId, existing);
+  }
 
   const workflows = (data ?? []).map((row) => ({
     id: row.id,
     name: row.name,
     prompt: row.prompt,
     frequency: row.frequency,
+    runDayOfWeek: row.run_day_of_week,
+    runHourEt: row.run_hour_et,
     recipients: Array.isArray(row.recipients) ? (row.recipients as string[]) : [],
     active: row.active,
     createdAt: row.created_at,
     lastRunAt: row.last_run_at,
+    reports: (reportsByWorkflow.get(row.id) ?? []).map((report) => ({
+      id: report.id,
+      fileName: report.file_name,
+      fileUrl: report.file_url,
+      fileType: report.file_type,
+      createdAt: report.created_at,
+    })),
   }));
 
   return NextResponse.json({ workflows });
@@ -54,6 +95,8 @@ export async function POST(
     name?: unknown;
     prompt?: unknown;
     frequency?: unknown;
+    runDayOfWeek?: unknown;
+    runHourEt?: unknown;
     recipients?: unknown;
   };
   try {
@@ -72,6 +115,15 @@ export async function POST(
       { error: "Frequency must be one of daily, weekly, monthly" },
       { status: 400 },
     );
+  }
+  const runDayOfWeek = typeof body.runDayOfWeek === "string" ? body.runDayOfWeek.trim().toLowerCase() : "";
+  const validDays = new Set(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]);
+  if (!validDays.has(runDayOfWeek)) {
+    return NextResponse.json({ error: "Day of week is required" }, { status: 400 });
+  }
+  const runHourEt = typeof body.runHourEt === "number" ? body.runHourEt : Number(body.runHourEt);
+  if (!Number.isInteger(runHourEt) || runHourEt < 0 || runHourEt > 23) {
+    return NextResponse.json({ error: "Run hour (ET) must be an integer between 0 and 23" }, { status: 400 });
   }
 
   const rawRecipients = Array.isArray(body.recipients) ? body.recipients : [];
@@ -94,12 +146,23 @@ export async function POST(
       name,
       prompt,
       frequency,
+      run_day_of_week: runDayOfWeek,
+      run_hour_et: runHourEt,
       recipients,
     })
-    .select("id, name, prompt, frequency, recipients, active, created_at, last_run_at")
+    .select("id, name, prompt, frequency, run_day_of_week, run_hour_et, recipients, active, created_at, last_run_at")
     .single();
 
   if (insertError) {
+    if (isRecurringWorkflowTableMissing(insertError.message)) {
+      return NextResponse.json(
+        {
+          error:
+            "Recurring workflows are not available yet. Please run the latest database migrations and retry.",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
 
@@ -109,6 +172,8 @@ export async function POST(
       name: inserted.name,
       prompt: inserted.prompt,
       frequency: inserted.frequency,
+      runDayOfWeek: inserted.run_day_of_week,
+      runHourEt: inserted.run_hour_et,
       recipients: Array.isArray(inserted.recipients) ? (inserted.recipients as string[]) : [],
       active: inserted.active,
       createdAt: inserted.created_at,
