@@ -5,6 +5,15 @@ import { getSupabase } from "@/lib/supabase";
 
 const ALLOWED_FREQUENCIES = new Set(["daily", "weekly", "monthly"]);
 
+function isRecurringWorkflowTableMissing(errorMessage: string | null | undefined) {
+  if (!errorMessage) return false;
+  const normalized = errorMessage.toLowerCase();
+  return (
+    normalized.includes("assist_recurring_workflows") &&
+    (normalized.includes("schema cache") || normalized.includes("does not exist"))
+  );
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -23,7 +32,12 @@ export async function GET(
     .eq("project_id", projectId)
     .order("created_at", { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (isRecurringWorkflowTableMissing(error.message)) {
+      return NextResponse.json({ workflows: [] });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   const workflows = (data ?? []).map((row) => ({
     id: row.id,
@@ -100,6 +114,15 @@ export async function POST(
     .single();
 
   if (insertError) {
+    if (isRecurringWorkflowTableMissing(insertError.message)) {
+      return NextResponse.json(
+        {
+          error:
+            "Recurring workflows are not available yet. Please run the latest database migrations and retry.",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
 
