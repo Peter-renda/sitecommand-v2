@@ -428,7 +428,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#FAFAF7]">
       <ProjectNav projectId={projectId} />
 
       {/* Toast */}

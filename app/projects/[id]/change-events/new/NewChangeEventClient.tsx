@@ -1067,12 +1067,12 @@ export default function NewChangeEventClient({
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* ── Breadcrumb + Title ────────────────────────────────────────────────── */}
-      <div className="px-6 pt-8 pb-4 bg-gray-50">
+      <div className="px-6 pt-8 pb-4 bg-[#FAFAF7]">
         <nav className="flex items-center gap-1 text-xs text-gray-500 mb-2">
           <button
             onClick={() => router.push(`/projects/${projectId}/change-events`)}

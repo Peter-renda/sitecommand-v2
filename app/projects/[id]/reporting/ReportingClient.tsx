@@ -2487,7 +2487,7 @@ export default function ReportingClient({
   }, [statusBanner]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#FAFAF7]">
       <ProjectNav projectId={projectId} />
 
       <main className="max-w-[1400px] mx-auto px-6 py-6">

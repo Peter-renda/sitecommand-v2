@@ -102,14 +102,14 @@ export default function SsovEditClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
         <p className="text-sm text-gray-400">Loading…</p>
       </div>
     );
   }
   if (!commitment) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
         <p className="text-sm text-gray-500">Commitment not found.</p>
       </div>
     );
@@ -117,7 +117,7 @@ export default function SsovEditClient({
 
   if (!commitment.ssov_enabled) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center px-8">
+      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center px-8">
         <div className="max-w-md text-center">
           <p className="text-sm text-gray-700 mb-2">Subcontractor SOV is not enabled on this commitment.</p>
           <a
@@ -132,7 +132,7 @@ export default function SsovEditClient({
   }
   if (commitment.sov_accounting_method !== "amount") {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center px-8">
+      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center px-8">
         <div className="max-w-md text-center">
           <p className="text-sm text-gray-700 mb-2">
             The Subcontractor SOV tab is only supported by the Amount Based accounting method.
@@ -321,8 +321,8 @@ export default function SsovEditClient({
   const nonHeaderSov = sovItems.filter((s) => !s.is_group_header);
 
   return (
-    <div className="min-h-screen bg-white">
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+    <div className="min-h-screen bg-[#FAFAF7]">
+      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600">
           SiteCommand
         </a>

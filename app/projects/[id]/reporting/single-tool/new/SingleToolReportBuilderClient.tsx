@@ -514,7 +514,7 @@ export default function SingleToolReportBuilderClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
       <ProjectNav projectId={projectId} />
 
       <div className="border-b border-gray-200 bg-white px-6 py-3">
@@ -551,7 +551,7 @@ export default function SingleToolReportBuilderClient({
                   onClick={() => setEditingName(true)}
                   className="flex items-center gap-2 group text-left"
                 >
-                  <h1 className="text-2xl font-semibold text-gray-900">
+                  <h1 className="font-display text-[24px] leading-tight text-[color:var(--ink)]">
                     {reportName.trim() || "Enter Report Name"}
                     <span className="text-orange-500 ml-1">*</span>
                   </h1>

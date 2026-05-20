@@ -207,7 +207,7 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6]">
+    <div className="min-h-screen bg-[#FAFAF7]">
       <ProjectNav projectId={projectId} />
 
       <main className="mx-auto max-w-[1400px] px-4 py-6">

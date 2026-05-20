@@ -1031,9 +1031,9 @@ export default function NewCommitmentClient({
     commitmentType === "purchase_order" ? "Purchase Order" : "Subcontract";
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[#FAFAF7]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a
           href="/dashboard"
           className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors"

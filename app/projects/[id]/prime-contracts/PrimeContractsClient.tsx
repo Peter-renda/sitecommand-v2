@@ -507,12 +507,12 @@ export default function PrimeContractsClient({
 
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* Header */}
-      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-gray-50 gap-4 flex-wrap">
+      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-[#FAFAF7] gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Prime Contracts</h1>

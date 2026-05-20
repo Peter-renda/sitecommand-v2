@@ -324,7 +324,7 @@ export default function BIMClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 

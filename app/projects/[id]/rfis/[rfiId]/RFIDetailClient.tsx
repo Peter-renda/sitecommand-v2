@@ -509,9 +509,9 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-          <a href="/dashboard" className="text-sm font-semibold text-gray-900">SiteCommand</a>
+      <div className="min-h-screen bg-[#FAFAF7]">
+        <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+          <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)]">SiteCommand</a>
           <span className="text-sm text-gray-400">{username}</span>
         </header>
         <main className="px-6 py-8"><p className="text-sm text-gray-400">Loading...</p></main>
@@ -521,9 +521,9 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
 
   if (notFound || !rfi) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-          <a href="/dashboard" className="text-sm font-semibold text-gray-900">SiteCommand</a>
+      <div className="min-h-screen bg-[#FAFAF7]">
+        <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+          <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)]">SiteCommand</a>
         </header>
         <main className="px-6 py-8"><p className="text-sm text-gray-500">RFI not found.</p></main>
       </div>
@@ -535,10 +535,10 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
   const historyCount = history.length;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#FAFAF7]">
       {/* Site header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-        <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">SiteCommand</a>
+      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+        <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">SiteCommand</a>
         <div className="flex items-center gap-5">
           <span className="text-sm text-gray-400">{username}</span>
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Logout</button>

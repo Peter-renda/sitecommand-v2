@@ -563,7 +563,7 @@ export default function CommitmentDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
         <p className="text-sm text-gray-400">Loading…</p>
       </div>
     );
@@ -571,7 +571,7 @@ export default function CommitmentDetailClient({
 
   if (!commitment) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
         <p className="text-sm text-gray-500">Commitment not found.</p>
       </div>
     );
@@ -599,9 +599,9 @@ export default function CommitmentDetailClient({
     .reduce((sum, l) => sum + (sovMethod === "unit_quantity" ? l.qty * l.unit_cost : l.amount), 0);
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[#FAFAF7]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a
           href="/dashboard"
           className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors"
