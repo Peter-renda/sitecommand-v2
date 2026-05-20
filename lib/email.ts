@@ -69,6 +69,30 @@ export async function sendInviteEmail(to: string, inviteUrl: string, companyName
   );
 }
 
+export async function sendProjectMemberInviteEmail(
+  to: string,
+  recipientName: string,
+  companyName: string,
+  projectName: string,
+  acceptInviteUrl: string,
+  supportUrl: string,
+) {
+  await sendEmail(
+    "project-member-invite",
+    {
+      to,
+      subject: `${companyName} invited you to collaborate on ${projectName} in SiteCommand`,
+      html: `
+        <p style="font-size:14px;">Hi ${recipientName || "there"},</p>
+        <p style="font-size:14px;"><strong>${companyName}</strong> has invited you to collaborate on <strong>${projectName}</strong> in SiteCommand.</p>
+        <p style="font-size:14px;">SiteCommand is ${companyName}'s online project management system. Click the link below to log in:</p>
+        <p><a href="${acceptInviteUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Accept Invitation</a></p>
+        <p style="font-size:13px;">Need help? <a href="${supportUrl}">Visit SiteCommand Support</a></p>
+      `,
+    },
+  );
+}
+
 export async function sendTaskCreatedEmail(
   to: string,
   projectName: string,
