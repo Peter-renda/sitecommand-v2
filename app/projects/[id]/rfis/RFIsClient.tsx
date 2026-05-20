@@ -727,6 +727,8 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
   const [bulkStatus, setBulkStatus] = useState<"" | "draft" | "open" | "closed">("");
   const [bulkDueDate, setBulkDueDate] = useState("");
   const [applyingBulk, setApplyingBulk] = useState(false);
+  const [sortColumn, setSortColumn] = useState<ColumnKey>("rfi_number");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [rowMenuOpen, setRowMenuOpen] = useState<string | null>(null);
   const rowMenuRef = useRef<HTMLDivElement | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -966,8 +968,53 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
     });
   }, [rfis, filters, todayStr]);
 
+
+  const sortedRfis = useMemo(() => {
+    const getSortableValue = (rfi: RFI, key: ColumnKey): string | number => {
+      switch (key) {
+        case "rfi_number": return rfi.rfi_number ?? 0;
+        case "subject": return (rfi.subject ?? "").toLowerCase();
+        case "status": return (rfi.status ?? "").toLowerCase();
+        case "responsible_contractor": return getContactNameById(directory, rfi.responsible_contractor_id).toLowerCase();
+        case "received_from": return getContactNameById(directory, rfi.received_from_id).toLowerCase();
+        case "date_initiated": return rfi.created_at ?? "";
+        case "rfi_manager": return getContactNameById(directory, rfi.rfi_manager_id).toLowerCase();
+        case "assignees": return (rfi.assignees ?? []).map((a) => a.name).join(", ").toLowerCase();
+        case "ball_in_court": return getContactNameById(directory, rfi.ball_in_court_id).toLowerCase();
+        case "due_date": return rfi.due_date ?? "";
+        case "closed_date": return "";
+        case "location": return (((rfi as RFI & { location?: string | null }).location) ?? "").toLowerCase();
+        case "schedule_impact": return (rfi.schedule_impact ?? "").toLowerCase();
+        case "cost_impact": return (rfi.cost_impact ?? "").toLowerCase();
+        case "cost_code": return (rfi.cost_code ?? "").toLowerCase();
+        case "sub_job": return (rfi.sub_job ?? "").toLowerCase();
+        case "rfi_stage": return (rfi.rfi_stage ?? "").toLowerCase();
+        case "distribution": return (rfi.distribution_list ?? []).map((d) => d.name).join(", ").toLowerCase();
+        case "private": return rfi.private ? 1 : 0;
+        default: return "";
+      }
+    };
+
+    const sorted = [...filteredRfis].sort((a, b) => {
+      const va = getSortableValue(a, sortColumn);
+      const vb = getSortableValue(b, sortColumn);
+      if (typeof va === "number" && typeof vb === "number") return va - vb;
+      return String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: "base" });
+    });
+    return sortDirection === "desc" ? sorted.reverse() : sorted;
+  }, [filteredRfis, sortColumn, sortDirection, directory]);
+
+  function handleSortColumn(column: ColumnKey) {
+    if (sortColumn === column) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortColumn(column);
+    setSortDirection("asc");
+  }
+
   const filterCount = activeFilterCount(filters);
-  const allSelected = filteredRfis.length > 0 && selectedRfiIds.length === filteredRfis.length;
+  const allSelected = sortedRfis.length > 0 && selectedRfiIds.length === sortedRfis.length;
 
   async function applyBulkUpdate() {
     if (selectedRfiIds.length === 0) return;
@@ -1250,7 +1297,7 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
               description={activeTab === "recycle_bin" ? "Deleted RFIs will appear here." : "Click Create new RFI to add the first one."}
             />
           </div>
-        ) : filteredRfis.length === 0 ? (
+        ) : sortedRfis.length === 0 ? (
           <div className="bg-white border border-dashed border-gray-200 rounded-xl p-10 text-center">
             <p className="text-sm text-gray-600">No RFIs match the current filters.</p>
             <button onClick={() => setFilters(emptyRFIFilters())} className="mt-3 text-sm font-medium text-blue-600 hover:text-blue-700">Clear all filters</button>
@@ -1265,21 +1312,24 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
                       <input
                         type="checkbox"
                         checked={allSelected}
-                        onChange={(e) => setSelectedRfiIds(e.target.checked ? filteredRfis.map((r) => r.id) : [])}
+                        onChange={(e) => setSelectedRfiIds(e.target.checked ? sortedRfis.map((r) => r.id) : [])}
                         className="rounded border-gray-300"
                       />
                     </th>
                   )}
                   {orderedVisibleColumns.map((key) => (
                     <th key={key} className="text-left px-4 py-3 mono-label whitespace-nowrap">
-                      {COLUMN_LABELS[key].toUpperCase()}
+                      <button type="button" onClick={() => handleSortColumn(key)} className="inline-flex items-center gap-1 hover:text-gray-900">
+                        {COLUMN_LABELS[key].toUpperCase()}
+                        {sortColumn === key ? <span aria-hidden>{sortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
                     </th>
                   ))}
                   <th className="w-10" />
                 </tr>
               </thead>
               <tbody>
-                {filteredRfis.map((rfi) => (
+                {sortedRfis.map((rfi) => (
                   <tr
                     key={rfi.id}
                     onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; window.location.href = `/projects/${projectId}/rfis/${rfi.id}`; }}
