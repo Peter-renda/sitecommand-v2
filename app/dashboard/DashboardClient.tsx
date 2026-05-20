@@ -764,6 +764,10 @@ export default function DashboardClient({ username, email, role, companyRole, us
           const attentionCount = myOpenItems.length;
           const greetingFirstName = (username || "there").split(/[\s.@]/)[0];
           const greeting = `Good ${(() => { const h = new Date().getHours(); return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"; })()}, ${greetingFirstName}.`;
+          const updatesWhileAwayCount =
+            lastLoginAt === null
+              ? 0
+              : activities.filter((item) => new Date(item.created_at).getTime() > lastLoginAt).length;
           return (
             <div className="bezel ambient-hero mb-10">
               <div className="bezel-inner">
@@ -784,10 +788,15 @@ export default function DashboardClient({ username, email, role, companyRole, us
                         </>
                       )}
                     </h1>
-                    <p className="text-sm text-gray-500 mb-6 max-w-md">
+                    <p className="text-sm text-gray-500 max-w-md">
                       {attentionCount > 0
                         ? "Open items assigned to you or created by you across all active projects."
                         : "Signals from your projects will surface here as work progresses."}
+                    </p>
+                    <p className="text-sm text-gray-500 mb-6 max-w-xl mt-1">
+                      {updatesWhileAwayCount > 0
+                        ? `${updatesWhileAwayCount} update${updatesWhileAwayCount === 1 ? "" : "s"} while you were gone — including new daily logs, photos, documents, drawings, and recurring workflow reports.`
+                        : "No new updates while you were gone yet — new daily logs, photos, documents, drawings, and recurring workflow reports will appear here."}
                     </p>
 
                     {scopedTasks.length > 0 && (
