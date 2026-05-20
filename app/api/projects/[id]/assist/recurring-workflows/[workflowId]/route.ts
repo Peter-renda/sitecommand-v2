@@ -29,6 +29,8 @@ export async function PATCH(
     name?: unknown;
     prompt?: unknown;
     frequency?: unknown;
+    runDayOfWeek?: unknown;
+    runHourEt?: unknown;
     recipients?: unknown;
     active?: unknown;
   };
@@ -59,6 +61,21 @@ export async function PATCH(
       );
     }
     updates.frequency = v;
+  }
+  if (typeof body.runDayOfWeek === "string") {
+    const v = body.runDayOfWeek.trim().toLowerCase();
+    const validDays = new Set(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]);
+    if (!validDays.has(v)) {
+      return NextResponse.json({ error: "Invalid day of week" }, { status: 400 });
+    }
+    updates.run_day_of_week = v;
+  }
+  if (body.runHourEt !== undefined) {
+    const v = typeof body.runHourEt === "number" ? body.runHourEt : Number(body.runHourEt);
+    if (!Number.isInteger(v) || v < 0 || v > 23) {
+      return NextResponse.json({ error: "Run hour (ET) must be an integer between 0 and 23" }, { status: 400 });
+    }
+    updates.run_hour_et = v;
   }
   if (Array.isArray(body.recipients)) {
     const recipients: string[] = [];
