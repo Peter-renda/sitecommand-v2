@@ -635,7 +635,7 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-[#FAFAF7]">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex items-center justify-center h-64">
@@ -646,12 +646,12 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#FAFAF7]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* Page header */}
-      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-gray-50 gap-4 flex-wrap">
+      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-[#FAFAF7] gap-4 flex-wrap">
         <div>
           <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Scope of Work</h1>
         </div>

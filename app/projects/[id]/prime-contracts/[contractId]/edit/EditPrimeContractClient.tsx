@@ -259,7 +259,7 @@ export default function EditPrimeContractClient({
 
   if (loadingData) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
+      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading…</div>
       </div>
@@ -268,7 +268,7 @@ export default function EditPrimeContractClient({
 
   if (loadError) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
+      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-red-500 text-sm">{loadError}</div>
       </div>
@@ -276,7 +276,7 @@ export default function EditPrimeContractClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
+    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
       <ProjectNav projectId={projectId} />
 
       <form onSubmit={handleSubmit} className="flex-1 flex flex-col">

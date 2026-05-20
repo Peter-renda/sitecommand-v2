@@ -1154,17 +1154,17 @@ export default function EditCommitmentClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
         <p className="text-sm text-gray-400">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[#FAFAF7]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-        <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">SiteCommand</a>
+      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+        <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">SiteCommand</a>
         <div className="flex items-center gap-5">
           <span className="text-sm text-gray-400">{username}</span>
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Logout</button>

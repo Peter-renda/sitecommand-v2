@@ -31,7 +31,7 @@ export default function TMTicketsClient({ projectId, username }: { projectId: st
   const [activeTab, setActiveTab] = useState<TabKey>("all_tickets");
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#FAFAF7]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 

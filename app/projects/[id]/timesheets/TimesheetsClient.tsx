@@ -235,7 +235,7 @@ export default function TimesheetsClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#FAFAF7]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 

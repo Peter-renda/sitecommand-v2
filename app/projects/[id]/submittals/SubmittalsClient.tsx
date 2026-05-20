@@ -1385,9 +1385,9 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-        <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">SiteCommand</a>
+    <div className="min-h-screen bg-[#FAFAF7]">
+      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+        <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">SiteCommand</a>
         <div className="flex items-center gap-5">
           <span className="text-sm text-gray-400">{username}</span>
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Logout</button>

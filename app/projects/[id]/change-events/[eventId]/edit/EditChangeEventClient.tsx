@@ -773,7 +773,7 @@ export default function EditChangeEventClient({
 
   if (loadingEvent) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Loading…</div>
       </div>
@@ -782,7 +782,7 @@ export default function EditChangeEventClient({
 
   if (loadError) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-red-500">{loadError}</div>
       </div>
@@ -790,7 +790,7 @@ export default function EditChangeEventClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
       <ProjectNav projectId={projectId} />
 
       {/* ── Breadcrumb + Title ────────────────────────────────────────────────── */}

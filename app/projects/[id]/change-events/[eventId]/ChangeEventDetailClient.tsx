@@ -241,7 +241,7 @@ export default function ChangeEventDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Loading…</div>
@@ -251,7 +251,7 @@ export default function ChangeEventDetailClient({
 
   if (error || !event) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-red-500">{error ?? "Change event not found."}</div>
@@ -547,7 +547,7 @@ export default function ChangeEventDetailClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
