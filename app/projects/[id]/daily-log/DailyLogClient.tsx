@@ -2017,6 +2017,27 @@ export default function DailyLogClient({
 
   const isToday = date === todayISO();
 
+  // Live tallies for the editorial stat strip
+  const crewTotal = form.manpower.reduce((sum, e) => sum + (parseInt(e.workers) || 0), 0);
+  const tradeCount = new Set(
+    form.manpower.map((e) => e.company.trim().toLowerCase()).filter(Boolean),
+  ).size;
+  const hoursTotal = form.manpower.reduce(
+    (sum, e) => sum + (parseInt(e.workers) || 0) * (parseFloat(e.hours) || 0),
+    0,
+  );
+  const deliveryCount = form.deliveries.length;
+  const issueCount = form.note_entries.filter((n) => n.is_issue).length;
+  const safetyCount = form.safety_violations.length;
+  const accidentCount = form.accidents.length;
+  const openConcerns = issueCount + safetyCount + accidentCount;
+  const longDate = new Date(date + "T00:00:00").toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
   return (
     <div className="min-h-screen bg-[#FAFAF7]">
       {/* Header */}
@@ -2035,121 +2056,163 @@ export default function DailyLogClient({
       <ProjectNav projectId={projectId} />
 
       <main className="max-w-[1500px] mx-auto px-4 py-8">
-        <div className="mb-5">
-          <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Daily Log</h1>
-          <p className="sec-sub mt-1.5">
-            <span className="serif-italic text-[color:var(--brand-700)]">{isToday ? "Today's entry" : "Viewing past entry"}</span>
-            <span className="sep">·</span>
-            <span className="num">{new Date(date + "T00:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</span>
-          </p>
+        {/* Breadcrumb */}
+        <div className="crumbs mb-4">
+          <a href={`/projects/${projectId}`}>Project</a>
+          <span className="sep">/</span>
+          <span>Daily Log</span>
+          <span className="stamp">
+            {loading
+              ? "Loading…"
+              : logId
+              ? dirty
+                ? "Unsaved changes"
+                : saving
+                ? "Saving…"
+                : "Saved"
+              : "No log yet"}
+          </span>
         </div>
-        {/* Weather hero band — warm gradient + DM Serif temp */}
-        <div className="bezel mb-6">
-          <div className="bezel-inner weather-hero">
-            <div className="relative z-[1] grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-6 px-6 sm:px-8 py-6 sm:py-7">
-              {/* Left: page heading + date nav */}
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <button
-                    onClick={() => setDate(shiftDay(date, -1))}
-                    className="p-2 rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 transition-colors"
-                    title="Previous day"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  <div className="flex items-baseline gap-3">
-                    <input
-                      type="date"
-                      value={date}
-                      max={todayISO()}
-                      onChange={(e) => e.target.value && setDate(e.target.value)}
-                      className="font-display text-[28px] leading-none text-[color:var(--ink)] bg-transparent border-none outline-none cursor-pointer"
-                      style={{ colorScheme: "light" }}
-                    />
-                    {isToday && <span className="pill pill-info">Today</span>}
-                  </div>
-                  <button
-                    onClick={() => setDate(shiftDay(date, 1))}
-                    disabled={isToday}
-                    className="p-2 rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Next day"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500">
-                  {loading
-                    ? "Loading..."
-                    : logId
-                    ? dirty
-                      ? "Unsaved changes"
-                      : `Log saved · ${savedOnce ? "stored" : ""}`
-                    : "No log for this date yet"}
-                </p>
 
-                <div className="flex items-center gap-2 mt-5">
-                  {!isToday && (
-                    <button
-                      onClick={() => setDate(todayISO())}
-                      className="px-3 py-2 text-sm text-gray-600 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors"
-                    >
-                      Jump to today
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setVoiceOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 bg-white rounded-md hover:bg-gray-50 transition-colors"
-                    title="Dictate entries with your voice"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 01-14 0v-2M12 19v4m-4 0h8" />
-                    </svg>
-                    Voice entry
-                  </button>
-                  <button
-                    onClick={handleSave}
-                    disabled={saving || !dirty}
-                    className="px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {saving ? "Saving..." : savedOnce && !dirty ? "Saved" : "Save log"}
-                  </button>
-                </div>
+        {/* Editorial page head */}
+        <div className="sec-row mb-6">
+          <div>
+            <h1 className="h2-warm">Daily log</h1>
+            <p className="sub mt-1.5">
+              <em>{isToday ? "Today's field journal" : "Field journal entry"}</em>
+              <span className="sep">·</span>
+              <span className="num">{longDate}</span>
+              {crewTotal > 0 && (
+                <>
+                  <span className="sep">·</span>
+                  <span className="num" style={{ color: "#047857" }}>{crewTotal}</span> on site
+                </>
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {!isToday && (
+              <button onClick={() => setDate(todayISO())} className="btn-quiet">
+                Jump to today
+              </button>
+            )}
+            <button
+              onClick={() => setVoiceOpen(true)}
+              className="btn-secondary"
+              title="Dictate entries with your voice"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 01-14 0v-2M12 19v4m-4 0h8" />
+              </svg>
+              Voice entry
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {saving ? "Saving…" : savedOnce && !dirty ? "Saved" : "Save log"}
+            </button>
+          </div>
+        </div>
+
+        {/* Stat strip — live tallies for the day */}
+        <div className="stats">
+          <div className="stat calm">
+            <div className="lbl">Crew on site</div>
+            <div className="val">{crewTotal}</div>
+            <div className="delta">
+              {tradeCount} {tradeCount === 1 ? "trade" : "trades"} logged
+            </div>
+          </div>
+          <div className="stat">
+            <div className="lbl">Hours logged</div>
+            <div className="val">{hoursTotal.toFixed(0)}</div>
+            <div className="delta">Across {form.manpower.length} crew {form.manpower.length === 1 ? "entry" : "entries"}</div>
+          </div>
+          <div className={`stat${deliveryCount > 0 ? " warn" : ""}`}>
+            <div className="lbl">Deliveries</div>
+            <div className="val">{deliveryCount}</div>
+            <div className="delta">{form.inspections.length} inspections recorded</div>
+          </div>
+          <div className={`stat${openConcerns > 0 ? " alert" : ""}`}>
+            <div className="lbl">Open concerns</div>
+            <div className="val">{openConcerns}</div>
+            <div className="delta">
+              {issueCount} {issueCount === 1 ? "issue" : "issues"} · {safetyCount} safety · {accidentCount} {accidentCount === 1 ? "accident" : "accidents"}
+            </div>
+          </div>
+        </div>
+
+        {/* Field-journal day head — serif numeral + weather strip */}
+        <div className="log-entry mb-6">
+          <div className="day-head">
+            <span className="day">
+              {new Date(date + "T00:00:00").getDate()}
+            </span>
+            <div>
+              <div style={{ fontFamily: "DM Serif Display, serif", fontSize: 22 }}>
+                {new Date(date + "T00:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
               </div>
+              <div className="sub-day">
+                {form.weather_conditions || "Conditions not logged"}
+                {" · Logged by "}
+                {username}
+              </div>
+            </div>
+            <span style={{ marginLeft: "auto" }} className="flex items-center gap-2">
+              <button
+                onClick={() => setDate(shiftDay(date, -1))}
+                className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 transition-colors"
+                title="Previous day"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <input
+                type="date"
+                value={date}
+                max={todayISO()}
+                onChange={(e) => e.target.value && setDate(e.target.value)}
+                className="font-mono text-xs text-gray-600 bg-white border border-gray-200 rounded-md px-2 py-1.5 outline-none cursor-pointer"
+                style={{ colorScheme: "light" }}
+              />
+              <button
+                onClick={() => setDate(shiftDay(date, 1))}
+                disabled={isToday}
+                className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                title="Next day"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              <span className={`chip ${isToday ? "chip-open" : "chip-closed"}`}>
+                {isToday ? "Today" : "Past entry"}
+              </span>
+            </span>
+          </div>
 
-              {/* Right: weather snapshot */}
-              <div className="md:border-l md:hairline md:pl-8">
-                <div className="flex items-baseline gap-3 mb-3">
-                  <span className="font-display text-[44px] leading-none text-[color:var(--ink)] tabular-nums">
-                    {form.weather_temp ? `${form.weather_temp}°` : "—"}
-                  </span>
-                  <span className="text-sm text-gray-600">
-                    {form.weather_conditions || "No conditions logged"}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
-                  {form.weather_wind && (
-                    <div className="flex items-center gap-2">
-                      <span className="mono-label">WIND</span>
-                      <span>{form.weather_wind}</span>
-                    </div>
-                  )}
-                  {form.weather_humidity && (
-                    <div className="flex items-center gap-2">
-                      <span className="mono-label">HUMIDITY</span>
-                      <span>{form.weather_humidity}</span>
-                    </div>
-                  )}
-                  {!form.weather_wind && !form.weather_humidity && (
-                    <p className="text-xs text-gray-400 italic col-span-2">
-                      Record wind, humidity and more below.
-                    </p>
-                  )}
-                </div>
+          {/* Weather strip */}
+          <div className="weather">
+            <div>
+              <div className="lbl">Temp</div>
+              <div className="val">{form.weather_temp || "—"}</div>
+            </div>
+            <div>
+              <div className="lbl">Wind</div>
+              <div className="val">{form.weather_wind || "—"}</div>
+            </div>
+            <div>
+              <div className="lbl">Humidity</div>
+              <div className="val">{form.weather_humidity || "—"}</div>
+            </div>
+            <div>
+              <div className="lbl">Conditions</div>
+              <div className="val" style={{ fontStyle: "italic", color: "#9A6240", fontSize: 16 }}>
+                {form.weather_conditions || "Not logged"}
               </div>
             </div>
           </div>

@@ -1833,59 +1833,78 @@ export default function DrawingsClient({
       <ProjectNav projectId={projectId} />
 
       {/* Page title */}
-      <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0 flex items-end justify-between gap-4 flex-wrap">
-        <div className="min-w-0">
-          <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Drawings</h1>
-          {drawings.length > 0 ? (
-            <p className="sec-sub mt-1.5">
-              <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
-              <span className="sep">·</span>
-              <span className="num" style={{ color: "var(--brand-500)" }}>{drawings.length}</span> sheets
-            </p>
-          ) : (
-            <p className="sec-sub mt-1.5">View, manage, and upload all of your drawings from the Drawings log.</p>
-          )}
+      <div className="bg-white border-b border-black/[0.06] px-6 pt-7 pb-5 shrink-0">
+        <div className="sec-row">
+          <div className="min-w-0">
+            <h1 className="h2-warm">Drawings</h1>
+            {drawings.length > 0 ? (
+              <p className="sub mt-1.5">
+                <em>Across this project</em>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{drawings.length}</span> sheets
+                <span className="sep">·</span>
+                <span className="num">{disciplineGroups.length}</span> disciplines
+                <span className="sep">·</span>
+                <span className="num">{uploads.length}</span> sets
+              </p>
+            ) : (
+              <p className="sub mt-1.5">
+                <em>View, manage, and upload</em> all of your drawings from the Drawings log.
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {uploading && (
+              <span className="text-xs flex items-center gap-1.5" style={{ color: "var(--brand-600)" }}>
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                {uploadStatus}
+              </span>
+            )}
+            <button className="btn-secondary">Reports</button>
+            <button className="btn-secondary">View Locations</button>
+            <button className="btn-secondary">Export</button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="btn-primary disabled:opacity-50"
+            >
+              Upload
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {uploading && (
-            <span className="text-xs text-blue-600 flex items-center gap-1.5">
-              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-              {uploadStatus}
-            </span>
-          )}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="px-4 py-1.5 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
-          >
-            Upload
-          </button>
-          <button className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-200 text-gray-600 rounded-md hover:bg-gray-50 transition-colors">
-            Reports
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          <button className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-200 text-gray-600 rounded-md hover:bg-gray-50 transition-colors">
-            View Locations
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          <button className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-200 text-gray-600 rounded-md hover:bg-gray-50 transition-colors">
-            Export
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-        </div>
+
+        {/* Stat strip */}
+        {drawings.length > 0 && (
+          <div className="stats" style={{ marginTop: 18 }}>
+            <div className="stat">
+              <div className="lbl">Sheets</div>
+              <div className="val">{drawings.length}</div>
+              <div className="delta">Across {disciplineGroups.length} disciplines</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Disciplines</div>
+              <div className="val">{disciplineGroups.length}</div>
+              <div className="delta">{disciplineGroups.map((g) => g.discipline).slice(0, 3).join(" · ") || "—"}</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Drawing sets</div>
+              <div className="val">{uploads.length}</div>
+              <div className="delta">{uploads.length === 1 ? "1 upload" : `${uploads.length} uploads`}</div>
+            </div>
+            <div className="stat calm">
+              <div className="lbl">Last uploaded</div>
+              <div className="val">{uploads[0] ? formatDate(uploads[0].uploaded_at).replace(/, \d{4}$/, "") : "—"}</div>
+              <div className="delta">{uploads[0]?.filename ?? "No sets yet"}</div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
-      <div className="bg-white border-b border-gray-100 px-6 shrink-0">
+      <div className="bg-white border-b border-black/[0.06] px-6 shrink-0">
         <nav className="flex">
           {(["current", "sets", "recycle"] as const).map((tab) => {
             const labels = { current: "Current Drawings", sets: "Drawing Sets", recycle: "Recycle Bin" };
@@ -1895,7 +1914,7 @@ export default function DrawingsClient({
                 onClick={() => setActiveTab(tab)}
                 className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   activeTab === tab
-                    ? "border-blue-500 text-blue-600"
+                    ? "border-[color:var(--brand-500)] text-[color:var(--ink)]"
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
@@ -1907,65 +1926,62 @@ export default function DrawingsClient({
       </div>
 
       {/* Filter bar */}
-      <div className="bg-white border-b border-gray-100 px-6 py-3 flex items-center gap-3 shrink-0">
-        <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-48"
-          />
-        </div>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-          </svg>
-          Filters
-        </button>
-        <select
-          value={disciplineFilter}
-          onChange={(e) => setDisciplineFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">Discipline</option>
-          {[...new Set(drawings.map((d) => inferDiscipline(d.drawing_no)))].sort().map((disc) => (
-            <option key={disc} value={disc}>{disc}</option>
-          ))}
-        </select>
-        <select
-          value={setFilter}
-          onChange={(e) => setSetFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">Set</option>
-          {uploads.map((u) => (
-            <option key={u.id} value={u.id}>{u.filename}</option>
-          ))}
-        </select>
-        <div className="flex-1" />
-        <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
-          <button
-            onClick={() => setActiveView("table")}
-            title="List view"
-            className={`p-2 transition-colors ${activeView === "table" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+      <div className="bg-white border-b border-black/[0.06] px-6 py-3 shrink-0">
+        <div className="filters">
+          <div className="search">
+            <svg className="w-4 h-4 shrink-0" style={{ color: "var(--brand-500)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
             </svg>
-          </button>
-          <button
-            onClick={() => setActiveView("grid")}
-            title="Grid view"
-            className={`p-2 transition-colors ${activeView === "grid" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}
-          >
+            <input
+              type="text"
+              placeholder="Search by sheet number, title, revision…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          <button className="btn-secondary">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
             </svg>
+            Filters
           </button>
+          <select
+            value={disciplineFilter}
+            onChange={(e) => setDisciplineFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-black/10 rounded-md bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+          >
+            <option value="">Discipline</option>
+            {[...new Set(drawings.map((d) => inferDiscipline(d.drawing_no)))].sort().map((disc) => (
+              <option key={disc} value={disc}>{disc}</option>
+            ))}
+          </select>
+          <select
+            value={setFilter}
+            onChange={(e) => setSetFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-black/10 rounded-md bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+          >
+            <option value="">Set</option>
+            {uploads.map((u) => (
+              <option key={u.id} value={u.id}>{u.filename}</option>
+            ))}
+          </select>
+          <div className="flex-1" />
+          <div className="seg">
+            <button
+              onClick={() => setActiveView("table")}
+              title="List view"
+              className={activeView === "table" ? "active" : ""}
+            >
+              List
+            </button>
+            <button
+              onClick={() => setActiveView("grid")}
+              title="Grid view"
+              className={activeView === "grid" ? "active" : ""}
+            >
+              Sheets
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1976,157 +1992,132 @@ export default function DrawingsClient({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
       >
-        <div className={`flex-1 flex flex-col overflow-hidden ${isDragging ? "ring-2 ring-blue-400 ring-inset" : ""}`}>
-          <div className="flex-1 overflow-y-auto">
+        <div className={`flex-1 flex flex-col overflow-hidden ${isDragging ? "ring-2 ring-[color:var(--brand-500)] ring-inset" : ""}`}>
+          <div className="flex-1 overflow-y-auto px-6 py-6">
             {loading ? (
-              <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading…</div>
-            ) : filteredDrawings.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-64 text-center">
-                <svg className="w-12 h-12 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p className="text-sm font-medium text-gray-500">No drawings match your search</p>
-              </div>
-            ) : activeView === "grid" ? (
-              // ── Grid ──
-              <div className="p-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {filteredDrawings.map((d) => (
-                  <button
-                    key={d.id}
-                    onClick={() => setViewingDrawing(d)}
-                    className="group relative aspect-[3/4] bg-gray-100 rounded-xl overflow-hidden border-2 border-transparent hover:border-blue-300 transition-all text-left focus:outline-none"
-                  >
-                    <Thumb drawing={d} />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-3 py-2">
-                      {d.drawing_no && <p className="text-white text-xs font-bold truncate">{d.drawing_no}</p>}
-                      <p className="text-white/80 text-xs truncate">{d.title ?? `Page ${d.page_number} of ${d.filename}`}</p>
-                      {d.revision && (
-                        <span className="inline-block mt-1 px-1.5 py-0.5 bg-white/20 rounded text-white text-[10px] font-medium">Rev {d.revision}</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelected(d); }}
-                      title="Edit details"
-                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 bg-black/50 rounded text-white hover:bg-black/70 transition-all"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
-                  </button>
+              <div className="rfi-list">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <div key={i} className="drow" style={{ pointerEvents: "none" }}>
+                    <div className="sn" style={{ opacity: 0.25 }}>···</div>
+                    <div className="ttl"><span className="inline-block h-3 w-48 rounded bg-black/[0.06]" /></div>
+                    <div className="rev"><span className="inline-block h-3 w-10 rounded bg-black/[0.06]" /></div>
+                    <div className="when"><span className="inline-block h-3 w-16 rounded bg-black/[0.06]" /></div>
+                    <div className="disc"><span className="inline-block h-3 w-20 rounded bg-black/[0.06]" /></div>
+                    <div className="rfi-arrow" />
+                  </div>
                 ))}
               </div>
+            ) : filteredDrawings.length === 0 ? (
+              <div className="card card-pad flex flex-col items-center justify-center text-center" style={{ padding: "56px 24px" }}>
+                <svg className="w-12 h-12 mb-3" style={{ color: "var(--brand-500)", opacity: 0.4 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <p className="font-display text-lg text-[color:var(--ink)]">No drawings match your search</p>
+                <p className="text-sm text-gray-500 mt-1">Adjust the search or filters to see more sheets.</p>
+              </div>
+            ) : activeView === "grid" ? (
+              // ── Grid — sheet thumbnails ──
+              <div className="grid-4">
+                {filteredDrawings.map((d) => {
+                  const disc = inferDiscipline(d.drawing_no, d.category);
+                  return (
+                    <div key={d.id} className="group relative">
+                      <button
+                        onClick={() => setViewingDrawing(d)}
+                        className="sheet block w-full text-left focus:outline-none"
+                        style={{ overflow: "hidden" }}
+                      >
+                        <Thumb drawing={d} />
+                        <div className="sheet-tag">
+                          <span className="num">{d.drawing_no ?? `P.${d.page_number}`}</span>
+                          <span style={{ fontStyle: "italic", fontFamily: "var(--font-display), serif", color: "var(--brand-700)" }}>{disc}</span>
+                        </div>
+                      </button>
+                      <div style={{ fontSize: 12, fontWeight: 500, marginTop: 8, color: "var(--ink)" }} className="truncate">
+                        {d.title ?? `Page ${d.page_number} of ${d.filename}`}
+                      </div>
+                      <div className="font-mono" style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>
+                        {d.revision ? `Rev ${d.revision}` : "Rev 0"}
+                        {d.drawing_date ? ` · ${formatDate(d.drawing_date)}` : ""}
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSelected(d); }}
+                        title="Edit details"
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 rounded bg-white border border-black/10 text-gray-500 hover:text-gray-800 transition-all"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
-              // ── Table (discipline-grouped) ──
-              <div className="bg-white">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      <th className="w-10 px-3 py-3" />
-                      <th className="w-8 px-2 py-3">
-                        <input type="checkbox" className="rounded border-gray-300" />
-                      </th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-36">Drawing No.</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600">Drawing Title</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-36">Revision</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-36">Drawing Date</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-36">Received Date</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-44">Set</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-28">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {disciplineGroups.map(({ discipline, drawings: groupDrawings }) => (
-                      <>
-                        {/* Group header row */}
-                        <tr key={`group-${discipline}`} className="bg-blue-50 border-b border-gray-200">
-                          <td className="px-3 py-2.5 text-center">
-                            <button
-                              onClick={() => setCollapsedGroups((prev) => {
+              // ── List — editorial drow rows, discipline-grouped ──
+              <div className="rfi-list">
+                <div className="drow head" style={{ gridTemplateColumns: "110px 1fr 70px 110px 100px 60px" }}>
+                  <div>Sheet</div><div>Title</div><div>Rev</div><div>Updated</div><div>Discipline</div><div></div>
+                </div>
+                {disciplineGroups.map(({ discipline, drawings: groupDrawings }) => {
+                  const collapsed = collapsedGroups.has(discipline);
+                  return (
+                    <div key={`group-${discipline}`}>
+                      <button
+                        onClick={() => setCollapsedGroups((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(discipline)) next.delete(discipline);
+                          else next.add(discipline);
+                          return next;
+                        })}
+                        className="w-full flex items-center gap-2 px-5 py-2.5 text-left bg-[#F4F2EC] border-b border-black/[0.06]"
+                      >
+                        <svg className={`w-3.5 h-3.5 text-gray-500 transition-transform ${collapsed ? "" : "rotate-90"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                        <span className="font-display text-[15px] italic text-[color:var(--ink)]">{discipline}</span>
+                        <span className="font-mono text-xs text-gray-400">{groupDrawings.length}</span>
+                      </button>
+                      {!collapsed && groupDrawings.map((d) => (
+                        <div
+                          key={d.id}
+                          onClick={() => setViewingDrawing(d)}
+                          className="drow cursor-pointer"
+                        >
+                          <div className="sn">{d.drawing_no ?? `P.${d.page_number}`}</div>
+                          <div className="ttl">
+                            {d.title ?? <span className="text-gray-400">{`Page ${d.page_number} of ${d.filename}`}</span>}
+                            <span className="font-mono ml-2 text-[10px] text-gray-400 truncate">{d.filename}</span>
+                          </div>
+                          <div className="rev">Rev {d.revision ?? "0"}</div>
+                          <div className="when">{d.drawing_date ? formatDate(d.drawing_date) : (d.received_date ? formatDate(d.received_date) : "—")}</div>
+                          <div className="disc">{discipline}</div>
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(d.id)}
+                              onChange={(e) => setSelectedIds((prev) => {
                                 const next = new Set(prev);
-                                if (next.has(discipline)) next.delete(discipline);
-                                else next.add(discipline);
+                                if (e.target.checked) next.add(d.id); else next.delete(d.id);
                                 return next;
                               })}
-                              className="text-gray-500 hover:text-gray-700"
+                              className="rounded border-gray-300"
+                            />
+                            <button
+                              onClick={() => setSelected(d)}
+                              title="Edit details"
+                              className="text-gray-400 hover:text-gray-700 p-0.5"
                             >
-                              {collapsedGroups.has(discipline) ? (
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                                </svg>
-                              ) : (
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                </svg>
-                              )}
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
                             </button>
-                          </td>
-                          <td className="px-2 py-2.5">
-                            <input type="checkbox" className="rounded border-gray-300" />
-                          </td>
-                          <td colSpan={7} className="px-3 py-2.5 text-sm font-semibold text-gray-700">
-                            {discipline} ({groupDrawings.length})
-                          </td>
-                        </tr>
-                        {/* Data rows */}
-                        {!collapsedGroups.has(discipline) && groupDrawings.map((d) => (
-                          <tr
-                            key={d.id}
-                            onClick={() => setViewingDrawing(d)}
-                            className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
-                          >
-                            <td className="px-3 py-3" />
-                            <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={selectedIds.has(d.id)}
-                                onChange={(e) => setSelectedIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (e.target.checked) next.add(d.id); else next.delete(d.id);
-                                  return next;
-                                })}
-                                className="rounded border-gray-300"
-                              />
-                            </td>
-                            <td className="px-3 py-3">
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setSelected(d); }}
-                                  title="Edit details"
-                                  className="text-gray-400 hover:text-gray-600 shrink-0"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                  </svg>
-                                </button>
-                                <span className="text-blue-600 font-medium text-xs">
-                                  {d.drawing_no ?? `P.${d.page_number}`}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-3 py-3 text-gray-700 text-xs">{d.title ?? <span className="text-gray-400">—</span>}</td>
-                            <td className="px-3 py-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-gray-700 text-xs">{d.revision ?? "0"}</span>
-                                <button onClick={(e) => e.stopPropagation()} className="px-2 py-0.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50">See All</button>
-                              </div>
-                            </td>
-                            <td className="px-3 py-3 text-gray-600 text-xs">{d.drawing_date ? formatDate(d.drawing_date) : <span className="text-gray-400">—</span>}</td>
-                            <td className="px-3 py-3 text-gray-600 text-xs">{d.received_date ? formatDate(d.received_date) : <span className="text-gray-400">—</span>}</td>
-                            <td className="px-3 py-3 text-gray-600 text-xs truncate max-w-[150px]">
-                              {d.filename}
-                            </td>
-                            <td className="px-3 py-3">
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-200">
-                                Published
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </>
-                    ))}
-                  </tbody>
-                </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

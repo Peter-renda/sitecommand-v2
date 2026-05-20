@@ -155,6 +155,15 @@ function avatarColor(initials: string): string {
   return AVATAR_COLORS[code % AVATAR_COLORS.length];
 }
 
+// Deterministic warm avatar tint (av-1 … av-5) from any string.
+function warmTint(seed: string): number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return (Math.abs(hash) % 5) + 1;
+}
+
 function Avatar({ first, last }: { first: string | null; last: string | null }) {
   const initials = getInitials(first, last);
   const color = avatarColor(initials);
@@ -1098,256 +1107,329 @@ export default function DirectoryClient({
       <ProjectNav projectId={projectId} />
 
       <main className="max-w-screen-xl mx-auto px-6 py-6">
-        {/* Toolbar */}
-        <div className="mb-4 flex items-end justify-between gap-4 flex-wrap">
+        {/* Page header — editorial title + voice line */}
+        <div className="sec-row mb-5">
           <div className="min-w-0">
-            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Directory</h1>
-            {totalCount > 0 && (
-              <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+            <h1 className="h2-warm">Directory</h1>
+            {totalCount > 0 ? (
+              <p className="sub mt-1.5">
+                <em>Across this project</em>
                 <span className="sep">·</span>
-                <span className="num" style={{ color: "var(--brand-500)" }}>{totalCount}</span> contacts
+                <span className="num" style={{ color: "var(--brand-500)" }}>{users.length}</span> people
                 <span className="sep">·</span>
                 <span className="num">{companyEntries.length}</span> companies
+                <span className="sep">·</span>
+                <span className="num">{groups.length}</span> groups
               </p>
+            ) : (
+              <p className="sub mt-1.5"><em>Project roster of people, companies &amp; distribution groups</em></p>
             )}
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Export button */}
+            <div ref={exportMenuRef} className="relative">
+              <button onClick={() => setShowExportMenu((o) => !o)} className="btn-secondary">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                </svg>
+                Export
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 mt-1 w-40 bg-white border border-black/[0.08] rounded-lg shadow-lg py-1 z-20">
+                  <button
+                    onClick={() => { exportDirectoryPDF(filtered); setShowExportMenu(false); }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Export as PDF
+                  </button>
+                  <button
+                    onClick={() => { exportDirectoryCSV(filtered); setShowExportMenu(false); }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Export as CSV
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Add button */}
+            <div ref={addMenuRef} className="relative">
+              <button onClick={() => setShowAddMenu((o) => !o)} className="btn-primary">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Add
+              </button>
+              {showAddMenu && (
+                <div className="absolute right-0 mt-1 w-64 bg-white border border-black/[0.08] rounded-lg shadow-lg py-1 z-20">
+                  <button onClick={() => { setShowUserModal(true); setShowAddMenu(false); }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                    Add Person
+                  </button>
+                  <button onClick={() => { setShowCompanyModal(true); setShowAddMenu(false); }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                    Add Company
+                  </button>
+                  <button onClick={() => { setShowGroupModal(true); setShowAddMenu(false); }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                    Add Distribution Group
+                  </button>
+                  <div className="border-t border-gray-100 my-1" />
+                  <button onClick={() => { setShowBulkAddModal(true); setShowAddMenu(false); }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                    Bulk Add from Company Directory
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 mb-4">
-          {/* Search */}
-          <div className="relative">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        {/* Filter bar — search + segmented tabs */}
+        <div className="filters">
+          <div className="search">
+            <svg className="w-4 h-4 text-gray-400 pointer-events-none shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search"
-              className="pl-9 pr-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 w-56 bg-white"
+              placeholder="Search people, companies, roles…"
             />
           </div>
-
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Export button */}
-          <div ref={exportMenuRef} className="relative">
-            <button
-              onClick={() => setShowExportMenu((o) => !o)}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded hover:bg-gray-50 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
-              </svg>
-              Export
-              <svg className={`w-4 h-4 transition-transform ${showExportMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {showExportMenu && (
-              <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-100 rounded-lg shadow-lg py-1 z-20">
-                <button
-                  onClick={() => { exportDirectoryPDF(filtered); setShowExportMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  Export as PDF
-                </button>
-                <button
-                  onClick={() => { exportDirectoryCSV(filtered); setShowExportMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  Export as CSV
-                </button>
-              </div>
-            )}
+          <div className="seg">
+            <button className={activeTab === "all" ? "active" : ""} onClick={() => setActiveTab("all")}>People</button>
+            <button className={activeTab === "companies" ? "active" : ""} onClick={() => setActiveTab("companies")}>Companies</button>
+            <button className={activeTab === "groups" ? "active" : ""} onClick={() => setActiveTab("groups")}>Groups</button>
           </div>
-
-          {/* Add button */}
-          <div ref={addMenuRef} className="relative">
+          {activeTab !== "groups" && (
             <button
-              onClick={() => setShowAddMenu((o) => !o)}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded hover:bg-gray-700 transition-colors"
+              onClick={() => setSortDir((d) => d === "asc" ? "desc" : "asc")}
+              className="btn-quiet ml-auto"
+              title="Toggle name sort"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              Add
-              <svg className={`w-4 h-4 transition-transform ${showAddMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
+              Sort: Name {sortDir === "asc" ? "↑" : "↓"}
             </button>
-            {showAddMenu && (
-              <div className="absolute right-0 mt-1 w-64 bg-white border border-gray-100 rounded-lg shadow-lg py-1 z-20">
-                <button onClick={() => { setShowUserModal(true); setShowAddMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                  Add Person
-                </button>
-                <button onClick={() => { setShowCompanyModal(true); setShowAddMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                  Add Company
-                </button>
-                <button onClick={() => { setShowGroupModal(true); setShowAddMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                  Add Distribution Group
-                </button>
-                <div className="border-t border-gray-100 my-1" />
-                <button onClick={() => { setShowBulkAddModal(true); setShowAddMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                  Bulk Add from Company Directory
-                </button>
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-gray-200 mb-4">
-          <button
-            onClick={() => setActiveTab("all")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === "all" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-          >
-            Users
-          </button>
-          <button
-            onClick={() => setActiveTab("companies")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === "companies" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-          >
-            Companies
-          </button>
-          <button
-            onClick={() => setActiveTab("groups")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === "groups" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-          >
-            Distribution Groups
-          </button>
-        </div>
-
-        {/* Count row */}
-        {!loading && totalCount > 0 && (
-          <p className="text-xs text-gray-500 mb-3">
-            Displaying 1 – {activeTab === "companies" ? companyEntries.length : activeTab === "groups" ? groups.length : users.length + companyEntries.length} of {activeTab === "companies" ? companyEntries.length : activeTab === "groups" ? groups.length : users.length + companyEntries.length}
+        {/* Bulk selection note */}
+        {!loading && selectedContacts.size > 0 && (
+          <p className="sub mb-3">
+            <span className="num" style={{ color: "var(--brand-500)" }}>{selectedContacts.size}</span> selected
+            <span className="sep">·</span>
+            <button onClick={() => setSelectedContacts(new Set())} className="btn-quiet">Clear selection</button>
           </p>
         )}
 
-        {/* Table */}
+        {/* Content */}
         {loading ? (
-          <p className="text-sm text-gray-400 py-8">Loading…</p>
+          <div className="dir-grid">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="dir-card animate-pulse">
+                <div className="head">
+                  <div className="w-10 h-10 rounded-full bg-black/[0.06]" />
+                  <div className="flex-1">
+                    <div className="h-3.5 w-28 bg-black/[0.06] rounded mb-1.5" />
+                    <div className="h-2.5 w-20 bg-black/[0.05] rounded" />
+                  </div>
+                </div>
+                <div className="h-2.5 w-32 bg-black/[0.05] rounded mt-3" />
+                <div className="h-2.5 w-40 bg-black/[0.05] rounded mt-2" />
+              </div>
+            ))}
+          </div>
         ) : (activeTab === "all" ? users.length + companyEntries.length === 0 : activeTab === "companies" ? companyEntries.length === 0 : groups.length === 0) ? (
-          <div className="bg-white border border-dashed border-gray-200 rounded-xl py-16 text-center">
-            <svg className="w-10 h-10 text-gray-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <div className="card card-pad py-16 text-center border-dashed">
+            <svg className="w-10 h-10 text-black/[0.12] mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
             </svg>
-            <p className="text-sm text-gray-400">
+            <p className="font-display text-lg text-[color:var(--ink)]">
               {activeTab === "companies"
-                ? `No companies${q ? " matching your search" : " yet"}`
+                ? `No companies${q ? " match your search" : " yet"}`
                 : activeTab === "groups"
-                  ? `No distribution groups${q ? " matching your search" : " yet"}`
-                  : `No contacts${q ? " matching your search" : " yet"}`}
+                  ? `No distribution groups${q ? " match your search" : " yet"}`
+                  : `No contacts${q ? " match your search" : " yet"}`}
             </p>
-            {!q && <p className="text-xs text-gray-300 mt-1">Use the Add button to create your first contact</p>}
+            {!q && <p className="text-xs text-gray-400 mt-1">Use the Add button to create your first contact</p>}
           </div>
-        ) : (
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="w-8 px-3 py-2.5">
-                    {activeTab === "all" && allGroupKeys.length > 0 && (
+        ) : activeTab === "all" ? (
+          <>
+            {companyNamesOrdered.map((companyName) => {
+              const companyEntry = companyEntries.find((ce) => ce.company === companyName);
+              const members = users.filter((u) => u.company === companyName);
+              const collapsed = collapsedGroups.has(companyName);
+              const groupIds = [
+                ...(companyEntry ? [companyEntry.id] : []),
+                ...members.map((m) => m.id),
+              ];
+              const groupAllSelected = groupIds.length > 0 && groupIds.every((id) => selectedContacts.has(id));
+
+              return (
+                <div key={`group-${companyName}`} className="mb-7">
+                  <div className="sec-row mb-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <button
-                        onClick={toggleAllGroups}
-                        title={allGroupsCollapsed ? "Expand all" : "Collapse all"}
-                        className="text-gray-400 hover:text-gray-700 transition-colors"
+                        onClick={() => toggleGroup(companyName)}
+                        className="text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                        title={collapsed ? "Expand" : "Collapse"}
                       >
-                        <svg className={`w-4 h-4 transition-transform ${allGroupsCollapsed ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className={`w-4 h-4 transition-transform ${collapsed ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                         </svg>
                       </button>
-                    )}
-                  </th>
-                  <th className="w-8 px-1 py-2.5">
-                    <input
-                      ref={headerCheckboxRef}
-                      type="checkbox"
-                      className="rounded border-gray-300 cursor-pointer"
-                      checked={allSelected}
-                      onChange={() => {
-                        if (allSelected) {
-                          setSelectedContacts(new Set());
-                        } else {
-                          setSelectedContacts(new Set(allSelectableIds));
-                        }
-                      }}
-                    />
-                  </th>
-                  <th className="px-3 py-2.5 text-left">
-                    <button
-                      onClick={() => setSortDir((d) => d === "asc" ? "desc" : "asc")}
-                      className="flex items-center gap-1 text-xs font-semibold text-gray-600 uppercase tracking-wide hover:text-gray-900 transition-colors"
-                    >
-                      Name
-                      <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        {sortDir === "asc" ? (
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
-                        ) : (
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M17 8V20m0 0l4-4m-4 4l-4-4M7 20V8m0 0L3 12m4-4l4 4" />
-                        )}
-                      </svg>
-                    </button>
-                  </th>
-                  {activeTab === "groups" ? (
-                    <>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Description</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Members</th>
-                      <th className="px-3 py-2.5" />
-                      <th className="px-3 py-2.5" />
-                      <th className="px-3 py-2.5" />
-                    </>
-                  ) : (
-                    <>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Job Title</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Email / Phone / Fax</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Address</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Company</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Permission Template</th>
-                    </>
-                  )}
-                  <th className="w-28 px-3 py-2.5" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-
-                {/* Companies tab: flat list of company-type entries, sorted alphabetically */}
-                {activeTab === "companies" && sortedCompanyEntries.map((ce) => (
-                  <tr key={ce.id} className="hover:bg-blue-50/30 transition-colors border-b border-gray-100 last:border-b-0">
-                    <td className="px-3 py-3" />
-                    <td className="px-1 py-3">
                       <input
                         type="checkbox"
-                        className="rounded border-gray-300 cursor-pointer"
+                        className="rounded border-gray-300 cursor-pointer shrink-0"
+                        checked={groupAllSelected}
+                        onChange={() => toggleSelectGroup(groupIds)}
+                        aria-label={`Select all in ${companyName}`}
+                      />
+                      <button
+                        onClick={() => companyEntry && openContactDetail(companyEntry.id)}
+                        disabled={!companyEntry}
+                        className="h3-warm truncate enabled:hover:text-[color:var(--brand-700)] transition-colors disabled:cursor-default"
+                      >
+                        {companyName}
+                      </button>
+                      <span className="text-xs text-gray-400 shrink-0">
+                        {members.length} {members.length === 1 ? "person" : "people"}
+                      </span>
+                      {companyEntry?.phone && (
+                        <span className="font-mono text-[11px] text-gray-400 shrink-0">{companyEntry.phone}</span>
+                      )}
+                    </div>
+                    {companyEntry && (
+                      <button
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (openMenuId === companyEntry.id) { setOpenMenuId(null); setMenuPos(null); return; }
+                          const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                          setMenuPos(computeMenuPos(rect));
+                          setOpenMenuId(companyEntry.id);
+                        }}
+                        className="p-1 text-gray-300 hover:text-gray-600 rounded hover:bg-gray-100 transition-colors shrink-0"
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  {!collapsed && (
+                    members.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic pl-7">No people added to this company yet.</p>
+                    ) : (
+                      <div className="dir-grid">
+                        {members.map((c) => (
+                          <PersonCard
+                            key={c.id}
+                            c={c}
+                            displayName={displayName(c)}
+                            invitingId={invitingId}
+                            openMenuId={openMenuId}
+                            onInvite={handleSendInvite}
+                            onMenuOpen={(id, rect) => { setMenuPos(computeMenuPos(rect)); setOpenMenuId(id); }}
+                            onMenuClose={() => { setOpenMenuId(null); setMenuPos(null); }}
+                            onOpen={(contact) => openContactDetail(contact.id)}
+                            selected={selectedContacts.has(c.id)}
+                            onToggleSelect={toggleSelectContact}
+                          />
+                        ))}
+                      </div>
+                    )
+                  )}
+                </div>
+              );
+            })}
+
+            {usersNoCompany.length > 0 && (
+              <div className="mb-7">
+                <div className="sec-row mb-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <button
+                      onClick={() => toggleGroup("__no_company__")}
+                      className="text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                      title={collapsedGroups.has("__no_company__") ? "Expand" : "Collapse"}
+                    >
+                      <svg className={`w-4 h-4 transition-transform ${collapsedGroups.has("__no_company__") ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    <input
+                      type="checkbox"
+                      className="rounded border-gray-300 cursor-pointer shrink-0"
+                      checked={usersNoCompany.length > 0 && usersNoCompany.every((u) => selectedContacts.has(u.id))}
+                      onChange={() => toggleSelectGroup(usersNoCompany.map((u) => u.id))}
+                      aria-label="Select all unassigned"
+                    />
+                    <h3 className="h3-warm">No company</h3>
+                    <span className="text-xs text-gray-400 shrink-0">
+                      {usersNoCompany.length} {usersNoCompany.length === 1 ? "person" : "people"}
+                    </span>
+                  </div>
+                </div>
+                {!collapsedGroups.has("__no_company__") && (
+                  <div className="dir-grid">
+                    {usersNoCompany.map((c) => (
+                      <PersonCard
+                        key={c.id}
+                        c={c}
+                        displayName={displayName(c)}
+                        invitingId={invitingId}
+                        openMenuId={openMenuId}
+                        onInvite={handleSendInvite}
+                        onMenuOpen={(id, rect) => { setMenuPos(computeMenuPos(rect)); setOpenMenuId(id); }}
+                        onMenuClose={() => { setOpenMenuId(null); setMenuPos(null); }}
+                        onOpen={(contact) => openContactDetail(contact.id)}
+                        selected={selectedContacts.has(c.id)}
+                        onToggleSelect={toggleSelectContact}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        ) : activeTab === "companies" ? (
+          <>
+            <h3 className="h3-warm mb-3">Companies</h3>
+            <div className="dir-grid">
+              {sortedCompanyEntries.map((ce) => {
+                const name = displayName(ce);
+                return (
+                  <div key={ce.id} className="dir-card">
+                    <div className="head">
+                      <div
+                        className={`av av-${warmTint(name)}`}
+                        style={{ width: 40, height: 40, borderRadius: 8, display: "grid", placeItems: "center", fontSize: 15, fontWeight: 600, color: "#fff", fontFamily: "var(--font-display, 'DM Serif Display'), serif", fontStyle: "italic" }}
+                      >
+                        {(name[0] || "?").toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <button onClick={() => openContactDetail(ce.id)} className="nm hover:text-[color:var(--brand-700)] transition-colors text-left">{name}</button>
+                        <div className="role">Company</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300 cursor-pointer ml-auto shrink-0"
                         checked={selectedContacts.has(ce.id)}
                         onChange={() => toggleSelectContact(ce.id)}
+                        aria-label={`Select ${name}`}
                       />
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <button onClick={() => setEditTarget(ce)} className="shrink-0 px-2 py-0.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition-colors">Edit</button>
-                        <button onClick={() => openContactDetail(ce.id)} className="font-medium text-gray-900 text-sm hover:text-blue-700 hover:underline transition-colors">{displayName(ce)}</button>
+                    </div>
+                    {(ce.email || ce.phone) && (
+                      <div className="info">
+                        {ce.email && <a href={`mailto:${ce.email}`} className="hover:text-[color:var(--ink)] transition-colors">{ce.email}</a>}
+                        {ce.email && ce.phone && <span className="sep"> · </span>}
+                        {ce.phone && <span>{ce.phone}</span>}
                       </div>
-                    </td>
-                    <td className="px-3 py-3 text-sm text-gray-500"><span className="text-gray-300">—</span></td>
-                    <td className="px-3 py-3">
-                      <div className="space-y-0.5">
-                        {ce.email && <div className="text-xs text-gray-600"><a href={`mailto:${ce.email}`} className="hover:text-gray-900 hover:underline transition-colors">{ce.email}</a></div>}
-                        {ce.phone && <div className="text-xs text-gray-500">{ce.phone}</div>}
-                        {!ce.email && !ce.phone && <span className="text-gray-300 text-xs">—</span>}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-xs text-gray-500 max-w-[160px]">{ce.address || <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-3 text-sm text-gray-500"><span className="text-gray-300">—</span></td>
-                    <td className="px-3 py-3 text-sm text-gray-500"><span className="text-gray-300">—</span></td>
-                    <td className="px-3 py-3">
+                    )}
+                    {ce.address && <div className="info">{ce.address}</div>}
+                    <div className="flex items-center gap-2 mt-3">
+                      <button onClick={() => setEditTarget(ce)} className="btn-quiet">Edit</button>
                       <button
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
@@ -1357,214 +1439,71 @@ export default function DirectoryClient({
                           setMenuPos(computeMenuPos(rect));
                           setOpenMenuId(ce.id);
                         }}
-                        className="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
+                        className="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors ml-auto"
                       >
                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                           <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
                         </svg>
                       </button>
-                    </td>
-                  </tr>
-                ))}
-
-                {/* All tab: Company groups */}
-                {activeTab === "all" && companyNamesOrdered.map((companyName) => {
-                  const companyEntry = companyEntries.find((ce) => ce.company === companyName);
-                  const members = users.filter((u) => u.company === companyName);
-                  const collapsed = collapsedGroups.has(companyName);
-                  const isEmpty = members.length === 0;
-
-                  const groupIds = [
-                    ...(companyEntry ? [companyEntry.id] : []),
-                    ...members.map(m => m.id),
-                  ];
-                  const groupAllSelected = groupIds.length > 0 && groupIds.every(id => selectedContacts.has(id));
-
-                  return [
-                    // Company group header row
-                    <tr key={`group-${companyName}`} className="bg-gray-50 border-b border-gray-200">
-                      <td className="px-3 py-2">
-                        <button onClick={() => toggleGroup(companyName)}
-                          className="text-gray-400 hover:text-gray-700 transition-colors">
-                          <svg className={`w-4 h-4 transition-transform ${collapsed ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                      </td>
-                      <td className="px-1 py-2">
-                        <input
-                          type="checkbox"
-                          className="rounded border-gray-300 cursor-pointer"
-                          checked={groupAllSelected}
-                          onChange={() => toggleSelectGroup(groupIds)}
-                        />
-                      </td>
-                      <td colSpan={7} className="px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => openContactDetail(companyEntry?.id ?? "")}
-                            disabled={!companyEntry}
-                            className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors disabled:text-gray-500 disabled:no-underline"
-                          >
-                            {companyName}
-                          </button>
-                          {!isEmpty && (
-                            <span className="text-xs text-gray-400">({members.length})</span>
-                          )}
-                          {companyEntry && (
-                            <div className="flex items-center gap-1 ml-1">
-                              {companyEntry.phone && (
-                                <span className="text-xs text-gray-400">{companyEntry.phone}</span>
-                              )}
-                            </div>
-                          )}
-                          {companyEntry && (
-                            <button
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (openMenuId === companyEntry.id) { setOpenMenuId(null); setMenuPos(null); return; }
-                                const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                setMenuPos(computeMenuPos(rect));
-                                setOpenMenuId(companyEntry.id);
-                              }}
-                              className="ml-auto p-1 text-gray-300 hover:text-gray-600 rounded hover:bg-gray-100 transition-colors"
-                            >
-                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
-                              </svg>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>,
-
-                    // Member rows
-                    ...(!collapsed ? members.map((c) => (
-                      <PersonRow
-                        key={c.id}
-                        c={c}
-                        displayName={displayName(c)}
-                        invitingId={invitingId}
-                        invitedIds={invitedIds}
-                        openMenuId={openMenuId}
-                        onInvite={handleSendInvite}
-                        onMenuOpen={(id, rect) => {
-                          setMenuPos(computeMenuPos(rect));
-                          setOpenMenuId(id);
-                        }}
-                        onMenuClose={() => { setOpenMenuId(null); setMenuPos(null); }}
-                        onEdit={(contact) => openContactDetail(contact.id)}
-                        indent
-                        selected={selectedContacts.has(c.id)}
-                        onToggleSelect={toggleSelectContact}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <h3 className="h3-warm mb-3">Distribution Groups</h3>
+            <div className="dir-grid">
+              {groups.map((c) => {
+                const name = c.group_name ?? "Unnamed Group";
+                const count = c.member_contact_ids?.length ?? 0;
+                return (
+                  <div key={c.id} className="dir-card">
+                    <div className="head">
+                      <div
+                        className={`av av-${warmTint(name)}`}
+                        style={{ width: 40, height: 40, borderRadius: 8, display: "grid", placeItems: "center", fontSize: 15, fontWeight: 600, color: "#fff", fontFamily: "var(--font-display, 'DM Serif Display'), serif", fontStyle: "italic" }}
+                      >
+                        {(name[0] || "?").toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="nm truncate">{name}</div>
+                        <div className="role">Distribution Group</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300 cursor-pointer ml-auto shrink-0"
+                        checked={selectedContacts.has(c.id)}
+                        onChange={() => toggleSelectContact(c.id)}
+                        aria-label={`Select ${name}`}
                       />
-                    )) : []),
-                  ];
-                })}
-
-                {/* Users with no company */}
-                {activeTab === "all" && usersNoCompany.length > 0 && (
-                  <>
-                    <tr className="bg-gray-50 border-b border-gray-200">
-                      <td className="px-3 py-2">
-                        <button onClick={() => toggleGroup("__no_company__")} className="text-gray-400 hover:text-gray-700 transition-colors">
-                          <svg className={`w-4 h-4 transition-transform ${collapsedGroups.has("__no_company__") ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                      </td>
-                      <td className="px-1 py-2">
-                        <input
-                          type="checkbox"
-                          className="rounded border-gray-300 cursor-pointer"
-                          checked={usersNoCompany.length > 0 && usersNoCompany.every(u => selectedContacts.has(u.id))}
-                          onChange={() => toggleSelectGroup(usersNoCompany.map(u => u.id))}
-                        />
-                      </td>
-                      <td colSpan={7} className="px-3 py-2">
-                        <span className="text-sm font-semibold text-gray-500">No Company</span>
-                        <span className="text-xs text-gray-400 ml-2">({usersNoCompany.length})</span>
-                      </td>
-                    </tr>
-                    {!collapsedGroups.has("__no_company__") && usersNoCompany.map((c) => (
-                      <PersonRow
-                        key={c.id}
-                        c={c}
-                        displayName={displayName(c)}
-                        invitingId={invitingId}
-                        invitedIds={invitedIds}
-                        openMenuId={openMenuId}
-                        onInvite={handleSendInvite}
-                        onMenuOpen={(id, rect) => {
+                    </div>
+                    <div className="co">{count} {count === 1 ? "member" : "members"}</div>
+                    {c.notes && <div className="info">{c.notes}</div>}
+                    <div className="flex items-center gap-2 mt-3">
+                      <button onClick={() => setEditTarget(c)} className="btn-quiet">Edit</button>
+                      <button
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (openMenuId === c.id) { setOpenMenuId(null); setMenuPos(null); return; }
+                          const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
                           setMenuPos(computeMenuPos(rect));
-                          setOpenMenuId(id);
+                          setOpenMenuId(c.id);
                         }}
-                        onMenuClose={() => { setOpenMenuId(null); setMenuPos(null); }}
-                        onEdit={(contact) => openContactDetail(contact.id)}
-                        indent={false}
-                        selected={selectedContacts.has(c.id)}
-                        onToggleSelect={toggleSelectContact}
-                      />
-                    ))}
-                  </>
-                )}
-
-                {/* Distribution groups */}
-                {activeTab === "groups" && groups.length > 0 && (
-                  <>
-                    {groups.map((c) => (
-                      <tr key={c.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-3 py-3" />
-                        <td className="px-1 py-3">
-                          <input
-                            type="checkbox"
-                            className="rounded border-gray-300 cursor-pointer"
-                            checked={selectedContacts.has(c.id)}
-                            onChange={() => toggleSelectContact(c.id)}
-                          />
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="flex items-center gap-2.5">
-                            <button onClick={() => setEditTarget(c)} className="shrink-0 px-2 py-0.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition-colors">Edit</button>
-                            <span className="font-medium text-gray-900 text-sm">{c.group_name}</span>
-                          </div>
-                        </td>
-                        <td className="px-3 py-3 text-xs text-gray-500">
-                          {c.notes || <span className="text-gray-300">—</span>}
-                        </td>
-                        <td className="px-3 py-3 text-xs text-gray-500">
-                          {(c.member_contact_ids?.length ?? 0) > 0
-                            ? `${c.member_contact_ids?.length} ${c.member_contact_ids?.length === 1 ? "member" : "members"}`
-                            : <span className="text-gray-300">—</span>}
-                        </td>
-                        <td className="px-3 py-3" />
-                        <td className="px-3 py-3" />
-                        <td className="px-3 py-3" />
-                        <td className="px-3 py-3">
-                          <button
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (openMenuId === c.id) { setOpenMenuId(null); setMenuPos(null); return; }
-                              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                              setMenuPos(computeMenuPos(rect));
-                              setOpenMenuId(c.id);
-                            }}
-                            className="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
-                          >
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                              <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
-                            </svg>
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </>
-                )}
-              </tbody>
-            </table>
-          </div>
+                        className="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors ml-auto"
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </main>
 

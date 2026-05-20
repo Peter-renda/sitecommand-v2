@@ -768,70 +768,86 @@ export default function ProjectClient({
           <p className="text-sm text-gray-500">Project not found.</p>
         ) : project ? (
           <>
-            {/* Centered project name */}
-            <div className="text-center mb-6 sm:mb-10">
-              <h1 className="font-display text-2xl sm:text-4xl lg:text-5xl text-[color:var(--ink)]">{project.name}</h1>
-              <div className="mt-2">
-                <Pill className="pill-coc">{project.status || "active"}</Pill>
-              </div>
-            </div>
+            {(() => {
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const todayStr = today.toISOString().slice(0, 10);
 
-            {/* Two-column layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              const workTasks = scheduleTasks.filter((t) => !t.isMilestone && t.start && t.finish);
+              const completedTasks = workTasks.filter((t) => t.percentComplete >= 100).length;
+              const pctComplete = workTasks.length > 0
+                ? Math.round((completedTasks / workTasks.length) * 100)
+                : 0;
 
-              {/* Left: Team + Activity */}
-              <div className="lg:col-span-2 space-y-6">
-                <div className="bg-white border border-gray-100 rounded-xl p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-sm font-semibold text-gray-900">Project Team</h2>
-                    {(companyRole === "super_admin" || companyRole === "admin") && (
-                      <div ref={teamMenuRef} className="relative">
-                        <button
-                          onClick={() => setTeamMenuOpen((o) => !o)}
-                          className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                          aria-label="Team options"
-                        >
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                            <circle cx="5" cy="12" r="1.5" />
-                            <circle cx="12" cy="12" r="1.5" />
-                            <circle cx="19" cy="12" r="1.5" />
-                          </svg>
-                        </button>
-                        {teamMenuOpen && (
-                          <div className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 min-w-[100px]">
-                            <button
-                              onClick={openRolesEdit}
-                              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
-                            >
-                              Edit
-                            </button>
-                          </div>
-                        )}
-                      </div>
+              const fmtDate = (d: string) =>
+                new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+              return (
+                <div className="home-hero">
+                  <div className="eyebrow">
+                    {[
+                      "Project",
+                      project.project_number || null,
+                      project.sector || null,
+                    ].filter(Boolean).join(" · ")}
+                  </div>
+                  <h1>{project.name}</h1>
+                  <div className="sub-line">
+                    {(project.city || project.state) && (
+                      <em>{[project.city, project.state].filter(Boolean).join(", ")}</em>
+                    )}
+                    {(project.city || project.state) && project.value > 0 && (
+                      <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
+                    )}
+                    {project.value > 0 && (
+                      <span style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                        ${project.value.toLocaleString()} contract
+                      </span>
+                    )}
+                    {(project.value > 0 || project.city || project.state) && (
+                      <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
+                    )}
+                    <span style={{ fontFamily: "JetBrains Mono, monospace", textTransform: "capitalize" }}>
+                      {project.status || "active"}
+                    </span>
+                    {(project.actual_start_date || project.start_date) && (
+                      <>
+                        <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
+                        <span style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                          SC: {fmtDate((project.actual_start_date || project.start_date)!)}
+                        </span>
+                      </>
                     )}
                   </div>
-                  {teamRoles.length === 0 ? (
-                    <p className="text-sm text-gray-400">No team members assigned.</p>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {teamRoles.map(({ contact, roleName }, i) => (
-                        <div key={`${contact.id}-${roleName}-${i}`} className="flex items-center gap-3 py-2.5 px-4 bg-gray-50 rounded-lg">
-                          <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-sm font-semibold text-gray-600 shrink-0">
-                            {contactName(contact)[0]?.toUpperCase() ?? "?"}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-gray-900">{contactName(contact)}</p>
-                            <p className="text-xs text-gray-400">{roleName}</p>
-                          </div>
-                        </div>
-                      ))}
+                  <div className="row">
+                    <div>
+                      <div className="lbl">Team</div>
+                      <div className="val">{teamRoles.length}</div>
                     </div>
-                  )}
+                    <div>
+                      <div className="lbl">My open tasks</div>
+                      <div className="val">{openTaskAlerts.length}</div>
+                    </div>
+                    <div>
+                      <div className="lbl">Schedule</div>
+                      <div className="val">{workTasks.length}</div>
+                    </div>
+                    <div>
+                      <div className="lbl">Complete</div>
+                      <div className="val">{workTasks.length > 0 ? `${pctComplete}%` : "—"}</div>
+                    </div>
+                  </div>
                 </div>
+              );
+            })()}
 
-                {/* Recent Activity */}
-                <div className="bg-white border border-gray-100 rounded-xl p-6">
-                  <h2 className="text-sm font-semibold text-gray-900 mb-4">Recent Activity</h2>
+            {/* Two-column layout */}
+            <div className="grid-2">
+
+              {/* Left: Activity + Work */}
+              <div>
+                <h3 className="h3-warm">Today&apos;s activity</h3>
+                <div className="card card-pad">
                   {activity.length === 0 ? (
                     <p className="text-sm text-gray-400">No activity yet.</p>
                   ) : (
@@ -839,7 +855,7 @@ export default function ProjectClient({
                       <div className="space-y-4">
                         {(recentActivityExpanded ? activity : activity.slice(0, 5)).map((item) => (
                           <div key={item.id} className="flex items-start gap-3">
-                            <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${lastLoginAt !== null && new Date(item.created_at).getTime() > lastLoginAt ? "bg-emerald-500 animate-pulse" : "bg-gray-300"}`} />
+                            <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${lastLoginAt !== null && new Date(item.created_at).getTime() > lastLoginAt ? "bg-[color:var(--brand-500)] animate-pulse" : "bg-gray-300"}`} />
                             <div>
                               <p className="text-sm text-gray-700">{item.description}</p>
                               <p className="text-xs text-gray-400 mt-0.5">
@@ -853,7 +869,7 @@ export default function ProjectClient({
                       {activity.length > 5 && (
                         <button
                           onClick={() => setRecentActivityExpanded((x) => !x)}
-                          className="mt-3 w-full py-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                          className="btn-secondary mt-4 w-full"
                         >
                           {recentActivityExpanded ? "Show less" : `Show ${activity.length - 5} more`}
                         </button>
@@ -878,73 +894,76 @@ export default function ProjectClient({
                   const list = workTab === "ongoing" ? ongoing : upcoming;
 
                   return (
-                    <div className="bg-white border border-gray-100 rounded-xl p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-sm font-semibold text-gray-900">Work Summary</h2>
-                        <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs font-medium">
+                    <>
+                      <div className="gap" />
+                      <div className="sec-row">
+                        <h3 className="h3-warm">Work summary</h3>
+                        <div className="seg">
                           <button
                             onClick={() => { setWorkTab("ongoing"); setWorkExpanded(false); }}
-                            className={`px-3 py-1.5 transition-colors ${workTab === "ongoing" ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"}`}
+                            className={workTab === "ongoing" ? "active" : ""}
                           >
                             Ongoing
                           </button>
                           <button
                             onClick={() => { setWorkTab("upcoming"); setWorkExpanded(false); }}
-                            className={`px-3 py-1.5 border-l border-gray-200 transition-colors ${workTab === "upcoming" ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"}`}
+                            className={workTab === "upcoming" ? "active" : ""}
                           >
                             Upcoming
                           </button>
                         </div>
                       </div>
-
-                      {scheduleTasks.length === 0 ? (
-                        <p className="text-sm text-gray-400">No schedule uploaded for this project.</p>
-                      ) : list.length === 0 ? (
-                        <p className="text-sm text-gray-400">
-                          {workTab === "ongoing" ? "No tasks in progress today." : "No tasks starting in the next two weeks."}
-                        </p>
-                      ) : (
-                        <>
-                          <div className="space-y-2">
-                            {(workExpanded ? list : list.slice(0, 3)).map((t) => (
-                              <div key={t.uid} className="flex items-start justify-between gap-4 py-2.5 px-3 bg-gray-50 rounded-lg">
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 truncate">{t.name}</p>
-                                  <p className="text-xs text-gray-400 mt-0.5">
-                                    {new Date(t.start + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                                    {" — "}
-                                    {new Date(t.finish + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                                  </p>
-                                </div>
-                                <div className="shrink-0 text-right">
-                                  <span className="text-xs font-semibold text-gray-700">{t.percentComplete}%</span>
-                                  <div className="w-16 h-1.5 bg-gray-200 rounded-full mt-1 overflow-hidden">
-                                    <div className="h-full bg-gray-700 rounded-full" style={{ width: `${t.percentComplete}%` }} />
+                      <div className="card card-pad">
+                        {scheduleTasks.length === 0 ? (
+                          <p className="text-sm text-gray-400">No schedule uploaded for this project.</p>
+                        ) : list.length === 0 ? (
+                          <p className="text-sm text-gray-400">
+                            {workTab === "ongoing" ? "No tasks in progress today." : "No tasks starting in the next two weeks."}
+                          </p>
+                        ) : (
+                          <>
+                            <div className="space-y-2">
+                              {(workExpanded ? list : list.slice(0, 3)).map((t) => (
+                                <div key={t.uid} className="flex items-start justify-between gap-4 py-2.5">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">{t.name}</p>
+                                    <p className="text-xs text-gray-400 mt-0.5 font-mono">
+                                      {new Date(t.start + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                      {" — "}
+                                      {new Date(t.finish + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                    </p>
+                                  </div>
+                                  <div className="shrink-0 text-right">
+                                    <span className="text-xs font-semibold text-gray-700 tabular-nums">{t.percentComplete}%</span>
+                                    <div className="w-16 h-1.5 bg-gray-200 rounded-full mt-1 overflow-hidden">
+                                      <div className="h-full bg-[color:var(--brand-500)] rounded-full" style={{ width: `${t.percentComplete}%` }} />
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                          {list.length > 3 && (
-                            <button
-                              onClick={() => setWorkExpanded((x) => !x)}
-                              className="mt-3 w-full py-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                            >
-                              {workExpanded ? "Show less" : `Show ${list.length - 3} more`}
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
+                              ))}
+                            </div>
+                            {list.length > 3 && (
+                              <button
+                                onClick={() => setWorkExpanded((x) => !x)}
+                                className="btn-secondary mt-4 w-full"
+                              >
+                                {workExpanded ? "Show less" : `Show ${list.length - 3} more`}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </>
                   );
                 })()}
               </div>
 
-              {/* Right: Photo, Info, Weather, Edit */}
-              <div className="space-y-5">
+              {/* Right: Photo, Info, Team, Weather */}
+              <div>
 
                 {/* Photo */}
-                <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+                <h3 className="h3-warm">Project photo</h3>
+                <div className="card overflow-hidden">
                   <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
                   {project.photo_url ? (
                     <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
@@ -984,36 +1003,32 @@ export default function ProjectClient({
                 </div>
 
                 {/* Project Info Card */}
-                <div className="bg-white border border-gray-100 rounded-xl p-5 space-y-3">
-                  {/* Card header with three-dot edit menu */}
-                  <div className="flex items-center justify-between -mt-0.5">
-                    <h2 className="text-sm font-semibold text-gray-900">Project Details</h2>
-                    {(companyRole === "super_admin" || companyRole === "admin") && (
-                      <div ref={infoMenuRef} className="relative">
-                        <button
-                          onClick={() => setShowInfoMenu((o) => !o)}
-                          className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                          aria-label="Project options"
-                        >
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                            <circle cx="5" cy="12" r="1.5" />
-                            <circle cx="12" cy="12" r="1.5" />
-                            <circle cx="19" cy="12" r="1.5" />
-                          </svg>
-                        </button>
-                        {showInfoMenu && (
-                          <div className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 min-w-[100px]">
-                            <button
-                              onClick={openEdit}
-                              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
-                            >
-                              Edit
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                <div className="gap" />
+                <div className="sec-row">
+                  <h3 className="h3-warm">Project details</h3>
+                  {(companyRole === "super_admin" || companyRole === "admin") && (
+                    <div ref={infoMenuRef} className="relative">
+                      <button
+                        onClick={() => setShowInfoMenu((o) => !o)}
+                        className="btn-quiet"
+                        aria-label="Project options"
+                      >
+                        Edit
+                      </button>
+                      {showInfoMenu && (
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 min-w-[100px]">
+                          <button
+                            onClick={openEdit}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="card card-pad space-y-3">
 
                   {/* Status + Value */}
                   <div className="flex items-center gap-3">
@@ -1110,9 +1125,85 @@ export default function ProjectClient({
                   )}
                 </div>
 
+                {/* Upcoming milestones */}
+                {(() => {
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const todayStr = today.toISOString().slice(0, 10);
+                  const milestones = scheduleTasks
+                    .filter((t) => t.isMilestone && t.finish && t.finish >= todayStr)
+                    .sort((a, b) => a.finish.localeCompare(b.finish));
+                  if (milestones.length === 0) return null;
+                  return (
+                    <>
+                      <div className="gap" />
+                      <h3 className="h3-warm">Upcoming milestones</h3>
+                      <div className="card card-pad">
+                        <div className="timeline">
+                          {milestones.slice(0, 6).map((m, i) => (
+                            <div key={m.uid} className={`tl-item${i === 0 ? " now" : ""}`}>
+                              <span className="when">
+                                {new Date(m.finish + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                              </span>
+                              <span className="what">{m.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {/* Project leads */}
+                <div className="gap" />
+                <div className="sec-row">
+                  <h3 className="h3-warm">Project leads</h3>
+                  {(companyRole === "super_admin" || companyRole === "admin") && (
+                    <div ref={teamMenuRef} className="relative">
+                      <button
+                        onClick={() => setTeamMenuOpen((o) => !o)}
+                        className="btn-quiet"
+                        aria-label="Team options"
+                      >
+                        Edit
+                      </button>
+                      {teamMenuOpen && (
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 min-w-[100px]">
+                          <button
+                            onClick={openRolesEdit}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="card card-pad">
+                  {teamRoles.length === 0 ? (
+                    <p className="text-sm text-gray-400">No team members assigned.</p>
+                  ) : (
+                    <div className="people">
+                      {teamRoles.map(({ contact, roleName }, i) => (
+                        <div key={`${contact.id}-${roleName}-${i}`} className="person">
+                          <div className={`av av-${(i % 5) + 1}`}>
+                            {contactName(contact)[0]?.toUpperCase() ?? "?"}
+                          </div>
+                          <div>
+                            <div className="nm">{contactName(contact)}</div>
+                            <div className="role">{roleName}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Weather */}
-                <div className="bg-white border border-gray-100 rounded-xl p-5">
-                  <h2 className="text-sm font-semibold text-gray-900 mb-4">7-Day Forecast</h2>
+                <div className="gap" />
+                <h3 className="h3-warm">7-day forecast</h3>
+                <div className="card card-pad">
                   <WeatherWidget
                     zipCode={project.zip_code ?? ""}
                     onDays={(days) => setRainAlert(buildRainAlert(days))}

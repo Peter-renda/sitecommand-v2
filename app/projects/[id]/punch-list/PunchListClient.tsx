@@ -65,11 +65,11 @@ const PUNCH_LIST_FILTER_OPTIONS = [
 ];
 const STATUSES = ["open", "in_progress", "closed"];
 const STATUS_LABELS: Record<string, string> = { open: "Open", in_progress: "In Progress", closed: "Closed" };
-const STATUS_COLORS: Record<string, string> = {
-  open: "bg-blue-50 text-blue-700",
-  in_progress: "bg-amber-50 text-amber-700",
-  closed: "bg-gray-100 text-gray-600",
-};
+const KANBAN_COLUMNS: { status: string; name: string; accent: string }[] = [
+  { status: "open", name: "Open", accent: "#D4500A" },
+  { status: "in_progress", name: "In progress", accent: "#B45309" },
+  { status: "closed", name: "Closed", accent: "#047857" },
+];
 const PRIORITY_COLORS: Record<string, string> = {
   Low: "bg-gray-50 text-gray-600",
   Medium: "bg-yellow-50 text-yellow-700",
@@ -588,20 +588,24 @@ export default function PunchListClient({ projectId, role, username, userId }: {
       <ProjectNav projectId={projectId} />
 
       <main className="max-w-7xl mx-auto px-6 py-8">
-        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+        <div className="sec-row">
           <div className="min-w-0">
-            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Punch List</h1>
-            {items.length > 0 && (
-              <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
-                <span className="sep">·</span>
-                <span className="num" style={{ color: "var(--brand-500)" }}>{items.filter((i) => i.status === "open").length}</span> open
-                <span className="sep">·</span>
-                <span className="num">{items.filter((i) => i.status === "in_progress").length}</span> in progress
-                <span className="sep">·</span>
-                <span className="num">{items.filter((i) => i.status === "closed").length}</span> closed
-              </p>
-            )}
+            <h1 className="h2-warm">Punch list</h1>
+            <p className="sub">
+              {items.length > 0 ? (
+                <>
+                  <em>Across this project</em>
+                  <span className="sep">·</span>
+                  <span className="num" style={{ color: "var(--brand-500)" }}>{items.filter((i) => i.status === "open").length}</span> open
+                  <span className="sep">·</span>
+                  <span className="num">{items.filter((i) => i.status === "in_progress").length}</span> in progress
+                  <span className="sep">·</span>
+                  <span className="num" style={{ color: "#047857" }}>{items.filter((i) => i.status === "closed").length}</span> closed
+                </>
+              ) : (
+                <em>Walk-through defects, ready to verify and closed</em>
+              )}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             {activeTab === "punch_lists" && (
@@ -609,13 +613,8 @@ export default function PunchListClient({ projectId, role, username, userId }: {
                 <button
                   type="button"
                   onClick={() => setShowFilters((open) => !open)}
-                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border rounded-md transition-colors ${
-                    showFilters ? "border-gray-900 text-gray-900 bg-gray-50" : "text-gray-700 border-gray-200 bg-white hover:bg-gray-50"
-                  }`}
+                  className="btn-secondary"
                 >
-                  <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                  </svg>
                   Filter
                 </button>
                 {showFilters && (
@@ -638,45 +637,32 @@ export default function PunchListClient({ projectId, role, username, userId }: {
                 )}
               </div>
             )}
-            <button onClick={() => exportPunchListPDF(displayedItems, directory)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors">
-              <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              Export as PDF
+            <button onClick={() => exportPunchListPDF(displayedItems, directory)} className="btn-secondary">
+              Export
             </button>
             {activeTab === "punch_lists" && (
-              <button onClick={() => setShowCreate(true)} disabled={creating || updating} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
-                {creating ? "Creating..." : "Create item"}
+              <button onClick={() => setShowCreate(true)} disabled={creating || updating} className="btn-primary disabled:opacity-50">
+                {creating ? "Creating..." : "New item"}
               </button>
             )}
           </div>
         </div>
 
-        <div className="mb-6 border-b border-gray-200">
-          <div className="flex items-center gap-6">
+        <div className="filters">
+          <div className="seg">
             <button
               type="button"
+              className={activeTab === "punch_lists" ? "active" : ""}
               onClick={() => setActiveTab("punch_lists")}
-              className={`relative py-3 text-sm font-medium transition-colors ${
-                activeTab === "punch_lists" ? "text-gray-900" : "text-gray-500 hover:text-gray-700"
-              }`}
             >
               Punch Lists
-              {activeTab === "punch_lists" && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-gray-900 rounded-full" />}
             </button>
             <button
               type="button"
+              className={activeTab === "recycle_bin" ? "active" : ""}
               onClick={() => setActiveTab("recycle_bin")}
-              className={`relative py-3 text-sm font-medium transition-colors ${
-                activeTab === "recycle_bin" ? "text-gray-900" : "text-gray-500 hover:text-gray-700"
-              }`}
             >
-              Recycle Bin
-              {deletedItems.length > 0 && (
-                <span className="ml-2 inline-flex items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-                  {deletedItems.length}
-                </span>
-              )}
-              {activeTab === "recycle_bin" && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-gray-900 rounded-full" />}
+              Recycle Bin{deletedItems.length > 0 ? ` (${deletedItems.length})` : ""}
             </button>
           </div>
         </div>
@@ -684,7 +670,7 @@ export default function PunchListClient({ projectId, role, username, userId }: {
         {loading ? (
           <SkeletonTable rows={5} cols={7} />
         ) : displayedItems.length === 0 ? (
-          <div className="bg-white border border-dashed border-gray-200 rounded-xl">
+          <div className="card card-pad" style={{ borderStyle: "dashed" }}>
             <EmptyState
               icon={
                 <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
@@ -692,72 +678,96 @@ export default function PunchListClient({ projectId, role, username, userId }: {
                 </svg>
               }
               title={activeTab === "punch_lists" ? "No punch list items yet" : "Recycle Bin is empty"}
-              description={activeTab === "punch_lists" ? "Click Create item to add the first one." : "Deleted punch list items will appear here."}
+              description={activeTab === "punch_lists" ? "Click New item to add the first one." : "Deleted punch list items will appear here."}
             />
           </div>
+        ) : activeTab === "recycle_bin" ? (
+          <div className="rfi-list">
+            <div
+              className="rfi-row head"
+              style={{ gridTemplateColumns: "64px 1fr 140px 160px 120px" }}
+            >
+              <div>#</div>
+              <div>Title</div>
+              <div>Status</div>
+              <div>Location</div>
+              <div>Due</div>
+            </div>
+            {displayedItems.map((item) => (
+              <div
+                key={item.id}
+                className="rfi-row"
+                style={{ gridTemplateColumns: "64px 1fr 140px 160px 120px" }}
+              >
+                <div className={`rfi-idx ${item.status === "closed" ? "closed" : item.status === "in_progress" ? "answered" : "open"}`}>
+                  {item.item_number}
+                </div>
+                <div className="rfi-q">
+                  <div className="title">{item.title}</div>
+                  <div className="meta">
+                    {item.trade && <span className="spec">{item.trade}</span>}
+                    {item.trade && item.type && <span className="sep">·</span>}
+                    {item.type && <span>{item.type}</span>}
+                  </div>
+                </div>
+                <div>
+                  <span className={`chip ${item.status === "closed" ? "chip-closed" : item.status === "in_progress" ? "chip-answered" : "chip-open"}`}>
+                    {STATUS_LABELS[item.status] ?? item.status}
+                  </span>
+                </div>
+                <div className="rfi-due">{item.location ?? "—"}</div>
+                <div className="rfi-due">{formatDate(item.due_date)}</div>
+              </div>
+            ))}
+          </div>
         ) : (
-          <div className="bg-white border border-gray-100 rounded-xl overflow-x-auto">
-            <table className="w-full min-w-[900px]">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider w-10"></th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">#</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Title</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Priority</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Manager</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Location</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Trade</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Due Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedItems.map((item) => (
-                  <tr
-                    key={item.id}
-                    onClick={(e) => {
-                      if ((e.target as HTMLElement).closest("button,a")) return;
-                      if (activeTab === "recycle_bin") return;
-                      window.location.href = `/projects/${projectId}/punch-list/${item.id}`;
-                    }}
-                    className={`border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0 ${
-                      activeTab === "punch_lists" ? "cursor-pointer" : "cursor-default"
-                    }`}
-                  >
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      {activeTab === "punch_lists" ? (
-                        <button
-                          type="button"
-                          onClick={() => setEditingItem(item)}
-                          className="inline-flex p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
-                          aria-label={`Edit punch list item ${item.item_number}`}
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                        </button>
-                      ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-mono text-gray-700">{item.item_number}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{item.title}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[item.status] ?? "bg-gray-100 text-gray-600"}`}>
-                        {STATUS_LABELS[item.status] ?? item.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {item.priority ? (
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[item.priority] ?? "bg-gray-50 text-gray-600"}`}>{item.priority}</span>
-                      ) : <span className="text-sm text-gray-400">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{getContactNameById(directory, item.punch_item_manager_id)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{item.location ?? "—"}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{item.trade ?? "—"}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{formatDate(item.due_date)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="kanban">
+            {KANBAN_COLUMNS.map((col) => {
+              const colItems = displayedItems.filter((i) => i.status === col.status);
+              return (
+                <div className="kcol" key={col.status}>
+                  <div className="kh">
+                    <span className="name">{col.name}</span>
+                    <span className="cnt">{colItems.length}</span>
+                  </div>
+                  {colItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="kcard"
+                      style={{ ["--accent" as string]: col.accent, cursor: "pointer" }}
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest("button,a")) return;
+                        window.location.href = `/projects/${projectId}/punch-list/${item.id}`;
+                      }}
+                    >
+                      <div className="num">{`P-${String(item.item_number).padStart(3, "0")}`}</div>
+                      <div className="ttl">{item.title}</div>
+                      <div className="foot">
+                        <span className="room">{item.location ?? "No location"}</span>
+                        <span style={{ marginLeft: "auto" }}>
+                          {item.priority ? (
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[item.priority] ?? "bg-gray-50 text-gray-600"}`}>{item.priority}</span>
+                          ) : (
+                            getContactNameById(directory, item.punch_item_manager_id)
+                          )}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditingItem(item)}
+                        className="mt-2 text-xs font-medium text-gray-400 hover:text-gray-700 transition-colors"
+                        aria-label={`Edit punch list item ${item.item_number}`}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  ))}
+                  {colItems.length === 0 && (
+                    <p className="text-xs text-gray-400 italic px-1 py-2">No items</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </main>

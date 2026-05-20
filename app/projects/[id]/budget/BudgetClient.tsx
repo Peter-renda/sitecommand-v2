@@ -1820,7 +1820,7 @@ export default function BudgetClient({
     if (item === null) {
       // Totals row
       switch (key) {
-        case "description": return <span className="font-semibold text-gray-900">Total</span>;
+        case "description": return <span className="font-display italic text-sm text-gray-900">Total</span>;
         case "unit_qty": return <span className="font-semibold">{totals.unit_qty.toLocaleString("en-US")}</span>;
         case "unit_of_measure": return <span className="font-semibold">—</span>;
         case "unit_cost": return <span className="font-semibold">—</span>;
@@ -1851,11 +1851,11 @@ export default function BudgetClient({
       case "description":
         return (
           <div>
-            <p className="text-xs font-medium text-gray-500">
+            <p className="font-display italic text-[13px] text-[color:var(--brand-700)]">
               {item!.cost_code}
               {item!.cost_type ? ` · ${item!.cost_type}` : ""}
             </p>
-            <p className="text-xs text-blue-600 flex items-center gap-1.5">
+            <p className="text-xs text-gray-600 flex items-center gap-1.5">
               <span>{item!.description || "No description"}</span>
               {item!.is_partial_line_item && (
                 <span
@@ -2173,19 +2173,29 @@ export default function BudgetClient({
       <ProjectNav projectId={projectId} />
 
       <main className="px-6 py-8">
+        {/* Breadcrumbs */}
+        <div className="crumbs mb-5">
+          <Link href={`/projects/${projectId}`}>Project</Link>
+          <span className="sep">/</span>
+          <span>Budget</span>
+          <span className="sep">/</span>
+          <span>Cost report</span>
+          <span className="stamp">{isBudgetLocked ? "Budget locked" : "Working draft"}</span>
+        </div>
+
         {/* Title + actions */}
-        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+        <div className="sec-row mb-6 gap-4 flex-wrap">
           <div className="min-w-0">
-            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Budget</h1>
-            {(items.length > 0 || snapshots.length > 0) && (
-              <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">{isBudgetLocked ? "Locked" : "Across this project"}</span>
-                <span className="sep">·</span>
-                <span className="num" style={{ color: "var(--brand-500)" }}>{items.length}</span> line items
-                <span className="sep">·</span>
-                <span className="num">{snapshots.length}</span> snapshots
-              </p>
-            )}
+            <h1 className="h2-warm">Budget</h1>
+            <p className="sec-sub mt-1.5">
+              <span className="serif-italic text-[color:var(--brand-700)]">{isBudgetLocked ? "Locked budget" : "Across this project"}</span>
+              <span className="sep">·</span>
+              <span className="num">{fmt(totals.projectedBudget)}</span> projected
+              <span className="sep">·</span>
+              <span className="num" style={{ color: "var(--brand-500)" }}>{items.length}</span> line items
+              <span className="sep">·</span>
+              <span className="num">{snapshots.length}</span> snapshots
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -2352,6 +2362,32 @@ export default function BudgetClient({
             </div>
           </div>
         </div>
+
+        {/* Stat strip */}
+        {!loading && (
+          <div className="stats mb-6">
+            <div className="stat">
+              <div className="lbl">Revised Budget</div>
+              <div className="val">{fmt(totals.revisedBudget)}</div>
+              <div className="delta">{fmt(totals.original_budget_amount)} original</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Projected Costs</div>
+              <div className="val">{fmt(totals.projectedCosts)}</div>
+              <div className="delta">{fmt(totals.committed_costs)} committed</div>
+            </div>
+            <div className="stat warn">
+              <div className="lbl">Forecast to Complete</div>
+              <div className="val">{fmt(totals.forecastToComplete)}</div>
+              <div className="delta">{fmt(totals.estimatedCostAtCompletion)} est. at completion</div>
+            </div>
+            <div className={`stat ${totals.projectedOverUnder < 0 ? "alert" : "calm"}`}>
+              <div className="lbl">Projected Over / Under</div>
+              <div className="val">{fmt(totals.projectedOverUnder)}</div>
+              <div className="delta">{totals.projectedOverUnder < 0 ? "Projected over budget" : "Within budget"}</div>
+            </div>
+          </div>
+        )}
 
         <div className="mb-4 border-b border-gray-200">
           <div className="flex items-center gap-6">
@@ -2879,15 +2915,15 @@ export default function BudgetClient({
             {loading ? (
               <SkeletonTable rows={6} cols={8} />
             ) : activeTab === "budget" ? (
-              <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+              <div className="budget">
                 <div className="overflow-auto max-h-[70vh]">
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 z-20">
-                      <tr className="border-b border-gray-100 bg-gray-50">
+                      <tr className="bg-[#FAFAF7] border-b border-black/[0.06]">
                         {COLS.map((col) => (
                           <th
                             key={col.key}
-                            className={`text-left px-3 py-3 font-semibold text-gray-700 whitespace-nowrap bg-gray-50 ${col.width} ${
+                            className={`text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 whitespace-nowrap bg-[#FAFAF7] ${col.width} ${
                               col.key === "description" ? "sticky left-0 z-30" : ""
                             }`}
                           >
@@ -2898,7 +2934,7 @@ export default function BudgetClient({
                             )}
                           </th>
                         ))}
-                        <th className="px-3 py-3 w-10 bg-gray-50" />
+                        <th className="px-3 py-2.5 w-10 bg-[#FAFAF7]" />
                       </tr>
                     </thead>
                     <tbody>
@@ -2906,8 +2942,8 @@ export default function BudgetClient({
                       {items.length === 0 ? (
                         <tr>
                           <td colSpan={COLS.length + 1} className="px-3 py-12 text-center">
-                            <p className="text-sm text-gray-400">No budget line items yet</p>
-                            <p className="text-xs text-gray-300 mt-1">
+                            <p className="font-display italic text-base text-[color:var(--brand-700)]">No budget line items yet</p>
+                            <p className="text-xs text-gray-400 mt-1">
                               Use the right panel to create your first budget code.
                             </p>
                           </td>
@@ -2916,13 +2952,15 @@ export default function BudgetClient({
                         items.map((item) => (
                           <tr
                             key={item.id}
-                            className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0 group"
+                            className="border-b border-black/[0.04] hover:bg-[#FAFAF7] transition-colors last:border-b-0 group"
                           >
                             {COLS.map((col) => (
                               <td
                                 key={col.key}
                                 className={`px-3 py-3 text-xs whitespace-nowrap ${
-                                  col.key === "description" ? "sticky left-0 z-10 bg-white" : ""
+                                  col.key === "description"
+                                    ? "sticky left-0 z-10 bg-white group-hover:bg-[#FAFAF7]"
+                                    : "font-mono tabular-nums text-right"
                                 }`}
                               >
                                 {renderCell(item, col.key)}
@@ -2965,18 +3003,20 @@ export default function BudgetClient({
                       )}
 
                       {/* Totals row */}
-                      <tr className="border-t border-gray-200 bg-gray-50 sticky bottom-0 z-20">
+                      <tr className="border-t border-black/[0.08] bg-[#FAFAF7] sticky bottom-0 z-20">
                         {COLS.map((col) => (
                           <td
                             key={col.key}
-                            className={`px-3 py-3 text-xs whitespace-nowrap bg-gray-50 ${
-                              col.key === "description" ? "sticky left-0 z-30" : ""
+                            className={`px-3 py-3 text-xs whitespace-nowrap bg-[#FAFAF7] ${
+                              col.key === "description"
+                                ? "sticky left-0 z-30"
+                                : "font-mono tabular-nums text-right"
                             }`}
                           >
                             {renderCell(null, col.key)}
                           </td>
                         ))}
-                        <td className="bg-gray-50" />
+                        <td className="bg-[#FAFAF7]" />
                       </tr>
                     </tbody>
                   </table>
@@ -3039,7 +3079,7 @@ export default function BudgetClient({
               function renderForecastCell(item: BudgetLineItem | null, key: string) {
                 if (item === null) {
                   switch (key) {
-                    case "description": return <span className="font-semibold text-gray-900">Total</span>;
+                    case "description": return <span className="font-display italic text-sm text-gray-900">Total</span>;
                     case "sub_job": return null;
                     case "revised_budget": return <span className="font-semibold">{fmt(forecastTotals.revisedBudget)}</span>;
                     case "projected_budget": return <span className="font-semibold">{fmt(forecastTotals.projectedBudget)}</span>;
@@ -3060,8 +3100,8 @@ export default function BudgetClient({
                   case "description":
                     return (
                       <div>
-                        <p className="text-xs font-medium text-gray-500">{item.cost_code}</p>
-                        <p className="text-xs text-blue-600">{item.description}</p>
+                        <p className="font-display italic text-[13px] text-[color:var(--brand-700)]">{item.cost_code}</p>
+                        <p className="text-xs text-gray-600">{item.description}</p>
                       </div>
                     );
                   case "sub_job": return <span className="text-gray-600">{tiers.tier1}</span>;
@@ -3090,15 +3130,15 @@ export default function BudgetClient({
               }
 
               return (
-                <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+                <div className="budget">
                   <div className="overflow-auto max-h-[70vh]">
                     <table className="w-full text-xs">
                       <thead className="sticky top-0 z-20">
-                        <tr className="border-b border-gray-100 bg-gray-50">
+                        <tr className="border-b border-black/[0.06] bg-[#FAFAF7]">
                           {FORECAST_COLS.map((col) => (
                             <th
                               key={col.key}
-                              className={`text-left px-3 py-3 font-semibold text-gray-700 whitespace-nowrap bg-gray-50 ${col.width} ${
+                              className={`text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 whitespace-nowrap bg-[#FAFAF7] ${col.width} ${
                                 col.key === "description" ? "sticky left-0 z-30" : ""
                               }`}
                             >
@@ -3110,24 +3150,24 @@ export default function BudgetClient({
                       <tbody>
                         {filteredForecastItems.length === 0 ? (
                           <tr>
-                            <td colSpan={FORECAST_COLS.length} className="px-3 py-12 text-center text-sm text-gray-400">
-                              No line items match the current filters
+                            <td colSpan={FORECAST_COLS.length} className="px-3 py-12 text-center">
+                              <p className="font-display italic text-base text-[color:var(--brand-700)]">No line items match the current filters</p>
                             </td>
                           </tr>
                         ) : forecastGroupBy ? (
                           groupedForecastItems.map(([groupName, groupItems]) => (
                             <Fragment key={`fg-${groupName}`}>
-                              <tr className="bg-gray-100 border-y border-gray-200">
-                                <td colSpan={FORECAST_COLS.length} className="px-3 py-2 text-xs font-semibold text-gray-700">
+                              <tr className="bg-[#F1EEE6] border-y border-black/[0.06]">
+                                <td colSpan={FORECAST_COLS.length} className="px-3 py-2 font-display italic text-[13px] text-gray-700">
                                   {groupName}
                                 </td>
                               </tr>
                               {groupItems.map((item) => (
-                                <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0">
+                                <tr key={item.id} className="border-b border-black/[0.04] hover:bg-[#FAFAF7] transition-colors last:border-b-0 group">
                                   {FORECAST_COLS.map((col) => (
                                     <td
                                       key={col.key}
-                                      className={`px-3 py-3 text-xs whitespace-nowrap ${col.key === "description" ? "sticky left-0 z-10 bg-white" : ""}`}
+                                      className={`px-3 py-3 text-xs whitespace-nowrap ${col.key === "description" ? "sticky left-0 z-10 bg-white group-hover:bg-[#FAFAF7]" : "font-mono tabular-nums text-right"}`}
                                     >
                                       {renderForecastCell(item, col.key)}
                                     </td>
@@ -3138,11 +3178,11 @@ export default function BudgetClient({
                           ))
                         ) : (
                           filteredForecastItems.map((item) => (
-                            <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0">
+                            <tr key={item.id} className="border-b border-black/[0.04] hover:bg-[#FAFAF7] transition-colors last:border-b-0 group">
                               {FORECAST_COLS.map((col) => (
                                 <td
                                   key={col.key}
-                                  className={`px-3 py-3 text-xs whitespace-nowrap ${col.key === "description" ? "sticky left-0 z-10 bg-white" : ""}`}
+                                  className={`px-3 py-3 text-xs whitespace-nowrap ${col.key === "description" ? "sticky left-0 z-10 bg-white group-hover:bg-[#FAFAF7]" : "font-mono tabular-nums text-right"}`}
                                 >
                                   {renderForecastCell(item, col.key)}
                                 </td>
@@ -3151,11 +3191,11 @@ export default function BudgetClient({
                           ))
                         )}
                         {/* Totals row */}
-                        <tr className="border-t border-gray-200 bg-gray-50 sticky bottom-0 z-20">
+                        <tr className="border-t border-black/[0.08] bg-[#FAFAF7] sticky bottom-0 z-20">
                           {FORECAST_COLS.map((col) => (
                             <td
                               key={col.key}
-                              className={`px-3 py-3 text-xs whitespace-nowrap bg-gray-50 ${col.key === "description" ? "sticky left-0 z-30" : ""}`}
+                              className={`px-3 py-3 text-xs whitespace-nowrap bg-[#FAFAF7] ${col.key === "description" ? "sticky left-0 z-30" : "font-mono tabular-nums text-right"}`}
                             >
                               {renderForecastCell(null, col.key)}
                             </td>
