@@ -341,6 +341,7 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const [myOpenItems, setMyOpenItems] = useState<MyOpenItem[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const myOpenItemsRef = useRef<HTMLElement>(null);
+  const whileAwayRef = useRef<HTMLElement>(null);
 
   // Form state
   const [name, setName] = useState("");
@@ -386,6 +387,10 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const [settingsSuccess, setSettingsSuccess] = useState("");
+  const updatesWhileAway =
+    lastLoginAt === null
+      ? []
+      : activities.filter((item) => new Date(item.created_at).getTime() > lastLoginAt);
 
   async function loadProjects() {
     const res = await fetch("/api/projects");
@@ -764,13 +769,18 @@ export default function DashboardClient({ username, email, role, companyRole, us
           const attentionCount = myOpenItems.length;
           const greetingFirstName = (username || "there").split(/[\s.@]/)[0];
           const greeting = `Good ${(() => { const h = new Date().getHours(); return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"; })()}, ${greetingFirstName}.`;
+          const updatesWhileAwayCount = updatesWhileAway.length;
           return (
             <div className="bezel ambient-hero mb-10">
               <div className="bezel-inner">
                 <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr]">
                   {/* Left: attention */}
                   <div className="px-6 sm:px-8 py-7 sm:py-9">
-                    <h1 className="font-display text-[32px] sm:text-[40px] leading-[1.05] text-[color:var(--ink)] mb-1">
+                    <button
+                      type="button"
+                      onClick={() => myOpenItemsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      className="block text-left font-display text-[32px] sm:text-[40px] leading-[1.05] text-[color:var(--ink)] mb-1 hover:opacity-85 transition-opacity"
+                    >
                       {attentionCount > 0 ? (
                         <>
                           <span className="tabular-nums">{attentionCount}</span>{" "}
@@ -783,12 +793,21 @@ export default function DashboardClient({ username, email, role, companyRole, us
                           <span className="serif-italic text-gray-500">nothing overdue</span>
                         </>
                       )}
-                    </h1>
-                    <p className="text-sm text-gray-500 mb-6 max-w-md">
+                    </button>
+                    <p className="text-sm text-gray-500 max-w-md">
                       {attentionCount > 0
                         ? "Open items assigned to you or created by you across all active projects."
                         : "Signals from your projects will surface here as work progresses."}
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => whileAwayRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      className="block text-left font-display text-[32px] sm:text-[40px] leading-[1.05] text-[color:var(--ink)] mb-6 hover:opacity-85 transition-opacity"
+                    >
+                      <span className="tabular-nums">{updatesWhileAwayCount}</span>{" "}
+                      new or updated {updatesWhileAwayCount === 1 ? "document" : "documents"}{" "}
+                      <span className="serif-italic text-gray-500">while you were away</span>
+                    </button>
 
                     {scopedTasks.length > 0 && (
                       <ul className="divide-y divide-gray-50 border hairline rounded-lg bg-white">
@@ -1160,6 +1179,43 @@ export default function DashboardClient({ username, email, role, companyRole, us
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+
+        <section ref={whileAwayRef} className="mt-12">
+          <div className="flex items-end justify-between mb-5">
+            <div>
+              <h2 className="font-display text-[28px] leading-[1.05] text-[color:var(--ink)]">While you were away</h2>
+              <p className="sec-sub">
+                <span className="num">{updatesWhileAway.length}</span> update{updatesWhileAway.length !== 1 ? "s" : ""} since your last login
+              </p>
+            </div>
+          </div>
+
+          {updatesWhileAway.length > 0 ? (
+            <ul className="divide-y divide-gray-50 border hairline rounded-xl bg-white">
+              {updatesWhileAway.map((item) => (
+                <li key={`${item.type}-${item.id}`}>
+                  <a
+                    href={item.href}
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+                  >
+                    <ActivityIcon type={item.type} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-gray-900 truncate">{item.title}</p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {TYPE_LABELS[item.type]} · {item.project_name}
+                      </p>
+                    </div>
+                    <span className="text-xs text-gray-500 shrink-0 mono-label">{timeAgo(item.created_at)}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="bg-white border border-dashed border-gray-200 rounded-xl px-6 py-8 text-center">
+              <p className="text-sm text-gray-400">No updates since your last login.</p>
+            </div>
           )}
         </section>
       </main>
