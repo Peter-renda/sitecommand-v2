@@ -250,25 +250,35 @@ export default function AssistClient({ projectId }: { projectId: string }) {
     <div className="min-h-screen bg-[#FAFAF7]">
       <ProjectNav projectId={projectId} />
 
-      <main className="mx-auto max-w-[900px] px-4 py-6">
-        <div className="mb-4 rounded-xl border border-[var(--border-base)] bg-white p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Assist</h1>
-              <p className="mt-1 text-sm text-gray-600">
-                Ask anything about this project. Assist searches across RFIs, submittals, daily logs, meetings,
-                tasks, contracts, budget, commitments, change orders/events, schedules, specs, photos, and any
-                attached files (drawings, spec book, RFI/submittal attachments, project documents).
-              </p>
-            </div>
-          </div>
+      <main className="mx-auto max-w-[900px] px-4 py-8">
+        <div className="mb-6">
+          <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
+            Assist
+          </h1>
+          <p className="sub mt-1.5">
+            <em>Ask anything about this project</em>
+            <span className="sep">·</span>
+            <span className="num">{messages.filter((m) => m.role === "user").length}</span> asked
+            <span className="sep">·</span>
+            <span className="num" style={{ color: "var(--brand-500)" }}>{workflows.filter((w) => w.active).length}</span> active workflows
+          </p>
+          <p className="mt-2 text-sm text-gray-600">
+            Assist searches across RFIs, submittals, daily logs, meetings, tasks, contracts, budget, commitments,
+            change orders/events, schedules, specs, photos, and any attached files (drawings, spec book,
+            RFI/submittal attachments, project documents).
+          </p>
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-white flex flex-col h-[calc(100vh-220px)]">
+        <div className="rounded-xl border border-[color:var(--border-base)] bg-white flex flex-col h-[calc(100vh-260px)]">
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.length === 0 && (
-              <div className="text-center py-10">
-                <p className="text-gray-700 font-medium">What would you like to know about this project?</p>
+              <div className="text-center py-12">
+                <p className="font-display text-[20px] leading-tight text-[color:var(--ink)]">
+                  What would you like to know about this project?
+                </p>
+                <p className="mt-1.5 text-sm text-gray-500 serif-italic">
+                  Type a question below to begin.
+                </p>
               </div>
             )}
 
@@ -277,14 +287,14 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                 <div
                   className={`max-w-[85%] rounded-lg px-4 py-3 text-sm whitespace-pre-wrap ${
                     m.role === "user"
-                      ? "bg-gray-900 text-white"
-                      : "bg-gray-50 border border-gray-200 text-gray-900"
+                      ? "bg-[color:var(--ink)] text-white"
+                      : "bg-[color:var(--surface-sunken)] border border-[color:var(--border-base)] text-[color:var(--ink)]"
                   }`}
                 >
                   {m.content}
                   {m.sourceDocuments && m.sourceDocuments.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-gray-200">
-                      <div className="text-[11px] font-medium uppercase tracking-wide text-gray-500 mb-1.5">
+                    <div className="mt-3 pt-3 border-t border-[color:var(--border-base)]">
+                      <div className="mono-label text-[11px] text-gray-500 mb-1.5">
                         Source documents
                       </div>
                       <ul className="space-y-1">
@@ -294,7 +304,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                               href={doc.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex items-start gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                              className="inline-flex items-start gap-1.5 text-xs text-[color:var(--brand-700)] hover:text-[color:var(--brand-500)] hover:underline"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -322,7 +332,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                     </div>
                   )}
                   {m.stats && (
-                    <div className="mt-2 pt-2 border-t border-gray-200 text-[11px] text-gray-500">
+                    <div className="mt-2 pt-2 border-t border-[color:var(--border-base)] text-[11px] text-gray-500 tabular-nums">
                       Searched {m.stats.recordCount} records across {m.stats.toolsSearched} tools
                       {m.stats.filesAttached > 0
                         ? ` · ${m.stats.filesCited} of ${m.stats.filesAttached} file${m.stats.filesAttached === 1 ? "" : "s"} cited`
@@ -335,7 +345,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
 
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-500">
+                <div className="bg-[color:var(--surface-sunken)] border border-[color:var(--border-base)] rounded-lg px-4 py-3 text-sm text-gray-500 serif-italic">
                   Searching project data…
                 </div>
               </div>
@@ -348,7 +358,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
             )}
           </div>
 
-          <div className="border-t border-gray-200 p-3">
+          <div className="border-t border-[color:var(--border-base)] p-3">
             <div className="flex gap-2 items-end">
               <textarea
                 ref={inputRef}
@@ -358,12 +368,12 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                 rows={2}
                 placeholder="Ask anything about this project… (Enter to send, Shift+Enter for new line)"
                 disabled={loading}
-                className="flex-1 resize-none rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-50"
+                className="flex-1 resize-none rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)] disabled:bg-[color:var(--surface-sunken)]"
               />
               <button
                 onClick={() => ask(input)}
                 disabled={loading || !input.trim()}
-                className="px-4 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Send
               </button>
@@ -371,34 +381,32 @@ export default function AssistClient({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4">
-          <div className="mb-3">
-            <h2 className="font-display text-[20px] leading-tight text-[color:var(--ink)]">
-              Recurring Workflows
-            </h2>
+        <section className="card card-pad mt-6">
+          <div className="mb-4">
+            <h2 className="h3-warm">Recurring Workflows</h2>
             <p className="mt-1 text-sm text-gray-600">
               Save a prompt to run on a recurring schedule. Results are emailed to the listed recipients.
             </p>
           </div>
 
-          <form onSubmit={saveWorkflow} className="space-y-3 border-b border-gray-200 pb-4 mb-4">
+          <form onSubmit={saveWorkflow} className="space-y-3 border-b border-[color:var(--border-base)] pb-5 mb-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Name</label>
+                <label className="mono-label block text-gray-600 mb-1">Name</label>
                 <input
                   type="text"
                   value={wfName}
                   onChange={(e) => setWfName(e.target.value)}
                   placeholder="Weekly RFI summary"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Frequency</label>
+                <label className="mono-label block text-gray-600 mb-1">Frequency</label>
                 <select
                   value={wfFrequency}
                   onChange={(e) => setWfFrequency(e.target.value as Frequency)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
                 >
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
@@ -436,37 +444,27 @@ export default function AssistClient({ projectId }: { projectId: string }) {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Prompt</label>
+              <label className="mono-label block text-gray-600 mb-1">Prompt</label>
               <textarea
                 value={wfPrompt}
                 onChange={(e) => setWfPrompt(e.target.value)}
                 rows={3}
                 placeholder="Summarize all open RFIs and any submittals waiting on the architect."
-                className="w-full resize-none rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                className="w-full resize-none rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                Recipients from Project Directory
+              <label className="mono-label block text-gray-600 mb-1">
+                Recipients <span className="normal-case tracking-normal text-gray-500">(comma-separated emails)</span>
               </label>
-              <div className="rounded-md border border-gray-300 px-3 py-2 max-h-[140px] overflow-y-auto space-y-1">
-                {directoryRecipients.map((recipient) => (
-                  <label key={recipient.id} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={wfRecipients.includes(recipient.email)}
-                      onChange={(e) => {
-                        setWfRecipients((prev) =>
-                          e.target.checked ? [...prev, recipient.email] : prev.filter((v) => v !== recipient.email),
-                        );
-                      }}
-                    />
-                    <span>{recipient.name} ({recipient.email})</span>
-                  </label>
-                ))}
-              </div>
-              <p className="mt-1 text-[11px] text-gray-500">Select one or more recipients.</p>
+              <input
+                type="text"
+                value={wfRecipients}
+                onChange={(e) => setWfRecipients(e.target.value)}
+                placeholder="pm@example.com, super@example.com"
+                className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+              />
             </div>
 
             {wfError && (

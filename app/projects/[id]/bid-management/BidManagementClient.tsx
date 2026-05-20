@@ -53,19 +53,19 @@ function formatCurrency(n: number | null): string {
 // ─── Status badge configs ─────────────────────────────────────────────────────
 
 const PACKAGE_STATUS_STYLES: Record<PackageStatus, string> = {
-  draft: "bg-gray-100 text-gray-600",
-  open: "bg-blue-50 text-blue-700",
-  leveling: "bg-amber-50 text-amber-700",
-  awarded: "bg-green-50 text-green-700",
-  cancelled: "bg-red-50 text-red-600",
+  draft: "pill pill-warn",
+  open: "pill pill-open",
+  leveling: "pill pill-info",
+  awarded: "pill pill-coc",
+  cancelled: "pill pill-danger",
 };
 
 const BID_STATUS_STYLES: Record<BidStatus, string> = {
-  invited: "bg-gray-100 text-gray-600",
-  viewed: "bg-blue-50 text-blue-700",
-  submitted: "bg-green-50 text-green-700",
-  declined: "bg-red-50 text-red-600",
-  awarded: "bg-amber-50 text-amber-700",
+  invited: "pill pill-warn",
+  viewed: "pill pill-info",
+  submitted: "pill pill-coc",
+  declined: "pill pill-danger",
+  awarded: "pill pill-open",
 };
 
 const PACKAGE_STATUS_OPTIONS: PackageStatus[] = ["draft", "open", "leveling", "awarded", "cancelled"];
@@ -190,14 +190,15 @@ function AddBidderRow({
   const [contactEmail, setContactEmail] = useState("");
 
   return (
-    <tr className="bg-blue-50/40">
+    <tr className="bg-[color:var(--brand-50)]">
+      <td className="px-4 py-2 text-center text-gray-300">—</td>
       <td className="px-4 py-2">
         <input
           type="text"
           value={companyName}
           onChange={(e) => setCompanyName(e.target.value)}
           placeholder="Company name *"
-          className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-gray-900"
+          className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-[color:var(--ink)]"
           autoFocus
         />
       </td>
@@ -207,7 +208,7 @@ function AddBidderRow({
           value={contactName}
           onChange={(e) => setContactName(e.target.value)}
           placeholder="Contact name"
-          className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-gray-900"
+          className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-[color:var(--ink)]"
         />
       </td>
       <td className="px-4 py-2">
@@ -216,14 +217,14 @@ function AddBidderRow({
           value={contactEmail}
           onChange={(e) => setContactEmail(e.target.value)}
           placeholder="Email"
-          className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-gray-900"
+          className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-[color:var(--ink)]"
         />
       </td>
-      <td className="px-4 py-2 text-center">—</td>
-      <td className="px-4 py-2 text-center">—</td>
-      <td className="px-4 py-2 text-center">—</td>
+      <td className="px-4 py-2 text-center text-gray-300">—</td>
+      <td className="px-4 py-2 text-center text-gray-300">—</td>
+      <td className="px-4 py-2 text-center text-gray-300">—</td>
       <td className="px-4 py-2">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-end gap-1.5">
           <button
             type="button"
             onClick={() => {
@@ -231,14 +232,14 @@ function AddBidderRow({
               onAdd({ company_name: companyName, contact_name: contactName, contact_email: contactEmail });
             }}
             disabled={!companyName.trim()}
-            className="px-2.5 py-1 text-xs font-medium text-white bg-gray-900 rounded hover:bg-gray-700 transition-colors disabled:opacity-50"
+            className="btn-primary disabled:opacity-50"
           >
             Add
           </button>
           <button
             type="button"
             onClick={onCancel}
-            className="px-2.5 py-1 text-xs font-medium text-gray-600 border border-gray-200 rounded hover:bg-gray-50 transition-colors"
+            className="btn-secondary"
           >
             Cancel
           </button>
@@ -439,6 +440,11 @@ export default function BidManagementClient({
     ? Math.min(...submittedBids.map((b) => b.base_amount ?? Infinity))
     : null;
 
+  // ── Headline metrics ──
+  const openPackageCount = packages.filter((p) => p.status === "open").length;
+  const levelingPackageCount = packages.filter((p) => p.status === "leveling").length;
+  const awardedPackageCount = packages.filter((p) => p.status === "awarded").length;
+
   // ── Select package helper ──
   function selectPackage(pkg: BidPackage) {
     setSelectedPackage(pkg);
@@ -452,18 +458,54 @@ export default function BidManagementClient({
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
-      <div className="px-6 pt-8 pb-4 bg-[#FAFAF7]">
-        <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Bid Management</h1>
+      <div className="px-6 pt-8 pb-5 bg-[#FAFAF7]">
+        <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Bid management</h1>
+        {!loadingPackages && (
+          <p className="sub mt-1.5">
+            <em>Procurement on this project</em>
+            <span className="sep">·</span>
+            <span className="num" style={{ color: "var(--brand-500)" }}>{openPackageCount}</span> out for bid
+            <span className="sep">·</span>
+            <span className="num">{packages.length}</span> package{packages.length !== 1 ? "s" : ""}
+            <span className="sep">·</span>
+            <span className="num">{awardedPackageCount}</span> awarded
+          </p>
+        )}
+
+        {!loadingPackages && packages.length > 0 && (
+          <div className="stats mt-5">
+            <div className="stat">
+              <div className="lbl">Total Packages</div>
+              <div className="val">{packages.length}</div>
+              <div className="delta">across procurement</div>
+            </div>
+            <div className={`stat${openPackageCount > 0 ? " alert" : ""}`}>
+              <div className="lbl">Out for Bid</div>
+              <div className="val">{openPackageCount}</div>
+              <div className="delta">collecting proposals</div>
+            </div>
+            <div className={`stat${levelingPackageCount > 0 ? " warn" : ""}`}>
+              <div className="lbl">In Leveling</div>
+              <div className="val">{levelingPackageCount}</div>
+              <div className="delta">under comparison</div>
+            </div>
+            <div className={`stat${awardedPackageCount > 0 ? " calm" : ""}`}>
+              <div className="lbl">Awarded</div>
+              <div className="val">{awardedPackageCount}</div>
+              <div className="delta">scope committed</div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex h-[calc(100vh-56px-56px-96px)] min-h-[480px]">
         {/* ── Left Sidebar: Package List ── */}
-        <aside className="w-72 bg-white border-r border-gray-100 flex flex-col shrink-0">
-          <div className="px-4 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900">Bid Packages</h2>
+        <aside className="w-72 bg-white border-r border-black/[0.06] flex flex-col shrink-0">
+          <div className="px-4 py-4 border-b border-black/[0.06] flex items-center justify-between">
+            <h2 className="mono-label">Bid Packages</h2>
             <button
               onClick={() => setShowNewPackage(true)}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
+              className="btn-primary"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -476,7 +518,7 @@ export default function BidManagementClient({
             {loadingPackages ? (
               <div className="space-y-2 p-4">
                 {[...Array(3)].map((_, i) => (
-                  <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />
+                  <div key={i} className="h-16 bg-[color:var(--surface-sunken)] rounded-lg animate-pulse" />
                 ))}
               </div>
             ) : packages.length === 0 ? (
@@ -486,41 +528,64 @@ export default function BidManagementClient({
               </div>
             ) : (
               <div className="p-2 space-y-1">
-                {packages.map((pkg) => (
-                  <button
-                    key={pkg.id}
-                    onClick={() => selectPackage(pkg)}
-                    className={`w-full text-left px-3 py-3 rounded-lg transition-colors ${
-                      selectedPackage?.id === pkg.id
-                        ? "bg-gray-900 text-white"
-                        : "hover:bg-gray-50 text-gray-700"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className={`text-sm font-medium leading-snug ${selectedPackage?.id === pkg.id ? "text-white" : "text-gray-900"}`}>
-                        {pkg.name}
-                      </span>
-                      <span
-                        className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
-                          selectedPackage?.id === pkg.id
-                            ? "bg-white/20 text-white"
-                            : PACKAGE_STATUS_STYLES[pkg.status]
-                        }`}
-                      >
-                        {pkg.status}
-                      </span>
-                    </div>
-                    <div className={`flex items-center gap-3 mt-1.5 text-xs ${selectedPackage?.id === pkg.id ? "text-white/70" : "text-gray-400"}`}>
-                      <span>{pkg.bid_count} bid{pkg.bid_count !== 1 ? "s" : ""}</span>
-                      {pkg.due_date && (
-                        <>
-                          <span>·</span>
-                          <span>Due {formatDate(pkg.due_date)}</span>
-                        </>
-                      )}
-                    </div>
-                  </button>
-                ))}
+                {packages.map((pkg, i) => {
+                  const active = selectedPackage?.id === pkg.id;
+                  return (
+                    <button
+                      key={pkg.id}
+                      onClick={() => selectPackage(pkg)}
+                      className={`w-full text-left px-3 py-3 rounded-lg transition-colors ${
+                        active
+                          ? "bg-[color:var(--ink)] text-white"
+                          : "hover:bg-[color:var(--surface-sunken)] text-gray-700"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <span
+                          className={`idx-italic shrink-0 ${
+                            active
+                              ? ""
+                              : pkg.status === "awarded"
+                                ? "status-answered"
+                                : pkg.status === "open"
+                                  ? "status-open"
+                                  : pkg.status === "cancelled"
+                                    ? "status-closed"
+                                    : "status-draft"
+                          }`}
+                          style={active ? { color: "rgba(255,255,255,0.85)" } : undefined}
+                        >
+                          {String(i + 1).padStart(2, "0")}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className={`text-sm font-medium leading-snug ${active ? "text-white" : "text-[color:var(--ink)]"}`}>
+                              {pkg.name}
+                            </span>
+                            <span
+                              className={`shrink-0 ${
+                                active
+                                  ? "px-2 py-0.5 rounded-full text-xs font-medium capitalize bg-white/20 text-white"
+                                  : `${PACKAGE_STATUS_STYLES[pkg.status]} capitalize`
+                              }`}
+                            >
+                              {pkg.status}
+                            </span>
+                          </div>
+                          <div className={`flex items-center gap-2 mt-1.5 text-xs ${active ? "text-white/70" : "text-gray-400"}`}>
+                            <span className="font-mono tabular-nums">{pkg.bid_count} bid{pkg.bid_count !== 1 ? "s" : ""}</span>
+                            {pkg.due_date && (
+                              <>
+                                <span>·</span>
+                                <span>Due {formatDate(pkg.due_date)}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -550,10 +615,10 @@ export default function BidManagementClient({
           ) : (
             <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
               {/* Package Header */}
-              <div className="bg-white rounded-xl border border-gray-100 px-6 py-5">
+              <div className="bg-white rounded-xl border border-black/[0.06] px-6 py-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <h2 className="font-display text-[20px] leading-tight text-[color:var(--ink)] truncate">{selectedPackage.name}</h2>
+                    <h2 className="font-display text-[22px] leading-tight text-[color:var(--ink)] truncate">{selectedPackage.name}</h2>
                     {selectedPackage.description && (
                       <p className="text-sm text-gray-500 mt-0.5">{selectedPackage.description}</p>
                     )}
@@ -565,7 +630,7 @@ export default function BidManagementClient({
                     <select
                       value={selectedPackage.status}
                       onChange={(e) => handleStatusChange(e.target.value as PackageStatus)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium border-0 focus:outline-none focus:ring-2 focus:ring-gray-900 cursor-pointer capitalize ${PACKAGE_STATUS_STYLES[selectedPackage.status]}`}
+                      className={`border-0 focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)] cursor-pointer capitalize ${PACKAGE_STATUS_STYLES[selectedPackage.status]}`}
                     >
                       {PACKAGE_STATUS_OPTIONS.map((s) => (
                         <option key={s} value={s} className="bg-white text-gray-900">
@@ -578,16 +643,16 @@ export default function BidManagementClient({
               </div>
 
               {/* Scope of Work */}
-              <div className="bg-white rounded-xl border border-gray-100 px-6 py-5">
+              <div className="bg-white rounded-xl border border-black/[0.06] px-6 py-5">
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-gray-900">Scope of Work</h2>
+                  <h3 className="h3-warm">Scope of Work</h3>
                   {!editingScopeOfWork && (
                     <button
                       onClick={() => {
                         setScopeOfWorkDraft(selectedPackage.scope_of_work ?? "");
                         setEditingScopeOfWork(true);
                       }}
-                      className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
+                      className="btn-quiet"
                     >
                       Edit
                     </button>
@@ -606,13 +671,13 @@ export default function BidManagementClient({
                       <button
                         onClick={handleSaveScopeOfWork}
                         disabled={savingScope}
-                        className="px-3 py-1.5 text-xs font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
+                        className="btn-primary disabled:opacity-50"
                       >
                         {savingScope ? "Saving..." : "Save"}
                       </button>
                       <button
                         onClick={() => setEditingScopeOfWork(false)}
-                        className="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+                        className="btn-secondary"
                       >
                         Cancel
                       </button>
@@ -628,13 +693,13 @@ export default function BidManagementClient({
               </div>
 
               {/* Bidders Table */}
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-gray-900">Bidders</h2>
+              <div className="bg-white rounded-xl border border-black/[0.06] overflow-hidden">
+                <div className="px-6 py-4 border-b border-black/[0.06] flex items-center justify-between">
+                  <h3 className="h3-warm">Bidders</h3>
                   {!showAddBidder && (
                     <button
                       onClick={() => setShowAddBidder(true)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+                      className="btn-secondary"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -647,54 +712,70 @@ export default function BidManagementClient({
                 {loadingBids ? (
                   <div className="px-6 py-8 space-y-2">
                     {[...Array(3)].map((_, i) => (
-                      <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />
+                      <div key={i} className="h-10 bg-[color:var(--surface-sunken)] rounded animate-pulse" />
                     ))}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[700px]">
+                    <table className="w-full min-w-[760px]">
                       <thead>
-                        <tr className="border-b border-gray-100">
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Company</th>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Contact</th>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Email</th>
-                          <th className="text-center px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
-                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Bid Amount</th>
-                          <th className="text-center px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Submitted</th>
-                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>
+                        <tr className="border-b border-black/[0.06]">
+                          <th className="text-left px-4 py-3 mono-label w-10">#</th>
+                          <th className="text-left px-4 py-3 mono-label">Company</th>
+                          <th className="text-left px-4 py-3 mono-label">Contact</th>
+                          <th className="text-left px-4 py-3 mono-label">Email</th>
+                          <th className="text-center px-4 py-3 mono-label">Status</th>
+                          <th className="text-right px-4 py-3 mono-label">Bid Amount</th>
+                          <th className="text-center px-4 py-3 mono-label">Submitted</th>
+                          <th className="text-right px-4 py-3 mono-label">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {bids.map((bid) => (
-                          <tr key={bid.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 transition-colors">
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{bid.company_name}</td>
+                        {bids.map((bid, i) => (
+                          <tr key={bid.id} className="border-b border-black/[0.04] last:border-0 hover:bg-[color:var(--surface-sunken)] transition-colors">
+                            <td className="px-4 py-3">
+                              <span
+                                className={`idx-italic ${
+                                  bid.status === "awarded"
+                                    ? "status-answered"
+                                    : bid.status === "submitted"
+                                      ? "status-open"
+                                      : bid.status === "declined"
+                                        ? "status-closed"
+                                        : "status-draft"
+                                }`}
+                              >
+                                {String(i + 1).padStart(2, "0")}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm font-medium text-[color:var(--ink)]">{bid.company_name}</td>
                             <td className="px-4 py-3 text-sm text-gray-600">{bid.contact_name || "—"}</td>
                             <td className="px-4 py-3 text-sm text-gray-500">{bid.contact_email || "—"}</td>
                             <td className="px-4 py-3 text-center">
                               <select
                                 value={bid.status}
                                 onChange={(e) => handleUpdateBid(bid.id, { status: e.target.value as BidStatus })}
-                                className={`px-2 py-0.5 rounded-full text-xs font-medium border-0 focus:outline-none cursor-pointer capitalize ${BID_STATUS_STYLES[bid.status]}`}
+                                className={`border-0 focus:outline-none cursor-pointer capitalize ${BID_STATUS_STYLES[bid.status]}`}
                               >
                                 {(["invited", "viewed", "submitted", "declined", "awarded"] as BidStatus[]).map((s) => (
                                   <option key={s} value={s} className="bg-white text-gray-900">{s}</option>
                                 ))}
                               </select>
                             </td>
-                            <td className="px-4 py-3 text-sm text-right">
+                            <td className="px-4 py-3 text-sm text-right font-mono tabular-nums">
                               {bid.status === "submitted" || bid.base_amount != null ? (
-                                <span className="text-gray-900 font-medium">{formatCurrency(bid.base_amount)}</span>
+                                <span className="text-[color:var(--ink)] font-medium">{formatCurrency(bid.base_amount)}</span>
                               ) : (
                                 <span className="text-gray-300">—</span>
                               )}
                             </td>
-                            <td className="px-4 py-3 text-xs text-center text-gray-500">{formatDate(bid.submitted_at)}</td>
+                            <td className="px-4 py-3 text-xs text-center text-gray-500 font-mono tabular-nums">{formatDate(bid.submitted_at)}</td>
                             <td className="px-4 py-3">
                               <div className="flex items-center justify-end gap-2">
                                 {bid.status !== "awarded" && bid.status !== "declined" && (
                                   <button
                                     onClick={() => handleAwardBid(bid.id)}
-                                    className="px-2.5 py-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded hover:bg-amber-100 transition-colors"
+                                    className="px-2.5 py-1 text-xs font-medium text-[color:var(--brand-700)] bg-[color:var(--brand-100)] rounded hover:brightness-95 transition"
                                   >
                                     Mark Awarded
                                   </button>
@@ -722,7 +803,7 @@ export default function BidManagementClient({
 
                         {bids.length === 0 && !showAddBidder && (
                           <tr>
-                            <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
+                            <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-400">
                               No bidders added yet. Click Add Bidder to invite subcontractors.
                             </td>
                           </tr>

@@ -178,6 +178,22 @@ function formatDate(d: string | null): string {
   return new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+const OPEN_STATUSES = new Set(["open", "draft", "resubmitted", "revise_and_resubmit", "revise_and_resubmit_2", "make_corrections", "not_reviewed"]);
+const APPROVED_STATUSES = new Set(["approved", "approved_as_noted", "no_exceptions_taken"]);
+
+function isSubmittalOverdue(s: Submittal): boolean {
+  if (!s.final_due_date || !OPEN_STATUSES.has(s.status)) return false;
+  const due = new Date(s.final_due_date + "T23:59:59");
+  return due.getTime() < Date.now();
+}
+
+function indexStatus(status: string): "open" | "closed" | "answered" | "draft" {
+  if (status === "draft") return "draft";
+  if (status === "closed") return "closed";
+  if (APPROVED_STATUSES.has(status)) return "answered";
+  return "open";
+}
+
 
 function safeText(value: unknown): string {
   return typeof value === "string" ? value : value == null ? "" : String(value);
@@ -1402,11 +1418,11 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Submittals</h1>
             {!loading && submittals.length > 0 && (
               <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+                <span className="serif-italic text-[color:var(--brand-700)]">Shop drawings &amp; product data under review</span>
                 <span className="sep">·</span>
-                <span className="num" style={{ color: "var(--brand-500)" }}>{submittals.filter((s) => s.status === "open").length}</span> open
+                <span className="num" style={{ color: "var(--brand-500)" }}>{submittals.filter((s) => OPEN_STATUSES.has(s.status)).length}</span> open
                 <span className="sep">·</span>
-                <span className="num">{submittals.filter((s) => s.status === "closed").length}</span> closed
+                <span className="num">{submittals.filter(isSubmittalOverdue).length}</span> overdue
                 <span className="sep">·</span>
                 <span className="num">{submittals.length}</span> total
               </p>
@@ -1581,6 +1597,31 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
           </div>
         )}
 
+        {!loading && activeTab === "items" && submittals.length > 0 && (
+          <div className="stats">
+            <div className="stat">
+              <div className="lbl">Total Submittals</div>
+              <div className="val">{submittals.length}</div>
+              <div className="delta">{visibleSubmittals.length} shown</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Open</div>
+              <div className="val">{submittals.filter((s) => OPEN_STATUSES.has(s.status)).length}</div>
+              <div className="delta">In active workflow</div>
+            </div>
+            <div className={`stat ${submittals.filter(isSubmittalOverdue).length > 0 ? "alert" : ""}`}>
+              <div className="lbl">Overdue</div>
+              <div className="val">{submittals.filter(isSubmittalOverdue).length}</div>
+              <div className="delta">Past final due date</div>
+            </div>
+            <div className="stat calm">
+              <div className="lbl">Approved</div>
+              <div className="val">{submittals.filter((s) => APPROVED_STATUSES.has(s.status)).length}</div>
+              <div className="delta">No exceptions / as noted</div>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <p className="text-sm text-gray-400">Loading...</p>
         ) : activeTab === "packages" ? (
@@ -1605,7 +1646,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                 <tbody>
                   {packages.map((pkg) => (
                     <tr key={pkg.id} className="border-b border-gray-50 hover:bg-[color:var(--surface-sunken)] cursor-pointer" onClick={() => { window.location.href = `/projects/${projectId}/submittal-packages/${pkg.id}`; }}>
-                      <td className="px-4 py-3 text-sm font-mono text-[color:var(--ink)] tabular-nums">#{pkg.package_number}</td>
+                      <td className="px-4 py-3"><span className="idx-italic status-open">{String(pkg.package_number).padStart(3, "0")}</span></td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-medium">{pkg.title}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{getSpecName(specifications, pkg.specification_id)}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 tabular-nums">{pkg.submittal_count}</td>
@@ -1713,7 +1754,9 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                         Edit
                       </a>
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono text-[color:var(--ink)] tabular-nums">#{s.submittal_number}</td>
+                    <td className="px-4 py-3">
+                      <span className={`idx-italic status-${indexStatus(s.status)}`}>{String(s.submittal_number).padStart(3, "0")}</span>
+                    </td>
                     <td className="px-4 py-3 text-sm text-gray-700 tabular-nums">{s.revision ?? "—"}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 font-medium">{s.title}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{s.submittal_type ?? "—"}</td>
@@ -1731,7 +1774,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                     <td className="px-4 py-3 text-sm text-gray-600">{latestResponse?.response ?? "—"}</td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{formatDate(latestResponse?.sent_date ?? null)}</td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{formatDate(latestResponse?.returned_date ?? null)}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{formatDate(s.final_due_date)}</td>
+                    <td className={`px-4 py-3 text-xs whitespace-nowrap tabular-nums ${isSubmittalOverdue(s) ? "font-semibold text-[color:var(--brand-600)]" : "text-gray-500"}`}>{formatDate(s.final_due_date)}</td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{formatDate(s.distributed_at ? s.distributed_at.slice(0, 10) : null)}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{s.location ?? "—"}</td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>

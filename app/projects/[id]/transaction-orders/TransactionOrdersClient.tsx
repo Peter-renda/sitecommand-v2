@@ -100,6 +100,14 @@ function formatCurrency(n: number | null): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
+function formatCompactCurrency(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "$0";
+  if (Math.abs(n) >= 1000) {
+    return `$${(n / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 })}K`;
+  }
+  return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
 function formatDate(s: string | null): string {
   if (!s) return "";
   // s is ISO YYYY-MM-DD or full timestamp.
@@ -401,6 +409,12 @@ export default function TransactionOrdersClient({
     }
   }
 
+  const totalOrderValue = orders.reduce(
+    (sum, o) => sum + (Number.isFinite(o.amount) ? (o.amount as number) : 0),
+    0,
+  );
+  const openAssignmentCount = assignments.filter((a) => a.status === "open").length;
+
   return (
     <div className="min-h-screen bg-[#FAFAF7]">
       <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
@@ -429,12 +443,20 @@ export default function TransactionOrdersClient({
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
               Transaction Orders
             </h1>
-            <p className="sec-sub mt-1.5">
-              <span className="serif-italic text-[color:var(--brand-700)]">
-                Accounting
-              </span>
+            <p className="sub mt-1.5">
+              <em>Invoices reconciled into the project ledger</em>
               <span className="sep">·</span>
-              <span className="num">{orders.length}</span> completed
+              <span className="num">{orders.length}</span> order
+              {orders.length === 1 ? "" : "s"}
+              {openAssignmentCount > 0 && (
+                <>
+                  <span className="sep">·</span>
+                  <span className="num" style={{ color: "var(--brand-500)" }}>
+                    {openAssignmentCount}
+                  </span>{" "}
+                  awaiting
+                </>
+              )}
             </p>
           </div>
 
@@ -442,7 +464,7 @@ export default function TransactionOrdersClient({
             {canAssign && (
               <button
                 onClick={() => setShowAssignModal(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+                className="btn-secondary inline-flex items-center gap-1.5"
               >
                 <svg
                   className="w-4 h-4"
@@ -462,7 +484,7 @@ export default function TransactionOrdersClient({
             )}
             <button
               onClick={openNewModal}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors"
+              className="btn-primary inline-flex items-center gap-1.5"
             >
               <svg
                 className="w-4 h-4"
@@ -478,17 +500,43 @@ export default function TransactionOrdersClient({
           </div>
         </div>
 
+        {/* Stat strip */}
+        <div className="stats">
+          <div className="stat">
+            <div className="lbl">Transaction Orders</div>
+            <div className="val">{orders.length}</div>
+            <div className="delta">Completed packets on file</div>
+          </div>
+          <div className="stat">
+            <div className="lbl">Total Value</div>
+            <div className="val">{formatCompactCurrency(totalOrderValue)}</div>
+            <div className="delta">Across all orders</div>
+          </div>
+          <div className={`stat${openAssignmentCount > 0 ? " warn" : ""}`}>
+            <div className="lbl">Assigned Invoices</div>
+            <div className="val">{openAssignmentCount}</div>
+            <div className="delta">Open · awaiting conversion</div>
+          </div>
+          <div className="stat">
+            <div className="lbl">Template</div>
+            <div className="val">{template ? (template.isDefault ? "Default" : "Custom") : "—"}</div>
+            <div className="delta">
+              {template ? template.filename : "Loading template…"}
+            </div>
+          </div>
+        </div>
+
         {/* Template panel */}
-        <section className="mb-8 rounded-xl border border-gray-100 bg-white p-5">
+        <section className="mb-8 rounded-xl border border-black/[0.06] bg-white p-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-gray-900">Transaction Order Template</h2>
-              <p className="text-xs text-gray-500 mt-1">
+              <h2 className="h3-warm">Transaction Order Template</h2>
+              <p className="text-xs text-[color:var(--gray-500)] mt-1">
                 The fillable PDF this project uses when generating new Transaction Orders.
               </p>
               {template ? (
                 <div className="mt-3 flex items-center gap-2 text-sm">
-                  <svg className="w-4 h-4 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                  <svg className="w-4 h-4 text-[color:var(--brand-500)]" viewBox="0 0 20 20" fill="currentColor">
                     <path
                       fillRule="evenodd"
                       d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
@@ -500,19 +548,21 @@ export default function TransactionOrdersClient({
                       href={template.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-gray-900 hover:underline"
+                      className="text-[color:var(--ink)] font-medium hover:underline"
                     >
                       {template.filename}
                     </a>
                   ) : (
-                    <span className="text-gray-900">{template.filename}</span>
+                    <span className="text-[color:var(--ink)] font-medium">{template.filename}</span>
                   )}
-                  <span className="text-xs text-gray-400">
+                  <span
+                    className={`pill ${template.isDefault ? "pill-info" : "pill-open"}`}
+                  >
                     {template.isDefault
-                      ? "(default)"
+                      ? "Default"
                       : template.uploadedAt
                         ? `Uploaded ${new Date(template.uploadedAt).toLocaleDateString()}`
-                        : ""}
+                        : "Custom"}
                   </span>
                 </div>
               ) : (
@@ -534,7 +584,7 @@ export default function TransactionOrdersClient({
               <button
                 onClick={() => templateInputRef.current?.click()}
                 disabled={templateBusy}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
+                className="btn-secondary disabled:opacity-50"
               >
                 {templateBusy ? "Working…" : "Replace template"}
               </button>
@@ -542,7 +592,7 @@ export default function TransactionOrdersClient({
                 <button
                   onClick={handleResetTemplate}
                   disabled={templateBusy}
-                  className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 disabled:opacity-50"
+                  className="btn-quiet disabled:opacity-50"
                 >
                   Reset to default
                 </button>

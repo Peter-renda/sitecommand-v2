@@ -545,14 +545,14 @@ function SectionCard({
       : filteredSaved.length;
 
   return (
-    <div id={`section-${section.id}`} className="bg-white border border-gray-200 rounded-lg">
+    <div id={`section-${section.id}`} className="bg-white border hairline rounded-xl">
       <div className="flex items-start justify-between px-4 pt-3 pb-2 gap-4">
         <button
           onClick={onToggle}
           className="flex items-center gap-2 text-left flex-1 min-w-0 group"
         >
           <svg
-            className={`w-4 h-4 text-gray-500 transition-transform shrink-0 ${open ? "" : "-rotate-90"}`}
+            className={`w-4 h-4 text-gray-400 transition-transform shrink-0 ${open ? "" : "-rotate-90"}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -560,13 +560,13 @@ function SectionCard({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
-          <h3 className="text-sm font-semibold text-gray-900 group-hover:text-gray-700">
-            {section.title} <span className="font-normal text-gray-500">({count})</span>
+          <h3 className="h3-warm group-hover:opacity-80">
+            {section.title} <span className="num text-gray-400" style={{ fontFamily: "inherit" }}>({count})</span>
           </h3>
         </button>
         <button
           onClick={onViewAll}
-          className="px-3 py-1 text-xs border border-gray-200 rounded-md text-gray-600 hover:bg-gray-50 shrink-0"
+          className="btn-quiet shrink-0"
         >
           View All
         </button>
@@ -574,7 +574,7 @@ function SectionCard({
       <p className="px-4 pb-3 pl-10 text-xs text-gray-500">{section.description}</p>
 
       {open && (
-        <div className="border-t border-gray-100">
+        <div className="border-t hairline">
           {section.kind === "templates" ? (
             (items as ReportDef[]).length === 0 ? (
               <div className="py-8 text-center text-xs text-gray-400">
@@ -585,21 +585,24 @@ function SectionCard({
             ) : (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-100">
-                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-64">Report Name</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-44">Report Type</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500">Description</th>
+                  <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
+                    <th className="px-4 py-3 text-left mono-label w-64">Report Name</th>
+                    <th className="px-4 py-3 text-left mono-label w-44">Report Type</th>
+                    <th className="px-4 py-3 text-left mono-label">Description</th>
                     <th className="w-10" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {(items as ReportDef[]).map((r) => (
+                <tbody>
+                  {(items as ReportDef[]).map((r, idx) => (
                     <tr
                       key={r.value}
-                      className="hover:bg-gray-50 transition-colors cursor-pointer"
+                      className="border-b border-gray-50 last:border-b-0 hover:bg-[color:var(--surface-sunken)] transition-colors cursor-pointer"
                       onClick={() => onOpenTemplate(r)}
                     >
-                      <td className="px-4 py-3 font-medium text-gray-900">{r.label}</td>
+                      <td className="px-4 py-3">
+                        <span className="idx-italic mr-2">{String(idx + 1).padStart(2, "0")}</span>
+                        <span className="font-medium text-gray-900">{r.label}</span>
+                      </td>
                       <td className="px-4 py-3">
                         <TypeBadge group={r.group} />
                       </td>
@@ -630,40 +633,47 @@ function SectionCard({
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-64">Report Name</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-44">Report Type</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500">Description</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-32">Created By</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-28">Date Created</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-28">Last Modified</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-20">Visuals</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-36">Last Snapshot</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-36">Company Level</th>
+                <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
+                  <th className="px-4 py-3 text-left mono-label w-64">Report Name</th>
+                  <th className="px-4 py-3 text-left mono-label w-44">Report Type</th>
+                  <th className="px-4 py-3 text-left mono-label">Description</th>
+                  <th className="px-4 py-3 text-left mono-label w-32">Created By</th>
+                  <th className="px-4 py-3 text-left mono-label w-28">Date Created</th>
+                  <th className="px-4 py-3 text-left mono-label w-28">Last Modified</th>
+                  <th className="px-4 py-3 text-left mono-label w-20">Visuals</th>
+                  <th className="px-4 py-3 text-left mono-label w-36">Last Snapshot</th>
+                  <th className="px-4 py-3 text-left mono-label w-36">Company Level</th>
                   <th className="w-10" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filteredSaved.map((r) => (
+              <tbody>
+                {filteredSaved.map((r, idx) => (
                   <tr
                     key={r.id}
-                    className="hover:bg-gray-50 transition-colors cursor-pointer"
+                    className="border-b border-gray-50 last:border-b-0 hover:bg-[color:var(--surface-sunken)] transition-colors cursor-pointer"
                     onClick={() => onOpenSaved(r)}
                   >
-                    <td className="px-4 py-3 font-medium text-gray-900">{r.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="idx-italic mr-2">{String(idx + 1).padStart(2, "0")}</span>
+                      <span className="font-medium text-gray-900">{r.name}</span>
+                    </td>
                     <td className="px-4 py-3">
                       <SavedTypeBadge label={r.reportType} />
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{r.description}</td>
                     <td className="px-4 py-3 text-gray-600">{r.createdBy}</td>
-                    <td className="px-4 py-3 text-gray-500">{fmtDate(r.createdAt)}</td>
-                    <td className="px-4 py-3 text-gray-500">{fmtDate(r.updatedAt)}</td>
-                    <td className="px-4 py-3 text-gray-500">{Math.max(1, r.visualCards?.length ?? 0)}</td>
+                    <td className="px-4 py-3 text-gray-500 tabular-nums">{fmtDate(r.createdAt)}</td>
+                    <td className="px-4 py-3 text-gray-500 tabular-nums">{fmtDate(r.updatedAt)}</td>
+                    <td className="px-4 py-3 text-gray-500 tabular-nums">{Math.max(1, r.visualCards?.length ?? 0)}</td>
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {r.lastDistributedAt ? `${fmtDate(r.lastDistributedAt)} (${r.distributionCount ?? 1})` : "Never"}
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">
-                      {r.promotedToCompanyAt ? `Promoted ${fmtDate(r.promotedToCompanyAt)}` : "Project Only"}
+                    <td className="px-4 py-3 text-xs">
+                      {r.promotedToCompanyAt ? (
+                        <span className="pill pill-open">Promoted {fmtDate(r.promotedToCompanyAt)}</span>
+                      ) : (
+                        <span className="text-gray-500">Project Only</span>
+                      )}
                     </td>
                     <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
                       <RowMenu
@@ -2489,30 +2499,30 @@ export default function ReportingClient({
     <div className="min-h-screen bg-[#FAFAF7]">
       <ProjectNav projectId={projectId} />
 
-      <main className="max-w-[1400px] mx-auto px-6 py-6">
-        <div className="mb-5">
-          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)] mb-1">Reporting</h1>
-          <p className="text-sm text-gray-500">360 Reporting — create reports, clone reports, then build and share dashboards from your visual library.</p>
-        </div>
-        <div className="flex items-start justify-between mb-5 rounded-xl border border-[var(--border-base)] bg-white p-4">
+      <main className="max-w-[1400px] mx-auto px-6 py-8">
+        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
           <div>
-            <p className="text-xs text-gray-500 mt-2">Create reports, clone reports, then build and share dashboards from your visual library.</p>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Reporting</h1>
+            <p className="sub mt-1.5">
+              <em>360 Reporting across this project</em>
+              <span className="sep">·</span>
+              <span className="num">{myReports.length}</span> {myReports.length === 1 ? "report" : "reports"}
+              <span className="sep">·</span>
+              <span className="num">{REPORT_TYPES.length}</span> templates
+              <span className="sep">·</span>
+              <span className="num">{dashboards.length}</span> {dashboards.length === 1 ? "dashboard" : "dashboards"}
+            </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <div className="inline-flex rounded-md border hairline overflow-hidden bg-white">
-              <TabButton active={activeTab === "reports"} label="Reports" onClick={() => setActiveTab("reports")} />
-              <TabButton active={activeTab === "templates"} label="All Templates" onClick={() => setActiveTab("templates")} />
-              <TabButton active={activeTab === "dashboards"} label="Dashboards" onClick={() => setActiveTab("dashboards")} />
-            </div>
             <button
               onClick={() => setShowSettingsModal(true)}
-              className="px-3 py-2 border border-gray-200 text-sm text-gray-600 rounded-md hover:bg-gray-50"
+              className="btn-secondary"
             >
               Configure Settings
             </button>
             <button
               onClick={() => setShowAssistModal(true)}
-              className="px-3 py-2 border border-gray-200 text-sm text-gray-600 rounded-md hover:bg-gray-50"
+              className="btn-secondary"
             >
               Assist
             </button>
@@ -2520,7 +2530,7 @@ export default function ReportingClient({
               <div className="relative">
                 <button
                   onClick={() => setCreateMenuOpen((v) => !v)}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"
+                  className="btn-primary flex items-center gap-1.5"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -2562,7 +2572,7 @@ export default function ReportingClient({
             ) : (
               <button
                 onClick={() => setShowCreateDashboardModal(true)}
-                className="flex items-center gap-1.5 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"
+                className="btn-primary flex items-center gap-1.5"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -2573,26 +2583,33 @@ export default function ReportingClient({
           </div>
         </div>
 
-        <div className="relative mb-6 max-w-xs">
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-          </svg>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={activeTab === "reports" ? "Search reports" : activeTab === "templates" ? "Search templates" : "Search dashboards"}
-            className="w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-1 focus:ring-gray-900"
-          />
+        <div className="flex items-center gap-3 mb-5 flex-wrap">
+          <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden bg-white">
+            <button onClick={() => setActiveTab("reports")} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "reports" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Reports</button>
+            <button onClick={() => setActiveTab("templates")} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "templates" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>All Templates</button>
+            <button onClick={() => setActiveTab("dashboards")} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "dashboards" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Dashboards</button>
+          </div>
+          <div className="relative max-w-xs ml-auto">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={activeTab === "reports" ? "Search reports" : activeTab === "templates" ? "Search templates" : "Search dashboards"}
+              className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+            />
+          </div>
         </div>
         {statusBanner && (
-          <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
             {statusBanner}
           </div>
         )}
@@ -2600,7 +2617,8 @@ export default function ReportingClient({
         {activeTab === "reports" && (
           <div className="flex gap-6 items-start">
             <aside className="w-56 shrink-0">
-              <nav className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <p className="mono-label mb-2 px-1">Report Library</p>
+              <nav className="bg-white border hairline rounded-xl overflow-hidden">
                 <ul>
                   {REPORT_SECTIONS.map((section) => {
                     const selected = selectedSectionId === section.id;
@@ -2621,8 +2639,8 @@ export default function ReportingClient({
                           }}
                           className={`w-full text-left px-3 py-2 text-sm border-l-2 transition-colors ${
                             selected
-                              ? "border-gray-900 bg-gray-50 text-gray-900 font-medium"
-                              : "border-transparent text-gray-600 hover:bg-gray-50"
+                              ? "border-[color:var(--brand-500)] bg-[color:var(--surface-sunken)] text-[color:var(--ink)] font-semibold"
+                              : "border-transparent text-gray-600 hover:bg-[color:var(--surface-sunken)]"
                           }`}
                         >
                           {section.title}

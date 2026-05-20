@@ -50,6 +50,9 @@ const ADMIN_SECTIONS = [
   { id: "additional-information", label: "Additional Information" },
 ] as const;
 
+const INPUT_CLASS =
+  "h-11 w-full rounded-md border border-black/10 bg-[color:var(--surface-sunken)] px-3 text-sm text-[color:var(--ink)] placeholder:text-gray-400 focus:border-[color:var(--ink)] focus:outline-none focus:ring-1 focus:ring-[color:var(--ink)] read-only:cursor-default disabled:cursor-not-allowed";
+
 function Field({
   label,
   required,
@@ -61,9 +64,9 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-semibold text-[#1f2937]">
+      <label className="mono-label mb-1.5 block">
         {label}
-        {required ? <span className="ml-1 text-red-500">*</span> : null}
+        {required ? <span className="ml-1 text-[color:var(--brand-500)]">*</span> : null}
       </label>
       {children}
     </div>
@@ -88,7 +91,7 @@ function TextInput({
       onChange={(e) => onChange?.(e.target.value)}
       placeholder={placeholder}
       readOnly={readOnly}
-      className="h-11 w-full rounded-md border border-gray-300 bg-gray-50 px-3 text-sm text-gray-700 placeholder:text-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400 read-only:cursor-default"
+      className={INPUT_CLASS}
     />
   );
 }
@@ -111,7 +114,7 @@ function SelectInput({
       value={value}
       onChange={(e) => onChange?.(e.target.value)}
       disabled={disabled}
-      className="h-11 w-full rounded-md border border-gray-300 bg-gray-50 px-3 text-sm text-gray-700 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed"
+      className={INPUT_CLASS}
     >
       <option value="">{placeholder}</option>
       {options.map((option) => (
@@ -130,15 +133,15 @@ function DateInput({ value, onChange, readOnly }: { value: string; onChange?: (v
       value={value}
       onChange={(e) => onChange?.(e.target.value)}
       readOnly={readOnly}
-      className="h-11 w-full rounded-md border border-gray-300 bg-gray-50 px-3 text-sm text-gray-700 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400"
+      className={INPUT_CLASS}
     />
   );
 }
 
 function SectionCard({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="scroll-mt-24 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-6 text-3xl font-semibold text-gray-900">{title}</h2>
+    <section id={id} className="card card-pad scroll-mt-24">
+      <h2 className="h3-warm mb-6">{title}</h2>
       {children}
     </section>
   );
@@ -363,10 +366,17 @@ export default function AdminClient({
           <p className="text-sm text-gray-500">Loading...</p>
         ) : (
           <>
-            <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+            <div className="sec-row mb-6">
               <div>
-                <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Project Admin</h1>
-                <p className="mt-1 text-base text-gray-700">{data?.name || "Untitled Project"}</p>
+                <h1 className="h2-warm">Project Admin</h1>
+                <p className="sub mt-1.5">
+                  <em>Settings for</em>{" "}
+                  <span className="num">{data?.name || "Untitled Project"}</span>
+                  <span className="sep">·</span>
+                  <span className="num">{ADMIN_SECTIONS.length}</span> sections
+                  <span className="sep">·</span>
+                  <span className="num">{members.length}</span> members
+                </p>
                 {!isAdmin ? (
                   <p className="mt-1 text-xs text-gray-500">View only — contact a project administrator to make changes.</p>
                 ) : null}
@@ -374,11 +384,7 @@ export default function AdminClient({
               {isAdmin ? (
                 <div className="flex flex-col items-end gap-2">
                   <Pill className="pill-open">Admin controls</Pill>
-                  <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="rounded-md bg-[color:var(--ink)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-60"
-                  >
+                  <button onClick={handleSave} disabled={saving} className="btn-primary">
                     {saved ? "Saved" : saving ? "Saving..." : "Save Changes"}
                   </button>
                 </div>
@@ -387,16 +393,16 @@ export default function AdminClient({
 
             <div className="grid grid-cols-12 gap-5">
               <aside className="col-span-12 lg:col-span-2">
-                <div className="sticky top-24 border-l border-gray-300 pl-3">
+                <div className="sticky top-24 border-l border-black/10 pl-3">
                   {ADMIN_SECTIONS.map((section) => (
                     <button
                       key={section.id}
                       type="button"
                       onClick={() => jumpToSection(section.id)}
-                      className={`mb-1 block w-full border-l-2 px-3 py-1.5 text-left text-sm ${
+                      className={`mb-1 block w-full border-l-2 px-3 py-1.5 text-left text-sm transition-colors ${
                         activeSection === section.id
-                          ? "border-gray-900 bg-gray-100 font-semibold text-gray-900"
-                          : "border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                          ? "border-[color:var(--brand-500)] bg-[color:var(--surface-sunken)] font-semibold text-[color:var(--ink)]"
+                          : "border-transparent text-gray-600 hover:bg-[color:var(--surface-sunken)] hover:text-[color:var(--ink)]"
                       }`}
                     >
                       {section.label}
@@ -410,7 +416,7 @@ export default function AdminClient({
                   <div className="grid grid-cols-2 gap-4">
                     <div className="col-span-2">
                       <Field label="Project Template">
-                        <a className="text-lg text-blue-600 underline" href="#">
+                        <a className="serif-italic text-[color:var(--brand-700)] underline" href="#">
                           General Project Template
                         </a>
                       </Field>
@@ -467,7 +473,7 @@ export default function AdminClient({
                           rows={4}
                           readOnly={!isAdmin}
                           placeholder="Enter description"
-                          className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                          className="w-full rounded-md border border-black/10 bg-[color:var(--surface-sunken)] px-3 py-2 text-sm text-[color:var(--ink)] placeholder:text-gray-400 focus:border-[color:var(--ink)] focus:outline-none focus:ring-1 focus:ring-[color:var(--ink)]"
                         />
                       </Field>
                     </div>
@@ -520,11 +526,11 @@ export default function AdminClient({
 
                 <SectionCard id="erp-integration" title="ERP Integration">
                   <div className="space-y-4">
-                    <label className="flex items-center gap-3 text-base text-gray-900">
-                      <input type="checkbox" className="h-5 w-5" checked readOnly /> ERP-sync this project
+                    <label className="flex items-center gap-3 text-sm text-[color:var(--ink)]">
+                      <input type="checkbox" className="h-5 w-5 accent-[color:var(--ink)]" checked readOnly /> ERP-sync this project
                     </label>
-                    <label className="flex items-center gap-3 text-base text-gray-900">
-                      <input type="checkbox" className="h-5 w-5" readOnly /> Enable ERP Job Cost Transaction Syncing
+                    <label className="flex items-center gap-3 text-sm text-[color:var(--ink)]">
+                      <input type="checkbox" className="h-5 w-5 accent-[color:var(--ink)]" readOnly /> Enable ERP Job Cost Transaction Syncing
                     </label>
                     <div className="max-w-xl">
                       <Field label="Sage 300 ID:">

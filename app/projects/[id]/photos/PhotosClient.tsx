@@ -477,11 +477,11 @@ export default function PhotosClient({
                   ? "bg-green-50 border border-green-200 text-green-800"
                   : item.status === "error"
                   ? "bg-red-50 border border-red-200 text-red-800"
-                  : "bg-white border border-gray-200 text-gray-700"
+                  : "bg-white border border-black/[0.08] text-[color:var(--ink)]"
               }`}
             >
               {item.status === "uploading" && (
-                <svg className="w-4 h-4 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 animate-spin text-[color:var(--brand-500)]" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                 </svg>
@@ -508,53 +508,50 @@ export default function PhotosClient({
       <div className="flex flex-1 overflow-hidden">
         {/* Main content */}
         <div
-          className={`flex-1 flex flex-col overflow-hidden ${isDragging ? "ring-2 ring-blue-400 ring-inset" : ""}`}
+          className={`flex-1 flex flex-col overflow-hidden ${isDragging ? "ring-2 ring-[color:var(--brand-400)] ring-inset" : ""}`}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
         >
           {/* Page heading */}
-          <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0">
-            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Photos</h1>
-            {photos.length > 0 && (
-              <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
-                <span className="sep">·</span>
-                <span className="num" style={{ color: "var(--brand-500)" }}>{photos.length}</span> photos
-                <span className="sep">·</span>
-                <span className="num">{albums.length}</span> albums
-              </p>
-            )}
+          <div className="bg-white border-b border-black/[0.06] px-6 py-5 shrink-0">
+            <h1 className="font-display text-[28px] leading-tight tracking-[-0.012em] text-[color:var(--ink)]">Photo journal</h1>
+            <p className="sub mt-1.5">
+              <em>Field record for this project</em>
+              <span className="sep">·</span>
+              <span className="num" style={{ color: "var(--brand-500)" }}>{filteredPhotos.length}</span>{" "}
+              {activeAlbumFilter || searchQuery ? "shown" : "photos"}
+              <span className="sep">·</span>
+              <span className="num">{photos.length}</span> total
+              <span className="sep">·</span>
+              <span className="num">{albums.length}</span> albums
+            </p>
           </div>
           {/* Toolbar */}
-          <div className="bg-white border-b border-gray-100 px-6 py-3 flex items-center justify-between shrink-0">
+          <div className="bg-white border-b border-black/[0.06] px-6 py-3 flex items-center justify-between gap-3 flex-wrap shrink-0">
             <div className="flex items-center gap-3">
               {/* Tabs */}
-              <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+              <div className="seg">
                 <button
                   onClick={() => { setActiveTab("photos"); setActiveAlbumFilter(null); }}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    activeTab === "photos" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                  }`}
+                  className={activeTab === "photos" ? "active" : ""}
                 >
                   All Photos
                 </button>
                 <button
                   onClick={() => setActiveTab("albums")}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    activeTab === "albums" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                  }`}
+                  className={activeTab === "albums" ? "active" : ""}
                 >
                   Albums
                 </button>
               </div>
               {/* Active album filter badge */}
               {activeAlbumFilter && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-full text-xs font-medium text-blue-700">
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-[color:var(--brand-700)] bg-[color:var(--brand-50)] border border-[color:var(--brand-200)]">
                   {albumMap[activeAlbumFilter]}
                   <button
                     onClick={() => setActiveAlbumFilter(null)}
-                    className="hover:text-blue-900"
+                    className="hover:text-[color:var(--brand-900)]"
                   >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -565,8 +562,8 @@ export default function PhotosClient({
             </div>
             <div className="flex items-center gap-3">
               {/* Search */}
-              <div className="relative">
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <div className="search">
+                <svg className="w-4 h-4 text-[color:var(--ink-soft)] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
                 </svg>
                 <input
@@ -574,13 +571,12 @@ export default function PhotosClient({
                   placeholder="Search photos…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-52"
                 />
               </div>
               {/* Upload button */}
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                className="btn-primary flex items-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -601,8 +597,8 @@ export default function PhotosClient({
           {/* Content area */}
           <div className="flex-1 overflow-y-auto p-6">
             {loading ? (
-              <div className="flex items-center justify-center h-48 text-gray-400 text-sm">
-                Loading…
+              <div className="flex items-center justify-center h-48 text-[color:var(--ink-soft)] text-sm">
+                <span className="serif-italic">Loading the journal…</span>
               </div>
             ) : selectedPhoto && activeTab !== "albums" ? (
               // ── Enlarged photo viewer ──
@@ -638,22 +634,23 @@ export default function PhotosClient({
                   </button>
                 )}
                 {/* Counter */}
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 bg-black/50 rounded-full text-white text-xs">
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 bg-black/55 rounded-full text-white text-xs font-mono tabular-nums tracking-wide">
                   {filteredPhotos.findIndex((p) => p.id === selectedPhoto.id) + 1} / {filteredPhotos.length}
                 </div>
               </div>
             ) : activeTab === "albums" && !activeAlbumFilter ? (
               // ── Albums grid ──
               <div>
+                <h2 className="h3-warm mb-4">Albums</h2>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                   {albumsWithMeta.map((album) => (
                     <div
                       key={album.id}
-                      className="group relative bg-white border border-gray-100 rounded-xl overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                      className="group relative bg-white border border-black/[0.08] rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
                       onClick={() => { setActiveAlbumFilter(album.id); setActiveTab("photos"); }}
                     >
                       {/* Cover */}
-                      <div className="aspect-square bg-gray-100 relative overflow-hidden">
+                      <div className="aspect-square bg-[color:var(--surface-sunken)] relative overflow-hidden border-b border-black/[0.06]">
                         {album.cover ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -663,20 +660,20 @@ export default function PhotosClient({
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
-                            <svg className="w-10 h-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                            <svg className="w-10 h-10 text-black/15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
                           </div>
                         )}
                       </div>
                       <div className="px-3 py-2 flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-gray-800 truncate">{album.name}</p>
-                          <p className="text-xs text-gray-400">{album.count} photo{album.count !== 1 ? "s" : ""}</p>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[color:var(--ink)] truncate">{album.name}</p>
+                          <p className="mono-label mt-0.5">{album.count} photo{album.count !== 1 ? "s" : ""}</p>
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); deleteAlbum(album.id); }}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-[color:var(--ink-soft)] hover:text-red-600 hover:bg-red-50 transition-all"
                           title="Delete album"
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -689,7 +686,7 @@ export default function PhotosClient({
 
                   {/* New album card */}
                   {showNewAlbumInput ? (
-                    <div className="bg-white border border-dashed border-gray-300 rounded-xl p-4 flex flex-col gap-2">
+                    <div className="bg-white border border-dashed border-black/20 rounded-lg p-4 flex flex-col gap-2">
                       <input
                         type="text"
                         placeholder="Album name"
@@ -697,19 +694,19 @@ export default function PhotosClient({
                         onChange={(e) => setNewAlbumName(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") createAlbum(); if (e.key === "Escape") setShowNewAlbumInput(false); }}
                         autoFocus
-                        className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="text-sm border border-black/[0.12] rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
                       />
                       <div className="flex gap-2">
                         <button
                           onClick={createAlbum}
                           disabled={creatingAlbum}
-                          className="flex-1 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                          className="btn-primary flex-1 justify-center disabled:opacity-50"
                         >
                           Create
                         </button>
                         <button
                           onClick={() => { setShowNewAlbumInput(false); setNewAlbumName(""); }}
-                          className="flex-1 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                          className="btn-secondary flex-1 justify-center"
                         >
                           Cancel
                         </button>
@@ -718,7 +715,7 @@ export default function PhotosClient({
                   ) : (
                     <button
                       onClick={() => setShowNewAlbumInput(true)}
-                      className="aspect-square bg-white border border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center gap-2 text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors"
+                      className="aspect-square bg-white border border-dashed border-black/20 rounded-lg flex flex-col items-center justify-center gap-2 text-[color:var(--ink-soft)] hover:text-[color:var(--ink)] hover:border-black/35 transition-colors"
                     >
                       <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -730,61 +727,74 @@ export default function PhotosClient({
               </div>
             ) : filteredPhotos.length === 0 ? (
               // ── Empty state ──
-              <div className="flex flex-col items-center justify-center h-64 text-center">
-                <svg className="w-12 h-12 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+              <div className="flex flex-col items-center justify-center h-64 text-center border border-dashed border-black/[0.12] rounded-lg bg-white">
+                <svg className="w-12 h-12 text-black/15 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
-                <p className="text-sm font-medium text-gray-500">
+                <p className="font-display text-lg text-[color:var(--ink)]">
                   {searchQuery ? "No photos match your search" : "No photos yet"}
                 </p>
                 {!searchQuery && (
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="serif-italic text-sm text-[color:var(--ink-soft)] mt-1">
                     Upload photos or drag and drop them here
                   </p>
                 )}
               </div>
             ) : (
               // ── Photo grid ──
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {filteredPhotos.map((photo) => (
-                  <button
-                    key={photo.id}
-                    onClick={() => setSelectedPhoto(photo)}
-                    className={`group relative aspect-square bg-gray-100 rounded-lg overflow-hidden focus:outline-none ring-2 transition-all ${
-                      selectedPhoto?.id === photo.id
-                        ? "ring-blue-500"
-                        : "ring-transparent hover:ring-blue-300"
-                    }`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={photo.url}
-                      alt={photo.filename}
-                      className="w-full h-full object-cover"
-                    />
-                    {/* Hover overlay */}
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-                    {/* Caption badge */}
-                    {photo.caption && (
-                      <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-gradient-to-t from-black/60 to-transparent">
-                        <p className="text-white text-xs truncate">{photo.caption}</p>
+              <div>
+                <h2 className="h3-warm mb-1">Field record</h2>
+                <p className="mono-label mb-4">
+                  {filteredPhotos.length} FRAME{filteredPhotos.length !== 1 ? "S" : ""}
+                  {activeAlbumFilter ? ` · ${albumMap[activeAlbumFilter] ?? ""}` : ""}
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {filteredPhotos.map((photo) => (
+                    <button
+                      key={photo.id}
+                      onClick={() => setSelectedPhoto(photo)}
+                      className={`group relative bg-white text-left rounded-md overflow-hidden border transition-all focus:outline-none ${
+                        selectedPhoto?.id === photo.id
+                          ? "border-[color:var(--brand-500)] shadow-sm"
+                          : "border-black/[0.08] hover:border-black/20 hover:shadow-sm"
+                      }`}
+                    >
+                      {/* Thumbnail */}
+                      <div className="aspect-square bg-[color:var(--surface-sunken)] overflow-hidden relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={photo.url}
+                          alt={photo.filename}
+                          className="w-full h-full object-cover"
+                        />
+                        {/* Hover overlay */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors" />
+                        {/* Album badge */}
+                        {photo.album_id && albumMap[photo.album_id] && (
+                          <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/55 rounded text-white text-[10px] font-medium tracking-wide uppercase">
+                            {albumMap[photo.album_id]}
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {/* Album badge */}
-                    {photo.album_id && albumMap[photo.album_id] && (
-                      <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/50 rounded text-white text-xs">
-                        {albumMap[photo.album_id]}
+                      {/* Caption strip with mono date stamp */}
+                      <div className="px-2.5 py-2 border-t border-black/[0.06]">
+                        <p className="text-xs text-[color:var(--ink)] truncate">
+                          {photo.caption || <span className="serif-italic text-[color:var(--ink-soft)]">Untitled frame</span>}
+                        </p>
+                        <p className="mono-label mt-1 truncate">
+                          {new Date(photo.taken_at ?? photo.uploaded_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </p>
                       </div>
-                    )}
-                  </button>
-                ))}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
             {/* Drag-and-drop overlay hint */}
             {isDragging && (
-              <div className="fixed inset-0 z-40 flex items-center justify-center bg-blue-500/10 border-4 border-dashed border-blue-400 pointer-events-none">
-                <p className="text-blue-600 text-xl font-semibold">Drop photos to upload</p>
+              <div className="fixed inset-0 z-40 flex items-center justify-center bg-[color:var(--brand-500)]/10 border-4 border-dashed border-[color:var(--brand-400)] pointer-events-none">
+                <p className="font-display text-2xl text-[color:var(--brand-700)]">Drop photos to upload</p>
               </div>
             )}
           </div>
@@ -792,13 +802,16 @@ export default function PhotosClient({
 
         {/* Detail panel */}
         {selectedPhoto && (
-          <div className="w-80 shrink-0 bg-white border-l border-gray-100 flex flex-col overflow-hidden">
+          <div className="w-80 shrink-0 bg-white border-l border-black/[0.06] flex flex-col overflow-hidden">
             {/* Panel header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-800 truncate pr-2">{selectedPhoto.filename}</h3>
+            <div className="flex items-start justify-between px-4 py-3 border-b border-black/[0.06]">
+              <div className="min-w-0 pr-2">
+                <h3 className="font-display text-[17px] leading-tight text-[color:var(--ink)] truncate">Frame detail</h3>
+                <p className="mono-label mt-0.5 truncate">{selectedPhoto.filename}</p>
+              </div>
               <button
                 onClick={() => setSelectedPhoto(null)}
-                className="p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors shrink-0"
+                className="p-1 rounded text-[color:var(--ink-soft)] hover:text-[color:var(--ink)] hover:bg-[color:var(--surface-sunken)] transition-colors shrink-0"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -810,23 +823,23 @@ export default function PhotosClient({
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {/* Caption */}
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Caption</label>
+                <label className="block mono-label mb-1">Caption</label>
                 <textarea
                   value={editCaption}
                   onChange={(e) => setEditCaption(e.target.value)}
                   rows={3}
                   placeholder="Add a caption…"
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-sm border border-black/[0.12] rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
                 />
               </div>
 
               {/* Album */}
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Album</label>
+                <label className="block mono-label mb-1">Album</label>
                 <select
                   value={editAlbumId}
                   onChange={(e) => setEditAlbumId(e.target.value)}
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  className="w-full text-sm border border-black/[0.12] rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)] bg-white"
                 >
                   <option value="">No Album</option>
                   {albums.map((album) => (
@@ -837,18 +850,18 @@ export default function PhotosClient({
 
               {/* Trades */}
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Trades</label>
-                <div className="min-h-[38px] w-full border border-gray-200 rounded-lg px-2 py-1.5 flex flex-wrap gap-1 items-center focus-within:ring-2 focus-within:ring-blue-500">
+                <label className="block mono-label mb-1">Trades</label>
+                <div className="min-h-[38px] w-full border border-black/[0.12] rounded-lg px-2 py-1.5 flex flex-wrap gap-1 items-center focus-within:ring-2 focus-within:ring-[color:var(--ink)]">
                   {editTrades.map((trade) => (
                     <span
                       key={trade}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 rounded-full text-xs text-blue-700"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-[color:var(--brand-50)] border border-[color:var(--brand-200)] rounded-full text-xs text-[color:var(--brand-700)]"
                     >
                       {trade}
                       <button
                         type="button"
                         onClick={() => removeTrade(trade)}
-                        className="hover:text-blue-900"
+                        className="hover:text-[color:var(--brand-900)]"
                       >
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -877,49 +890,49 @@ export default function PhotosClient({
 
               {/* Location */}
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Location</label>
+                <label className="block mono-label mb-1">Location</label>
                 <div className="relative" ref={locationDropdownRef}>
                   <button
                     type="button"
                     onClick={() => setShowLocationDropdown((v) => !v)}
-                    className="w-full text-left text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white flex items-center justify-between"
+                    className="w-full text-left text-sm border border-black/[0.12] rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)] bg-white flex items-center justify-between"
                   >
-                    <span className={editLocationId ? "text-gray-900" : "text-gray-400"}>
+                    <span className={editLocationId ? "text-[color:var(--ink)]" : "text-[color:var(--ink-soft)]"}>
                       {editLocationId
                         ? locations.find((l) => l.id === editLocationId)?.path ?? "Select Location"
                         : "Select Location"}
                     </span>
-                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="w-4 h-4 text-[color:var(--ink-soft)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
                   {showLocationDropdown && (
-                    <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                    <div className="absolute z-20 mt-1 w-full bg-white border border-black/[0.12] rounded-lg shadow-lg max-h-72 overflow-y-auto">
                       {editLocationId && (
                         <button
                           type="button"
                           onClick={() => { setEditLocationId(""); setShowLocationDropdown(false); }}
-                          className="w-full text-left px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 border-b border-gray-100"
+                          className="w-full text-left px-3 py-2 text-sm text-[color:var(--ink-soft)] hover:bg-[color:var(--surface-sunken)] border-b border-black/[0.06]"
                         >
                           Clear selection
                         </button>
                       )}
                       {locations.length === 0 && (
-                        <div className="px-3 py-2 text-xs text-gray-400">No locations yet</div>
+                        <div className="px-3 py-2 text-xs text-[color:var(--ink-soft)]">No locations yet</div>
                       )}
                       {locations.map((loc) => (
                         <button
                           key={loc.id}
                           type="button"
                           onClick={() => { setEditLocationId(loc.id); setShowLocationDropdown(false); }}
-                          className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 ${
-                            editLocationId === loc.id ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700"
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-[color:var(--brand-50)] ${
+                            editLocationId === loc.id ? "bg-[color:var(--brand-50)] text-[color:var(--brand-700)] font-medium" : "text-[color:var(--ink)]"
                           }`}
                         >
                           {loc.path}
                         </button>
                       ))}
-                      <div className="border-t border-gray-100">
+                      <div className="border-t border-black/[0.06]">
                         {showNewLocationInput ? (
                           <div className="p-2 flex gap-2">
                             <input
@@ -932,13 +945,13 @@ export default function PhotosClient({
                               }}
                               autoFocus
                               placeholder="Location name"
-                              className="flex-1 text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className="flex-1 text-sm border border-black/[0.12] rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
                             />
                             <button
                               type="button"
                               onClick={createLocation}
                               disabled={creatingLocation || !newLocationName.trim()}
-                              className="px-2 py-1 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 disabled:opacity-50"
+                              className="btn-primary text-xs px-2 py-1 disabled:opacity-50"
                             >
                               Add
                             </button>
@@ -947,7 +960,7 @@ export default function PhotosClient({
                           <button
                             type="button"
                             onClick={() => setShowNewLocationInput(true)}
-                            className="w-full text-left px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2"
+                            className="w-full text-left px-3 py-2 text-sm text-[color:var(--brand-700)] hover:bg-[color:var(--brand-50)] flex items-center gap-2"
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -962,11 +975,11 @@ export default function PhotosClient({
               </div>
 
               {/* Photo Metadata */}
-              <div className="pt-2 border-t border-gray-100">
+              <div className="pt-2 border-t border-black/[0.06]">
                 <button
                   type="button"
                   onClick={() => setMetadataOpen((v) => !v)}
-                  className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 hover:text-gray-900"
+                  className="flex items-center gap-1.5 h3-warm hover:text-[color:var(--brand-700)]"
                 >
                   <svg
                     className={`w-3 h-3 transition-transform ${metadataOpen ? "rotate-0" : "-rotate-90"}`}
@@ -974,27 +987,27 @@ export default function PhotosClient({
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
-                  Photo Metadata
+                  Photo metadata
                 </button>
                 {metadataOpen && (
                   <div className="mt-3 space-y-3">
                     <div>
-                      <p className="text-xs text-gray-400">Taken On</p>
-                      <p className="text-sm text-gray-800">
+                      <p className="mono-label">Taken On</p>
+                      <p className="text-sm text-[color:var(--ink)]">
                         {formatMetadataDate(selectedPhoto.taken_at ?? selectedPhoto.uploaded_at)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-400">Uploaded On</p>
-                      <p className="text-sm text-gray-800">{formatMetadataDate(selectedPhoto.uploaded_at)}</p>
+                      <p className="mono-label">Uploaded On</p>
+                      <p className="text-sm text-[color:var(--ink)]">{formatMetadataDate(selectedPhoto.uploaded_at)}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-400">Uploaded By</p>
-                      <p className="text-sm text-gray-800">{selectedPhoto.uploaded_by_name}</p>
+                      <p className="mono-label">Uploaded By</p>
+                      <p className="text-sm text-[color:var(--ink)]">{selectedPhoto.uploaded_by_name}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-400">File Name</p>
-                      <p className="text-sm text-gray-800 break-all">{selectedPhoto.filename}</p>
+                      <p className="mono-label">File Name</p>
+                      <p className="text-sm text-[color:var(--ink)] break-all">{selectedPhoto.filename}</p>
                     </div>
                   </div>
                 )}
@@ -1005,7 +1018,7 @@ export default function PhotosClient({
                 <button
                   onClick={saveDetail}
                   disabled={savingDetail}
-                  className="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  className="btn-primary w-full justify-center disabled:opacity-50"
                 >
                   {savingDetail ? "Saving…" : "Save"}
                 </button>
@@ -1015,7 +1028,7 @@ export default function PhotosClient({
                   download={selectedPhoto.filename}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block w-full py-2 border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors text-center"
+                  className="btn-secondary w-full justify-center"
                 >
                   Download
                 </a>
@@ -1030,7 +1043,7 @@ export default function PhotosClient({
                     </button>
                     <button
                       onClick={() => setDeleteConfirm(false)}
-                      className="flex-1 py-2 border border-gray-200 text-sm font-medium text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
+                      className="btn-secondary flex-1 justify-center"
                     >
                       Cancel
                     </button>

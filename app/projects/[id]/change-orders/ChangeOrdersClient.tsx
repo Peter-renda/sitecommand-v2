@@ -49,6 +49,25 @@ type Tab = "prime" | "commitment";
 const STATUS_OPTIONS = ["Draft", "Pending - In Review", "Pending - Revised", "Pending - Pricing", "Pending - Not Pricing", "Pending - Proceeding", "Pending - Not Proceeding", "Approved", "Rejected", "Void"];
 const EXECUTED_OPTIONS = ["Yes", "No"];
 
+function statusPillClass(status: string) {
+  if (status === "Approved") return "pill-open";
+  if (status === "Rejected" || status === "Void") return "pill-danger";
+  if (status === "Draft") return "pill-post";
+  return "pill-warn";
+}
+
+function StatusPill({ status }: { status: string }) {
+  return <span className={`pill ${statusPillClass(status)}`}>{status}</span>;
+}
+
+function idxStatus(status: string) {
+  const s = String(status || "").toLowerCase();
+  if (s === "approved") return "answered";
+  if (s === "rejected" || s === "void") return "closed";
+  if (s === "draft") return "draft";
+  return "open";
+}
+
 export default function ChangeOrdersClient({
   projectId,
   username,
@@ -164,6 +183,10 @@ export default function ChangeOrdersClient({
     "Pending - Proceeding",
     "Pending - Not Proceeding",
   ]);
+
+  const pendingCount = orders.filter((o) => o.status?.toLowerCase().startsWith("pending")).length;
+  const approvedCount = orders.filter((o) => o.status?.toLowerCase() === "approved").length;
+  const executedCount = orders.filter((o) => o.executed).length;
 
   async function updateStatus(orderId: string, status: string) {
     setUpdatingId(orderId);
@@ -310,44 +333,76 @@ export default function ChangeOrdersClient({
       <ProjectNav projectId={projectId} />
 
       {/* Page header */}
-      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-[#FAFAF7] gap-4 flex-wrap">
-        <div className="min-w-0">
-          <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Change Orders</h1>
-          {orders.length > 0 && (
-            <p className="sec-sub mt-1.5">
-              <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
-              <span className="sep">·</span>
-              <span className="num" style={{ color: "var(--brand-500)" }}>{orders.filter((o) => o.status?.toLowerCase().startsWith("pending")).length}</span> pending
-              <span className="sep">·</span>
-              <span className="num">{orders.filter((o) => o.status?.toLowerCase() === "approved").length}</span> approved
-              <span className="sep">·</span>
-              <span className="num">{orders.length}</span> total
-            </p>
-          )}
+      <div className="px-6 pt-8 pb-4 bg-[#FAFAF7]">
+        <div className="flex items-end justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Change Orders</h1>
+            {orders.length > 0 && (
+              <p className="sub mt-1.5">
+                <em>{activeTab === "prime" ? "Prime contract revisions" : "Commitment revisions"}</em>
+                <span className="sep">·</span>
+                <span className="num">{approvedCount}</span> issued
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{pendingCount}</span> pending
+                <span className="sep">·</span>
+                <span className="num">{fmt(total)}</span> net value
+              </p>
+            )}
+          </div>
+          <button
+            onClick={exportListAsCsv}
+            className="btn-secondary"
+          >
+            Export CO Log
+          </button>
         </div>
-        <button
-          onClick={exportListAsCsv}
-          className="px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors"
-        >
-          Export CO Log
-        </button>
+
+        {/* Stat strip */}
+        {!loading && orders.length > 0 && (
+          <div className="stats mt-5">
+            <div className="stat">
+              <div className="lbl">Total Change Orders</div>
+              <div className="val">{orders.length}</div>
+              <div className="delta">{filtered.length} shown</div>
+            </div>
+            <div className={`stat${pendingCount > 0 ? " warn" : ""}`}>
+              <div className="lbl">Pending Review</div>
+              <div className="val">{pendingCount}</div>
+              <div className="delta">awaiting decision</div>
+            </div>
+            <div className="stat calm">
+              <div className="lbl">Approved</div>
+              <div className="val">{approvedCount}</div>
+              <div className="delta">{executedCount} executed</div>
+            </div>
+            <div className={`stat${total < 0 ? " alert" : ""}`}>
+              <div className="lbl">Net Value</div>
+              <div className="val tabular-nums">{fmt(total)}</div>
+              <div className="delta">across {filtered.length} order{filtered.length === 1 ? "" : "s"}</div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs + section header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white shrink-0">
-        <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between px-6 py-2 border-b border-black/[0.06] bg-white shrink-0">
+        <div className="flex items-center gap-5">
           <button
             onClick={() => setActiveTab("prime")}
-            className={`text-sm font-medium pb-1 border-b-2 transition-colors ${
-              activeTab === "prime" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"
+            className={`text-sm pb-1.5 border-b-2 transition-colors ${
+              activeTab === "prime"
+                ? "border-[color:var(--brand-500)] text-[color:var(--ink)] font-semibold"
+                : "border-transparent text-gray-500 hover:text-[color:var(--ink)] font-medium"
             }`}
           >
             Prime Contract Change Orders
           </button>
           <button
             onClick={() => setActiveTab("commitment")}
-            className={`text-sm font-medium pb-1 border-b-2 transition-colors ${
-              activeTab === "commitment" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"
+            className={`text-sm pb-1.5 border-b-2 transition-colors ${
+              activeTab === "commitment"
+                ? "border-[color:var(--brand-500)] text-[color:var(--ink)] font-semibold"
+                : "border-transparent text-gray-500 hover:text-[color:var(--ink)] font-medium"
             }`}
           >
             Commitment Change Orders
@@ -356,57 +411,57 @@ export default function ChangeOrdersClient({
         <div ref={exportRef} className="relative">
           <button
             onClick={() => setExportPccoOpen((v) => !v)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs border border-black/[0.08] rounded text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors"
           >
             Export PCCOs <ChevronDown className="w-3 h-3" />
           </button>
           {exportPccoOpen && (
-            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 w-40 py-1">
-              <button className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50" onClick={exportListAsPdf}>Export as PDF</button>
-              <button className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50" onClick={exportListAsCsv}>Export as CSV</button>
+            <div className="absolute right-0 top-full mt-1 bg-white border border-black/[0.08] rounded-lg shadow-lg z-10 w-40 py-1">
+              <button className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-[color:var(--surface-sunken)]" onClick={exportListAsPdf}>Export as PDF</button>
+              <button className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-[color:var(--surface-sunken)]" onClick={exportListAsCsv}>Export as CSV</button>
             </div>
           )}
         </div>
       </div>
 
       {/* Search + filter bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 bg-white shrink-0">
+      <div className="flex items-center justify-between px-6 py-2.5 border-b border-black/[0.06] bg-white shrink-0">
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search"
+              placeholder="Search change orders"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-7 pr-3 py-1.5 text-xs border border-gray-300 rounded w-44 focus:outline-none focus:ring-1 focus:ring-gray-400"
+              className="pl-8 pr-3 py-1.5 text-xs border border-black/[0.1] rounded-md w-52 focus:outline-none focus:ring-1 focus:ring-[color:var(--brand-500)]"
             />
           </div>
           <button
             onClick={() => setFilterOpen((v) => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs border rounded transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs border rounded-md transition-colors ${
               filterOpen || activeFilterCount > 0
-                ? "border-blue-400 text-blue-600 bg-blue-50"
-                : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                ? "border-[color:var(--brand-300)] text-[color:var(--brand-700)] bg-[color:var(--brand-100)]"
+                : "border-black/[0.1] text-gray-700 hover:bg-[color:var(--surface-sunken)]"
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
             Filters
             {activeFilterCount > 0 && (
-              <span className="ml-0.5 bg-blue-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]">
+              <span className="ml-0.5 bg-[color:var(--brand-500)] text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] tabular-nums">
                 {activeFilterCount}
               </span>
             )}
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <select className="text-xs border border-gray-300 rounded px-2 py-1.5 text-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-400 bg-white">
+          <select className="text-xs border border-black/[0.1] rounded-md px-2 py-1.5 text-gray-500 focus:outline-none focus:ring-1 focus:ring-[color:var(--brand-500)] bg-white">
             <option value="">Select a column to group</option>
             <option value="status">Status</option>
             <option value="executed">Executed</option>
             <option value="designated_reviewer">Designated Reviewer</option>
           </select>
-          <button className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors">
+          <button className="flex items-center gap-1 px-3 py-1.5 text-xs border border-black/[0.1] rounded-md text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors">
             <Settings2 className="w-3.5 h-3.5" />
             Configure
           </button>
@@ -417,13 +472,13 @@ export default function ChangeOrdersClient({
       <div className="flex flex-1 overflow-hidden">
         {/* Filter panel */}
         {filterOpen && (
-          <div className="w-72 border-r border-gray-200 bg-white shrink-0 flex flex-col overflow-y-auto">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-              <span className="text-sm font-semibold text-gray-900">Filters</span>
+          <div className="w-72 border-r border-black/[0.06] bg-white shrink-0 flex flex-col overflow-y-auto">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-black/[0.06]">
+              <span className="font-display text-[18px] leading-none text-[color:var(--ink)]">Filters</span>
               <div className="flex items-center gap-3">
                 <button
                   onClick={clearAllFilters}
-                  className="text-xs text-blue-600 hover:text-blue-800 transition-colors"
+                  className="text-xs text-[color:var(--brand-700)] hover:text-[color:var(--brand-500)] transition-colors"
                 >
                   Clear All Filters
                 </button>
@@ -436,7 +491,7 @@ export default function ChangeOrdersClient({
             <div className="px-4 py-4 flex flex-col gap-5">
               {/* Status filter */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">Status</label>
+                <label className="block mono-label mb-1.5">Status</label>
                 <div className="relative">
                   <button
                     onClick={() => { setStatusDropOpen((v) => !v); setExecutedDropOpen(false); setSignerDropOpen(false); }}
@@ -464,7 +519,7 @@ export default function ChangeOrdersClient({
                 {filterStatus.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {filterStatus.map((s) => (
-                      <span key={s} className="flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                      <span key={s} className="flex items-center gap-1 px-2 py-0.5 bg-[color:var(--brand-100)] text-[color:var(--brand-700)] rounded text-xs">
                         {s}
                         <button onClick={() => setFilterStatus((prev) => prev.filter((v) => v !== s))}><X className="w-2.5 h-2.5" /></button>
                       </span>
@@ -475,7 +530,7 @@ export default function ChangeOrdersClient({
 
               {/* Executed filter */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">Executed</label>
+                <label className="block mono-label mb-1.5">Executed</label>
                 <div className="relative">
                   <button
                     onClick={() => { setExecutedDropOpen((v) => !v); setStatusDropOpen(false); setSignerDropOpen(false); }}
@@ -503,7 +558,7 @@ export default function ChangeOrdersClient({
                 {filterExecuted.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {filterExecuted.map((s) => (
-                      <span key={s} className="flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                      <span key={s} className="flex items-center gap-1 px-2 py-0.5 bg-[color:var(--brand-100)] text-[color:var(--brand-700)] rounded text-xs">
                         {s}
                         <button onClick={() => setFilterExecuted((prev) => prev.filter((v) => v !== s))}><X className="w-2.5 h-2.5" /></button>
                       </span>
@@ -514,7 +569,7 @@ export default function ChangeOrdersClient({
 
               {/* Project Executive or Project Manager Signer filter */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">Project Executive or Project Manager Signer</label>
+                <label className="block mono-label mb-1.5">Project Executive or Project Manager Signer</label>
                 <div className="relative">
                   <button
                     onClick={() => { setSignerDropOpen((v) => !v); setStatusDropOpen(false); setExecutedDropOpen(false); }}
@@ -546,7 +601,7 @@ export default function ChangeOrdersClient({
                 {filterSigner.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {filterSigner.map((s) => (
-                      <span key={s} className="flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                      <span key={s} className="flex items-center gap-1 px-2 py-0.5 bg-[color:var(--brand-100)] text-[color:var(--brand-700)] rounded text-xs">
                         {s}
                         <button onClick={() => setFilterSigner((prev) => prev.filter((v) => v !== s))}><X className="w-2.5 h-2.5" /></button>
                       </span>
@@ -561,109 +616,102 @@ export default function ChangeOrdersClient({
         {/* Table */}
         <div className="flex-1 overflow-x-auto">
           {loading ? (
-            <div className="text-center py-20 text-gray-400 text-sm">Loading change orders...</div>
+            <div className="text-center py-20 text-[color:var(--ink-soft,#6b6b63)] text-sm">
+              <span className="serif-italic text-[color:var(--brand-700)]">Gathering</span> change orders…
+            </div>
           ) : (
             <table className="w-full text-xs border-collapse">
               <thead>
-                <tr className="border-b border-t border-gray-200 bg-white">
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => toggleSort("number")} className="inline-flex items-center gap-1 hover:text-gray-900">
-                        Number
-                        <svg className={`w-3 h-3 text-gray-400 transition-transform ${sortKey === "number" && sortDir === "asc" ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </button>
-                    </div>
+                <tr className="border-b border-t border-black/[0.06] bg-[color:var(--surface-sunken)]">
+                  <th className="px-4 py-3 text-left mono-label whitespace-nowrap">
+                    <button onClick={() => toggleSort("number")} className="inline-flex items-center gap-1 hover:text-[color:var(--ink)]">
+                      Number
+                      <svg className={`w-3 h-3 text-gray-400 transition-transform ${sortKey === "number" && sortDir === "asc" ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
                   </th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600">Revision</th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600">Title</th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600">Status</th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600">Executed</th>
-                  <th className="px-3 py-2.5 w-8" />
-                  <th className="px-3 py-2.5 text-right font-medium text-gray-600">
-                    <button onClick={() => toggleSort("amount")} className="inline-flex items-center gap-1 hover:text-gray-900">
+                  <th className="px-4 py-3 text-left mono-label">Revision</th>
+                  <th className="px-4 py-3 text-left mono-label">Title</th>
+                  <th className="px-4 py-3 text-left mono-label">Status</th>
+                  <th className="px-4 py-3 text-left mono-label">Executed</th>
+                  <th className="px-3 py-3 w-8" />
+                  <th className="px-4 py-3 text-right mono-label">
+                    <button onClick={() => toggleSort("amount")} className="inline-flex items-center gap-1 hover:text-[color:var(--ink)]">
                       Amount
                     </button>
                   </th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">Date Initiated</th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">
-                    <button onClick={() => toggleSort("approved_at")} className="inline-flex items-center gap-1 hover:text-gray-900">
+                  <th className="px-4 py-3 text-left mono-label whitespace-nowrap">Date Initiated</th>
+                  <th className="px-4 py-3 text-left mono-label whitespace-nowrap">
+                    <button onClick={() => toggleSort("approved_at")} className="inline-flex items-center gap-1 hover:text-[color:var(--ink)]">
                       Approved On
                     </button>
                   </th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">Approval Order</th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">Due Date</th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">Review Date</th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">Designated Reviewer</th>
-                  <th className="px-3 py-2.5 text-left font-medium text-gray-600">PCO</th>
-                  <th className="px-3 py-2.5 w-16" />
+                  <th className="px-4 py-3 text-left mono-label whitespace-nowrap">Approval Order</th>
+                  <th className="px-4 py-3 text-left mono-label whitespace-nowrap">Due Date</th>
+                  <th className="px-4 py-3 text-left mono-label whitespace-nowrap">Review Date</th>
+                  <th className="px-4 py-3 text-left mono-label whitespace-nowrap">Designated Reviewer</th>
+                  <th className="px-4 py-3 text-left mono-label">PCO</th>
+                  <th className="px-3 py-3 w-16" />
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={15} className="text-center py-20 text-gray-400">
-                      No change orders found.
+                    <td colSpan={15} className="text-center py-20 text-[color:var(--ink-soft,#6b6b63)]">
+                      <span className="serif-italic text-[color:var(--brand-700)]">No change orders</span> on the log yet.
                     </td>
                   </tr>
                 ) : (
-                  sorted.map((order) => (
-                    <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="px-3 py-2">
+                  sorted.map((order) => {
+                    const isCredit = (order.amount ?? 0) < 0;
+                    return (
+                    <tr key={order.id} className="border-b border-black/[0.05] hover:bg-[color:var(--surface-sunken)] transition-colors">
+                      <td className="px-4 py-2.5">
                         <button
                           onClick={() => router.push(`/projects/${projectId}/change-orders/${order.id}`)}
-                          className="text-blue-600 hover:underline font-medium"
+                          className={`idx-italic status-${idxStatus(order.status)}`}
+                          title={`Change Order ${order.number}`}
                         >
                           {order.number}
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-gray-700">{order.revision}</td>
-                      <td className="px-3 py-2 text-blue-600 hover:underline cursor-pointer max-w-xs">
+                      <td className="px-4 py-2.5 text-gray-600 font-mono tabular-nums">{order.revision}</td>
+                      <td className="px-4 py-2.5 max-w-xs">
                         <button
                           onClick={() => router.push(`/projects/${projectId}/change-orders/${order.id}`)}
-                          className="text-left"
+                          className="text-left text-[color:var(--ink)] font-medium hover:text-[color:var(--brand-700)] transition-colors"
                         >
                           {order.title}
                         </button>
                       </td>
-                      <td className="px-3 py-2">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                          order.status === "Approved"
-                            ? "bg-green-100 text-green-700"
-                            : order.status === "Rejected" || order.status === "Void"
-                            ? "bg-red-100 text-red-700"
-                            : order.status === "Draft"
-                            ? "bg-gray-100 text-gray-600"
-                            : "bg-yellow-100 text-yellow-700"
-                        }`}>
-                          {order.status}
-                        </span>
+                      <td className="px-4 py-2.5">
+                        <StatusPill status={order.status} />
                       </td>
-                      <td className="px-3 py-2 text-gray-700">{order.executed ? "Yes" : "No"}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-4 py-2.5 text-gray-600">{order.executed ? "Yes" : "No"}</td>
+                      <td className="px-3 py-2.5">
                         <div className="flex items-center gap-1">
                           {order.has_attachments && <FileText className="w-3.5 h-3.5 text-gray-400" />}
                           {order.is_locked && <Lock className="w-3.5 h-3.5 text-gray-400" />}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">{fmt(order.amount)}</td>
-                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{fmtDate(order.date_initiated)}</td>
-                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{fmtDate(order.approved_at ?? null) || <span className="text-gray-400">—</span>}</td>
-                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{approvedOrderMap.get(order.id) ?? <span className="text-gray-400">—</span>}</td>
-                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{fmtDate(order.due_date)}</td>
-                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{fmtDate(order.review_date)}</td>
-                      <td className="px-3 py-2 text-gray-700">
+                      <td className={`px-4 py-2.5 text-right font-mono tabular-nums whitespace-nowrap ${isCredit ? "serif-italic text-[color:var(--brand-700)]" : "text-gray-700"}`}>{fmt(order.amount)}</td>
+                      <td className="px-4 py-2.5 text-gray-600 font-mono tabular-nums whitespace-nowrap">{fmtDate(order.date_initiated)}</td>
+                      <td className="px-4 py-2.5 text-gray-600 font-mono tabular-nums whitespace-nowrap">{fmtDate(order.approved_at ?? null) || <span className="text-gray-400">—</span>}</td>
+                      <td className="px-4 py-2.5 text-gray-600 font-mono tabular-nums whitespace-nowrap">{approvedOrderMap.get(order.id) ?? <span className="text-gray-400">—</span>}</td>
+                      <td className="px-4 py-2.5 text-gray-600 font-mono tabular-nums whitespace-nowrap">{fmtDate(order.due_date)}</td>
+                      <td className="px-4 py-2.5 text-gray-600 font-mono tabular-nums whitespace-nowrap">{fmtDate(order.review_date)}</td>
+                      <td className="px-4 py-2.5 text-gray-600">
                         {order.designated_reviewer
                           ? getContactNameByEmail(order.designated_reviewer)
                           : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="px-3 py-2 text-gray-700">
+                      <td className="px-4 py-2.5 text-gray-600">
                         {order.prime_contract_change_order && order.prime_contract_change_order !== "none"
                           ? order.prime_contract_change_order
                           : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2.5">
                         <div className="flex items-center gap-1">
                           {pendingReviewStatuses.has(order.status) &&
                             !!order.designated_reviewer &&
@@ -672,14 +720,14 @@ export default function ChangeOrdersClient({
                                 <button
                                   disabled={updatingId === order.id}
                                   onClick={() => updateStatus(order.id, "Approved")}
-                                  className="px-2 py-0.5 border border-green-200 text-green-700 rounded hover:bg-green-50 disabled:opacity-50 text-xs"
+                                  className="px-2 py-0.5 border border-[color:var(--success-200)] text-[color:var(--success-500)] rounded hover:bg-[color:var(--success-50)] disabled:opacity-50 text-xs"
                                 >
                                   Approve
                                 </button>
                                 <button
                                   disabled={updatingId === order.id}
                                   onClick={() => updateStatus(order.id, "Rejected")}
-                                  className="px-2 py-0.5 border border-red-200 text-red-700 rounded hover:bg-red-50 disabled:opacity-50 text-xs"
+                                  className="px-2 py-0.5 border border-[color:var(--danger-200)] text-[color:var(--danger-500)] rounded hover:bg-[color:var(--danger-50)] disabled:opacity-50 text-xs"
                                 >
                                   Reject
                                 </button>
@@ -688,7 +736,7 @@ export default function ChangeOrdersClient({
                           <button
                             onClick={() => deleteOrder(order)}
                             disabled={String(order.status || "").trim().toLowerCase() === "approved"}
-                            className="text-gray-300 hover:text-red-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="text-gray-300 hover:text-[color:var(--danger-500)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             title={String(order.status || "").trim().toLowerCase() === "approved" ? "Approved change orders cannot be deleted" : "Delete"}
                           >
                             <XCircle className="w-3.5 h-3.5" />
@@ -696,16 +744,17 @@ export default function ChangeOrdersClient({
                         </div>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
               {filtered.length > 0 && (
                 <tfoot>
-                  <tr className="border-t border-gray-200 bg-white">
-                    <td colSpan={6} className="px-3 py-2 text-right text-xs font-semibold text-gray-700">
-                      Total:
+                  <tr className="border-t border-black/[0.08] bg-[color:var(--surface-sunken)]">
+                    <td colSpan={6} className="px-4 py-2.5 text-right mono-label">
+                      Net Value
                     </td>
-                    <td className="px-3 py-2 text-right text-xs font-semibold text-gray-900 whitespace-nowrap">
+                    <td className={`px-4 py-2.5 text-right text-xs font-semibold font-mono tabular-nums whitespace-nowrap ${total < 0 ? "serif-italic text-[color:var(--brand-700)]" : "text-[color:var(--ink)]"}`}>
                       {fmt(total)}
                     </td>
                     <td colSpan={8} />

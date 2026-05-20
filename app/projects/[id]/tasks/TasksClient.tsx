@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, ChangeEvent } from "react";
 import ProjectNav from "@/components/ProjectNav";
 import EmptyState from "@/app/components/EmptyState";
 import { SkeletonTable } from "@/app/components/Skeleton";
-import { Brand, Pill } from "@/components/design-system/Primitives";
+import { Brand } from "@/components/design-system/Primitives";
 
 type DistributionContact = { id: string; name: string; email: string | null };
 
@@ -36,13 +36,27 @@ type DirectoryContact = {
 const STATUSES = ["initiated", "in progress", "ready for review", "closed", "void"];
 const CATEGORIES = ["Administrative", "Closeout", "Contract", "Design", "Miscellaneous", "Construction"];
 
-const STATUS_COLORS: Record<string, string> = {
-  initiated: "bg-blue-50 text-blue-700",
-  "in progress": "bg-amber-50 text-amber-700",
-  "ready for review": "bg-purple-50 text-purple-700",
-  closed: "bg-green-50 text-green-700",
-  void: "bg-gray-100 text-gray-500",
+const STATUS_PILL: Record<string, string> = {
+  initiated: "pill-open",
+  "in progress": "pill-warn",
+  "ready for review": "pill-open",
+  closed: "pill-post",
+  void: "pill-post",
 };
+
+// Maps a task status to an idx-italic status modifier (open / answered / closed / draft).
+const STATUS_IDX: Record<string, string> = {
+  initiated: "open",
+  "in progress": "open",
+  "ready for review": "answered",
+  closed: "closed",
+  void: "draft",
+};
+
+function TaskStatusPill({ status }: { status: string }) {
+  const cls = STATUS_PILL[status] ?? "pill-post";
+  return <span className={`pill ${cls} capitalize`}>{status}</span>;
+}
 
 
 // ── Assignee Picker ───────────────────────────────────────────────────────────
@@ -791,6 +805,15 @@ export default function TasksClient({
   const validNums = tasks.map((t) => Number(t.task_number)).filter((n) => Number.isFinite(n));
   const nextNumber = validNums.length > 0 ? Math.max(...validNums) + 1 : 1;
 
+  // Live headline metrics
+  const openCount = tasks.filter((t) => t.status === "initiated" || t.status === "in progress").length;
+  const reviewCount = tasks.filter((t) => t.status === "ready for review").length;
+  const closedCount = tasks.filter((t) => t.status === "closed").length;
+  const todayStr = new Date().toISOString().split("T")[0];
+  const overdueCount = tasks.filter(
+    (t) => t.due_date != null && t.due_date < todayStr && t.status !== "closed" && t.status !== "void"
+  ).length;
+
   async function handleCreate(data: {
     task_number: number;
     title: string;
@@ -875,14 +898,21 @@ export default function TasksClient({
 
       <main className="max-w-6xl mx-auto px-6 py-8">
         {/* Title + actions */}
-        <div className="mb-6 rounded-xl border border-[var(--border-base)] bg-white p-4">
-          <div className="mt-2 flex items-center justify-between">
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Tasks</h1>
-            <Pill className="pill-open">{tasks.length} open items</Pill>
+        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+          <div>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Tasks</h1>
+            {!loading && tasks.length > 0 && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">Field punch list</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{openCount}</span> open
+                <span className="sep">·</span>
+                <span className="num">{overdueCount}</span> overdue
+                <span className="sep">·</span>
+                <span className="num">{tasks.length}</span> total
+              </p>
+            )}
           </div>
-        </div>
-
-        <div className="flex items-center justify-end mb-6">
           <div className="flex items-center gap-2">
             {/* Export dropdown */}
             <div ref={exportRef} className="relative">
@@ -926,7 +956,7 @@ export default function TasksClient({
             <button
               onClick={() => setShowNew(true)}
               disabled={creating}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors disabled:opacity-50"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -935,6 +965,32 @@ export default function TasksClient({
             </button>
           </div>
         </div>
+
+        {/* Stat strip */}
+        {!loading && tasks.length > 0 && (
+          <div className="stats mb-6">
+            <div className="stat">
+              <div className="lbl">Open</div>
+              <div className="val">{openCount}</div>
+              <div className="delta">Initiated &amp; in progress</div>
+            </div>
+            <div className={`stat${overdueCount > 0 ? " alert" : ""}`}>
+              <div className="lbl">Overdue</div>
+              <div className="val">{overdueCount}</div>
+              <div className="delta">Past due date</div>
+            </div>
+            <div className="stat warn">
+              <div className="lbl">Ready for Review</div>
+              <div className="val">{reviewCount}</div>
+              <div className="delta">Awaiting sign-off</div>
+            </div>
+            <div className="stat calm">
+              <div className="lbl">Closed</div>
+              <div className="val">{closedCount}</div>
+              <div className="delta">Completed tasks</div>
+            </div>
+          </div>
+        )}
 
         {/* Tasks table */}
         {loading ? (
@@ -952,18 +1008,18 @@ export default function TasksClient({
             />
           </div>
         ) : (
-          <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-            <table className="w-full">
+          <div className="bg-white border hairline rounded-xl overflow-x-auto">
+            <table className="w-full min-w-[800px]">
               <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider w-16">#</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Title</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Category</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Assignees</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Distribution</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Due Date</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Created</th>
+                <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap w-16">#</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Title</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Status</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Category</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Assignees</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Distribution</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Due Date</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Created</th>
                   <th className="px-4 py-3 w-28" />
                 </tr>
               </thead>
@@ -972,13 +1028,15 @@ export default function TasksClient({
                   <tr
                     key={task.id}
                     onClick={() => window.location.href = `/projects/${projectId}/tasks/${task.id}`}
-                    className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0 cursor-pointer"
+                    className="border-b border-gray-50 hover:bg-[color:var(--surface-sunken)] transition-colors last:border-b-0 cursor-pointer"
                   >
-                    <td className="px-4 py-3 text-sm text-gray-400 font-mono">{task.task_number}</td>
                     <td className="px-4 py-3">
-                      <span className="text-sm font-medium text-gray-900">{task.title}</span>
+                      <span className={`idx-italic status-${STATUS_IDX[task.status] ?? "draft"}`}>{String(task.task_number).padStart(3, "0")}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-medium text-[color:var(--ink)]">{task.title}</span>
                       {task.is_private && (
-                        <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-medium align-middle">
+                        <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[color:var(--brand-100)] text-[color:var(--brand-700)] text-[10px] font-medium align-middle">
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c.828 0 1.5-.672 1.5-1.5S12.828 8 12 8s-1.5.672-1.5 1.5S11.172 11 12 11zm6-4V6a6 6 0 10-12 0v1a2 2 0 00-2 2v9a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2z" />
                           </svg>
@@ -992,9 +1050,7 @@ export default function TasksClient({
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_COLORS[task.status] ?? "bg-gray-100 text-gray-500"}`}>
-                        {task.status}
-                      </span>
+                      <TaskStatusPill status={task.status} />
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500">{task.category || <span className="text-gray-300">—</span>}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">
@@ -1007,12 +1063,16 @@ export default function TasksClient({
                         ? task.distribution_list.map((d) => d.name).join(", ")
                         : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                      {task.due_date
-                        ? new Date(task.due_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                        : <span className="text-gray-300">—</span>}
+                    <td className="px-4 py-3 text-xs whitespace-nowrap tabular-nums">
+                      {task.due_date ? (
+                        <span className={task.due_date < todayStr && task.status !== "closed" && task.status !== "void" ? "text-[color:var(--brand-600)] font-medium" : "text-gray-500"}>
+                          {new Date(task.due_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
+                    <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap tabular-nums">
                       {new Date(task.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
