@@ -15,6 +15,14 @@ type Message = {
 
 type Frequency = "daily" | "weekly" | "monthly";
 
+type WorkflowReport = {
+  id: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: "pdf" | "excel";
+  createdAt: string;
+};
+
 type RecurringWorkflow = {
   id: string;
   name: string;
@@ -24,6 +32,7 @@ type RecurringWorkflow = {
   active: boolean;
   createdAt: string;
   lastRunAt: string | null;
+  reports?: WorkflowReport[];
 };
 
 const FREQUENCY_LABELS: Record<Frequency, string> = {
@@ -44,7 +53,8 @@ export default function AssistClient({ projectId }: { projectId: string }) {
   const [wfName, setWfName] = useState("");
   const [wfPrompt, setWfPrompt] = useState("");
   const [wfFrequency, setWfFrequency] = useState<Frequency>("weekly");
-  const [wfRecipients, setWfRecipients] = useState("");
+  const [wfRecipients, setWfRecipients] = useState<string[]>([]);
+  const [directoryRecipients, setDirectoryRecipients] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [wfSaving, setWfSaving] = useState(false);
   const [wfError, setWfError] = useState<string | null>(null);
 
@@ -73,6 +83,36 @@ export default function AssistClient({ projectId }: { projectId: string }) {
     };
   }, [projectId]);
 
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/directory`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data)) {
+          const options = data
+            .map((row: Record<string, unknown>) => {
+              const email = typeof row.email === "string" ? row.email.trim().toLowerCase() : "";
+              if (!email) return null;
+              const first = typeof row.first_name === "string" ? row.first_name.trim() : "";
+              const last = typeof row.last_name === "string" ? row.last_name.trim() : "";
+              const company = typeof row.company === "string" ? row.company.trim() : "";
+              const name = [first, last].filter(Boolean).join(" ") || company || email;
+              return { id: String(row.id ?? email), name, email };
+            })
+            .filter(Boolean) as Array<{ id: string; name: string; email: string }>;
+          setDirectoryRecipients(options);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
   async function ask(question: string) {
     const trimmed = question.trim();
     if (!trimmed || loading) return;
@@ -131,10 +171,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       return;
     }
 
-    const recipients = wfRecipients
-      .split(/[,\n]/)
-      .map((s) => s.trim().toLowerCase())
-      .filter((s) => s.length > 0);
+    const recipients = wfRecipients.map((r) => r.trim().toLowerCase()).filter((s) => s.length > 0);
     for (const r of recipients) {
       if (!r.includes("@")) {
         setWfError(`"${r}" is not a valid email.`);
@@ -155,7 +192,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       setWfName("");
       setWfPrompt("");
       setWfFrequency("weekly");
-      setWfRecipients("");
+      setWfRecipients([]);
     } catch (err) {
       setWfError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -368,15 +405,24 @@ export default function AssistClient({ projectId }: { projectId: string }) {
 
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
-                Recipients <span className="text-gray-500 font-normal">(comma-separated emails)</span>
+                Recipients from Project Directory
               </label>
-              <input
-                type="text"
+              <select
+                multiple
                 value={wfRecipients}
-                onChange={(e) => setWfRecipients(e.target.value)}
-                placeholder="pm@example.com, super@example.com"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
+                onChange={(e) => {
+                  const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
+                  setWfRecipients(selected);
+                }}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-h-[110px]"
+              >
+                {directoryRecipients.map((recipient) => (
+                  <option key={recipient.id} value={recipient.email}>
+                    {recipient.name} ({recipient.email})
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-gray-500">Hold Ctrl/Cmd to select multiple recipients.</p>
             </div>
 
             {wfError && (
@@ -423,6 +469,28 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                         Recipients: {w.recipients.join(", ")}
                       </p>
                     )}
+                    <div className="mt-2">
+                      <p className="text-[11px] font-medium text-gray-600">Latest reports</p>
+                      {w.reports && w.reports.length > 0 ? (
+                        <ul className="mt-1 space-y-1">
+                          {w.reports.slice(0, 4).map((report) => (
+                            <li key={report.id}>
+                              <a href={report.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+                                {report.fileName}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-gray-500 mt-1">No reports yet.</p>
+                      )}
+                      <a
+                        href={`/projects/${projectId}/assist?workflow=${w.id}`}
+                        className="mt-2 inline-block text-xs font-medium text-gray-700 hover:text-gray-900 hover:underline"
+                      >
+                        View all reports
+                      </a>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button

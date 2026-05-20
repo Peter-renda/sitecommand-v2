@@ -5,6 +5,15 @@ import { getSupabase } from "@/lib/supabase";
 
 const ALLOWED_FREQUENCIES = new Set(["daily", "weekly", "monthly"]);
 
+function isRecurringWorkflowTableMissing(errorMessage: string | null | undefined) {
+  if (!errorMessage) return false;
+  const normalized = errorMessage.toLowerCase();
+  return (
+    normalized.includes("assist_recurring_workflows") &&
+    (normalized.includes("schema cache") || normalized.includes("does not exist"))
+  );
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; workflowId: string }> },
@@ -72,7 +81,18 @@ export async function PATCH(
     .eq("id", workflowId)
     .eq("project_id", projectId);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (isRecurringWorkflowTableMissing(error.message)) {
+      return NextResponse.json(
+        {
+          error:
+            "Recurring workflows are not available yet. Please run the latest database migrations and retry.",
+        },
+        { status: 503 },
+      );
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }
 
@@ -94,6 +114,17 @@ export async function DELETE(
     .eq("id", workflowId)
     .eq("project_id", projectId);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (isRecurringWorkflowTableMissing(error.message)) {
+      return NextResponse.json(
+        {
+          error:
+            "Recurring workflows are not available yet. Please run the latest database migrations and retry.",
+        },
+        { status: 503 },
+      );
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }
