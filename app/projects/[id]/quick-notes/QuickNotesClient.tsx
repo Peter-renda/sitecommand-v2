@@ -211,68 +211,81 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
       <ProjectNav projectId={projectId} />
 
       <main className="mx-auto max-w-[1400px] px-4 py-6">
-        <div className="mb-4 rounded-xl border border-[var(--border-base)] bg-white p-4">
-          <div className="mt-2 flex items-center justify-between">
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Quick Notes</h1>
-            <Pill className="pill-open">{notes.length} notes</Pill>
+        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+          <div>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Quick notes</h1>
+            <p className="sub mt-1.5">
+              <em>A working notebook for this project</em>
+              <span className="sep">·</span>
+              <span className="num" style={{ color: "var(--brand-500)" }}>{notes.length}</span> {notes.length === 1 ? "note" : "notes"}
+              {activeNote && (
+                <>
+                  <span className="sep">·</span>
+                  last touched {prettyDate(activeNote.updatedAt)}
+                </>
+              )}
+            </p>
           </div>
+          <button type="button" onClick={createNewNote} className="btn-primary">
+            New note
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
-          <aside className="bg-white border border-gray-200 rounded-xl p-3 h-[calc(100vh-120px)] overflow-hidden flex flex-col">
-            <button
-              type="button"
-              onClick={createNewNote}
-              className="w-full px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800"
-            >
-              + New note
-            </button>
+          <aside className="card h-[calc(100vh-150px)] overflow-hidden flex flex-col">
+            <div className="card-pad pb-3 border-b border-[color:var(--border-base)]">
+              <p className="mono-label text-[color:var(--ink-soft)]">Notebook</p>
+            </div>
 
-            <div className="mt-3 overflow-y-auto space-y-2">
-              {notes.map((note) => (
-                <button
-                  key={note.id}
-                  type="button"
-                  onClick={() => { setActiveId(note.id); setIsEditing(false); }}
-                  className={`w-full text-left p-2.5 rounded-md border transition ${
-                    note.id === activeId
-                      ? "bg-gray-50 border-gray-300"
-                      : "bg-white border-gray-200 hover:bg-gray-50"
-                  }`}
-                >
-                  <p className="text-sm font-medium text-gray-900 truncate">{note.title || "Untitled note"}</p>
-                  <p className="text-xs text-gray-500 mt-1">Updated {prettyDate(note.updatedAt)}</p>
-                </button>
-              ))}
+            <div className="overflow-y-auto p-2 space-y-1">
+              {notes.length === 0 ? (
+                <p className="px-2 py-4 text-sm text-[color:var(--ink-soft)] italic">No notes yet.</p>
+              ) : (
+                notes.map((note) => (
+                  <button
+                    key={note.id}
+                    type="button"
+                    onClick={() => { setActiveId(note.id); setIsEditing(false); }}
+                    className={`w-full text-left px-3 py-2.5 rounded-lg border transition ${
+                      note.id === activeId
+                        ? "bg-[color:var(--surface-sunken)] border-[color:var(--brand-500)]"
+                        : "bg-white border-transparent hover:bg-[color:var(--surface-sunken)]"
+                    }`}
+                  >
+                    <p className="font-display text-[15px] leading-tight text-[color:var(--ink)] truncate">{note.title || "Untitled note"}</p>
+                    <p className="mono-label mt-1.5 text-[color:var(--ink-soft)]">Updated {prettyDate(note.updatedAt)}</p>
+                  </button>
+                ))
+              )}
             </div>
           </aside>
 
-          <section className="bg-white border border-gray-200 rounded-xl p-4 h-[calc(100vh-120px)] flex flex-col">
+          <section className="card h-[calc(100vh-150px)] flex flex-col">
             {!activeNote ? (
-              <p className="text-sm text-gray-500">Select a note to start editing.</p>
+              <p className="card-pad text-sm text-[color:var(--ink-soft)] italic">Select a note to start editing.</p>
             ) : (
-              <>
-                <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-gray-200">
+              <div className="flex flex-col flex-1 card-pad overflow-hidden">
+                <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-[color:var(--border-base)]">
                   {isEditing ? (
                     <>
                       <button
                         type="button"
                         onClick={() => runCommand("bold")}
-                        className="px-2.5 py-1.5 border border-gray-300 rounded text-sm font-semibold"
+                        className="px-2.5 py-1.5 border border-[color:var(--border-base)] rounded-md text-sm font-semibold text-[color:var(--ink)] hover:bg-[color:var(--surface-sunken)] transition"
                       >
                         B
                       </button>
                       <button
                         type="button"
                         onClick={() => runCommand("underline")}
-                        className="px-2.5 py-1.5 border border-gray-300 rounded text-sm underline"
+                        className="px-2.5 py-1.5 border border-[color:var(--border-base)] rounded-md text-sm underline text-[color:var(--ink)] hover:bg-[color:var(--surface-sunken)] transition"
                       >
                         U
                       </button>
                       <button
                         type="button"
                         onClick={() => runCommand("insertUnorderedList")}
-                        className="px-2.5 py-1.5 border border-gray-300 rounded text-sm"
+                        className="px-2.5 py-1.5 border border-[color:var(--border-base)] rounded-md text-sm text-[color:var(--ink)] hover:bg-[color:var(--surface-sunken)] transition"
                       >
                         • List
                       </button>
@@ -284,7 +297,7 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
                           setFontSize(value);
                           runCommand("fontSize", value);
                         }}
-                        className="px-2.5 py-1.5 border border-gray-300 rounded text-sm"
+                        className="px-2.5 py-1.5 border border-[color:var(--border-base)] rounded-md text-sm bg-white text-[color:var(--ink)]"
                       >
                         {FONT_SIZES.map((size) => (
                           <option key={size.value} value={size.value}>
@@ -297,17 +310,15 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
                         type="button"
                         onClick={toggleRecording}
                         disabled={transcribing}
-                        className={`px-3 py-1.5 rounded text-sm font-medium ${
-                          recording ? "bg-red-600 text-white" : "bg-indigo-600 text-white"
-                        } disabled:opacity-50`}
+                        className="btn-secondary disabled:opacity-50"
                       >
-                        {recording ? "Stop Recording" : "Record with ElevenLabs"}
+                        {recording ? "Stop recording" : "Record with ElevenLabs"}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => setIsEditing(false)}
-                        className="ml-auto px-3 py-1.5 rounded bg-gray-900 text-white text-sm font-medium hover:bg-gray-800"
+                        className="btn-primary ml-auto"
                       >
                         Save
                       </button>
@@ -317,14 +328,14 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
                       <button
                         type="button"
                         onClick={() => setIsEditing(true)}
-                        className="px-3 py-1.5 rounded bg-gray-900 text-white text-sm font-medium hover:bg-gray-800"
+                        className="btn-primary"
                       >
                         Edit
                       </button>
                       <button
                         type="button"
                         onClick={deleteActiveNote}
-                        className="ml-auto px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                        className="btn-secondary ml-auto"
                       >
                         Delete note
                       </button>
@@ -337,10 +348,10 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
                   value={activeNote.title}
                   onChange={(e) => updateActive({ title: e.target.value })}
                   readOnly={!isEditing}
-                  className={`mt-3 px-3 py-2 border border-gray-200 rounded-md text-sm font-medium focus:outline-none ${
+                  className={`mt-3 px-3 py-2 border rounded-md font-display text-[20px] text-[color:var(--ink)] focus:outline-none ${
                     isEditing
-                      ? "focus:ring-2 focus:ring-gray-900"
-                      : "bg-gray-50 cursor-default text-gray-700"
+                      ? "border-[color:var(--border-base)] focus:ring-2 focus:ring-[color:var(--brand-500)]"
+                      : "border-transparent bg-[color:var(--surface-sunken)] cursor-default"
                   }`}
                   placeholder="Note title"
                 />
@@ -350,18 +361,18 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
                   contentEditable={isEditing}
                   suppressContentEditableWarning
                   onInput={() => isEditing && updateActive({ content: editorRef.current?.innerHTML ?? "" })}
-                  className={`mt-3 flex-1 border border-gray-200 rounded-md p-3 text-sm text-gray-900 overflow-y-auto ${
+                  className={`mt-3 flex-1 border rounded-md p-3 text-sm text-[color:var(--ink)] overflow-y-auto ${
                     isEditing
-                      ? "focus:outline-none focus:ring-2 focus:ring-gray-900"
-                      : "bg-gray-50 cursor-default"
+                      ? "border-[color:var(--border-base)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+                      : "border-transparent bg-[color:var(--surface-sunken)] cursor-default"
                   }`}
                   style={{ lineHeight: 1.6 }}
                 />
 
                 {audioMessage && (
-                  <p className="text-xs text-gray-500 mt-2">{audioMessage}</p>
+                  <p className="mono-label mt-2 text-[color:var(--ink-soft)]">{audioMessage}</p>
                 )}
-              </>
+              </div>
             )}
           </section>
         </div>

@@ -57,15 +57,15 @@ function numVal(s: string): number {
   return isNaN(n) ? 0 : n;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  approved: "bg-green-100 text-green-700",
-  draft: "bg-gray-100 text-gray-500",
-  void: "bg-red-50 text-red-500",
-  terminated: "bg-orange-50 text-orange-600",
+const STATUS_PILL: Record<string, string> = {
+  approved: "pill-open",
+  draft: "pill-warn",
+  void: "pill-post",
+  terminated: "pill-post",
 };
 
 const ERP_STATUS_COLORS: Record<string, string> = {
-  synced: "text-green-600",
+  synced: "text-[color:var(--brand-700)]",
   not_synced: "text-gray-400",
   pending: "text-amber-500",
 };
@@ -756,18 +756,27 @@ export default function CommitmentsClient({
 
   function renderCell(item: Commitment, key: string) {
     switch (key) {
-      case "number":
+      case "number": {
+        const idxStatus =
+          item.status === "approved"
+            ? "open"
+            : item.status === "void" || item.status === "terminated"
+            ? "closed"
+            : "draft";
         return (
           <a
             href={`/projects/${projectId}/commitments/${item.id}`}
-            className="text-blue-600 font-medium hover:underline"
+            className="hover:underline"
           >
-            {item.number}
+            <span className={`idx-italic status-${idxStatus}`}>
+              {String(item.number).padStart(3, "0")}
+            </span>
           </a>
         );
+      }
       case "contract_company":
         return (
-          <span className="flex items-center gap-1 text-gray-900">
+          <span className="flex items-center gap-1 text-[color:var(--ink)] font-medium">
             {item.contract_company || <span className="text-gray-300">—</span>}
             {item.contract_company && (
               <svg
@@ -787,11 +796,11 @@ export default function CommitmentsClient({
           </span>
         );
       case "title":
-        return <span className="text-gray-700">{item.title || <span className="text-gray-300">—</span>}</span>;
+        return <span className="text-gray-600">{item.title || <span className="text-gray-300">—</span>}</span>;
       case "erp_status":
         return <ErpStatusIcon status={item.erp_status} />;
       case "status": {
-        const cls = STATUS_COLORS[item.status] ?? "bg-gray-100 text-gray-500";
+        const cls = STATUS_PILL[item.status] ?? "pill-post";
         const label =
           item.status === "approved"
             ? "Approved"
@@ -800,13 +809,7 @@ export default function CommitmentsClient({
             : item.status === "terminated"
             ? "Terminated"
             : "Draft";
-        return (
-          <span
-            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${cls}`}
-          >
-            {label}
-          </span>
-        );
+        return <span className={`pill ${cls}`}>{label}</span>;
       }
       case "executed":
         return (
@@ -817,22 +820,22 @@ export default function CommitmentsClient({
           <span className="text-gray-500">{item.ssov_status || ""}</span>
         );
       case "original_contract_amount":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.original_contract_amount)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.original_contract_amount)}</span>;
       case "approved_change_orders":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.approved_change_orders)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.approved_change_orders)}</span>;
       case "revised_contract_amount": {
         const revised =
           item.original_contract_amount + item.approved_change_orders;
-        return <span className="text-gray-900 tabular-nums">{fmt(revised)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(revised)}</span>;
       }
       case "pending_change_orders":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.pending_change_orders)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.pending_change_orders)}</span>;
       case "draft_amount":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.draft_amount)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.draft_amount)}</span>;
       case "invoiced":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.invoiced)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.invoiced)}</span>;
       case "payments_issued":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.payments_issued)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.payments_issued)}</span>;
     }
   }
 
@@ -865,8 +868,8 @@ export default function CommitmentsClient({
           <div className="min-w-0">
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Commitments</h1>
             {items.length > 0 && (
-              <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+              <p className="sub mt-1.5">
+                <em>Purchase orders and subcontracts</em>
                 <span className="sep">·</span>
                 <span className="num" style={{ color: "var(--brand-500)" }}>{items.filter((i) => i.status === "approved").length}</span> approved
                 <span className="sep">·</span>
@@ -966,7 +969,7 @@ export default function CommitmentsClient({
             <div ref={createRef} className="relative">
               <button
                 onClick={() => setShowCreateMenu((o) => !o)}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
               >
                 <svg
                   className="w-4 h-4"
@@ -1038,8 +1041,45 @@ export default function CommitmentsClient({
           </div>
         </div>
 
+        {/* Stat strip */}
+        {!loading && items.length > 0 && (() => {
+          const totalRevised = items.reduce(
+            (s, i) => s + i.original_contract_amount + i.approved_change_orders,
+            0
+          );
+          const totalInvoiced = items.reduce((s, i) => s + i.invoiced, 0);
+          const totalOutstanding = totalRevised - totalInvoiced;
+          const pendingCount = items.filter(
+            (i) => i.pending_change_orders !== 0
+          ).length;
+          return (
+            <div className="stats mb-6">
+              <div className="stat">
+                <div className="lbl">Revised Value</div>
+                <div className="val">{fmt(totalRevised)}</div>
+                <div className="delta">{items.length} commitments</div>
+              </div>
+              <div className="stat calm">
+                <div className="lbl">Invoiced to Date</div>
+                <div className="val">{fmt(totalInvoiced)}</div>
+                <div className="delta">across all contracts</div>
+              </div>
+              <div className="stat">
+                <div className="lbl">Outstanding</div>
+                <div className="val">{fmt(totalOutstanding)}</div>
+                <div className="delta">revised less invoiced</div>
+              </div>
+              <div className={`stat${pendingCount > 0 ? " warn" : ""}`}>
+                <div className="lbl">Pending Changes</div>
+                <div className="val">{pendingCount}</div>
+                <div className="delta">with pending change orders</div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 mb-5">
+        <div className="flex border-b border-black/[0.08] mb-5">
           <button
             onClick={() => setActiveTab("contracts")}
             className={`px-1 pb-3 mr-6 text-sm font-medium border-b-2 transition-colors ${
@@ -1270,13 +1310,15 @@ export default function CommitmentsClient({
 
         {/* Table */}
         {loading ? (
-          <p className="text-sm text-gray-400">Loading...</p>
+          <div className="bg-white border hairline rounded-xl p-10 text-center">
+            <p className="text-sm text-gray-400 serif-italic">Loading commitments…</p>
+          </div>
         ) : (
-          <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+          <div className="bg-white border hairline rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50">
+                  <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
                     {COLS.map((col) => {
                       const isSorted = sortConfig?.key === col.key;
                       return (
@@ -1291,7 +1333,7 @@ export default function CommitmentsClient({
                                 : { key: col.key, dir: "asc" }
                             )
                           }
-                          className={`text-left px-3 py-3 font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:bg-gray-100 transition-colors ${col.width}`}
+                          className={`text-left px-3 py-3 mono-label whitespace-nowrap cursor-pointer select-none hover:bg-black/[0.03] transition-colors ${col.width}`}
                         >
                           <span className="flex items-center gap-1">
                             {col.label}
@@ -1317,17 +1359,17 @@ export default function CommitmentsClient({
                         className="px-3 py-16 text-center"
                       >
                         {activeTab === "recycle_bin" ? (
-                          <p className="text-sm text-gray-400">
+                          <p className="text-sm text-gray-400 serif-italic">
                             Recycle bin is empty
                           </p>
                         ) : (
                           <>
-                            <p className="text-sm text-gray-400">
+                            <p className="font-display text-lg text-[color:var(--ink)]">
                               No commitments yet
                             </p>
-                            <p className="text-xs text-gray-300 mt-1">
+                            <p className="text-xs text-gray-400 mt-1">
                               Click{" "}
-                              <span className="font-medium">+ Create</span> to
+                              <span className="font-medium text-[color:var(--ink)]">Create</span> to
                               add a Subcontract or Purchase Order
                             </p>
                           </>
@@ -1338,7 +1380,7 @@ export default function CommitmentsClient({
                     visibleItems.map((item) => (
                       <tr
                         key={item.id}
-                        className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0 group"
+                        className="border-b border-black/[0.05] hover:bg-[color:var(--surface-sunken)] transition-colors last:border-b-0 group"
                       >
                         {COLS.map((col) => (
                           <td
@@ -1430,24 +1472,24 @@ export default function CommitmentsClient({
                   const totalInvoiced = visibleItems.reduce((s, i) => s + i.invoiced, 0);
                   const totalPayments = visibleItems.reduce((s, i) => s + i.payments_issued, 0);
                   const totals: Record<string, React.ReactNode> = {
-                    number: <span className="font-semibold text-gray-700">Totals</span>,
+                    number: <span className="mono-label">Totals</span>,
                     contract_company: null,
                     title: null,
                     erp_status: null,
                     status: null,
                     executed: null,
                     ssov_status: null,
-                    original_contract_amount: <span className="font-semibold tabular-nums">{fmt(totalOriginal)}</span>,
-                    approved_change_orders: <span className="font-semibold tabular-nums">{fmt(totalApproved)}</span>,
-                    revised_contract_amount: <span className="font-semibold tabular-nums">{fmt(totalRevised)}</span>,
-                    pending_change_orders: <span className="font-semibold tabular-nums">{fmt(totalPending)}</span>,
-                    draft_amount: <span className="font-semibold tabular-nums">{fmt(totalDraft)}</span>,
-                    invoiced: <span className="font-semibold tabular-nums">{fmt(totalInvoiced)}</span>,
-                    payments_issued: <span className="font-semibold tabular-nums">{fmt(totalPayments)}</span>,
+                    original_contract_amount: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalOriginal)}</span>,
+                    approved_change_orders: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalApproved)}</span>,
+                    revised_contract_amount: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalRevised)}</span>,
+                    pending_change_orders: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalPending)}</span>,
+                    draft_amount: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalDraft)}</span>,
+                    invoiced: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalInvoiced)}</span>,
+                    payments_issued: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalPayments)}</span>,
                   };
                   return (
                     <tfoot>
-                      <tr className="border-t-2 border-gray-200 bg-gray-50">
+                      <tr className="border-t-2 border-black/[0.1] bg-[color:var(--surface-sunken)]">
                         {COLS.map((col) => (
                           <td key={col.key} className="px-3 py-3 text-xs whitespace-nowrap">
                             {totals[col.key]}

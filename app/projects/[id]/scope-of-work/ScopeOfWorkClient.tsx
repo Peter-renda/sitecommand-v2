@@ -633,13 +633,17 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
     return items.filter((i) => i.division_code === code);
   }
 
+  // Headline metrics for the stat strip
+  const activeDivisionCount = CSI_DIVISIONS.filter((d) => activeDivisions.has(d.code)).length;
+  const divisionsWithScope = new Set(items.map((i) => i.division_code)).size;
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#FAFAF7]">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex items-center justify-center h-64">
-          <div className="w-6 h-6 border-2 border-gray-300 border-t-orange-500 rounded-full animate-spin" />
+          <div className="w-6 h-6 border-2 border-[color:var(--brand-100)] border-t-[color:var(--brand-500)] rounded-full animate-spin" />
         </div>
       </div>
     );
@@ -653,25 +657,58 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
       {/* Page header */}
       <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-[#FAFAF7] gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Scope of Work</h1>
+          <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Scope of work</h1>
+          <p className="sec-sub mt-1.5">
+            <span className="serif-italic text-[color:var(--brand-700)]">{projectName}</span>
+            <span className="sep">·</span>
+            <span className="num" style={{ color: "var(--brand-500)" }}>{activeDivisionCount}</span> active{activeDivisionCount === 1 ? " division" : " divisions"}
+            <span className="sep">·</span>
+            <span className="num">{items.length}</span> scope{items.length === 1 ? " item" : " items"}
+            <span className="sep">·</span>
+            <span className="num">{attachments.length}</span> attached{attachments.length === 1 ? " file" : " files"}
+          </p>
         </div>
         <button
           onClick={handleExportPDF}
           disabled={exportLoading || items.length === 0}
-          className="flex items-center gap-2 px-4 py-2 bg-[color:var(--ink)] text-white text-sm font-semibold rounded-md hover:bg-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Download className="w-4 h-4" />
           {exportLoading ? "Exporting..." : "Export PDF"}
         </button>
       </div>
 
+      {/* Stat strip */}
+      <div className="px-6 pb-4 bg-[#FAFAF7]">
+        <div className="stats">
+          <div className={`stat${activeDivisionCount > 0 ? " alert" : ""}`}>
+            <div className="lbl">Active Divisions</div>
+            <div className="val">{activeDivisionCount}</div>
+            <div className="delta">of {CSI_DIVISIONS.length} CSI divisions</div>
+          </div>
+          <div className="stat">
+            <div className="lbl">Scope Items</div>
+            <div className="val">{items.length}</div>
+            <div className="delta">across {divisionsWithScope} division{divisionsWithScope === 1 ? "" : "s"}</div>
+          </div>
+          <div className="stat">
+            <div className="lbl">Attachments</div>
+            <div className="val">{attachments.length}</div>
+            <div className="delta">specs &amp; reference files</div>
+          </div>
+          <div className={`stat${items.length === 0 ? " warn" : " calm"}`}>
+            <div className="lbl">Documented</div>
+            <div className="val">{divisionsWithScope}</div>
+            <div className="delta">{items.length === 0 ? "no scope written yet" : "divisions with scope"}</div>
+          </div>
+        </div>
+      </div>
+
       <div className="flex h-[calc(100vh-56px-56px-104px)] min-h-[480px]">
         {/* ── Sidebar ────────────────────────────────────────────────────── */}
-        <aside className="w-64 shrink-0 bg-white border-r border-gray-200 overflow-y-auto">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">
-              CSI Divisions
-            </p>
+        <aside className="w-64 shrink-0 bg-white border-r border-black/[0.08] overflow-y-auto">
+          <div className="px-4 py-3 border-b border-black/[0.06]">
+            <p className="mono-label">CSI Divisions</p>
           </div>
           <div className="py-2">
             {CSI_DIVISIONS.map((div) => {
@@ -680,27 +717,27 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
               return (
                 <div
                   key={div.code}
-                  className="flex items-center gap-2 px-3 py-1.5 group"
+                  className="flex items-center gap-2 px-3 py-1.5 group hover:bg-[color:var(--surface-sunken)] transition-colors"
                 >
                   <input
                     type="checkbox"
                     checked={isActive}
                     onChange={() => toggleDivision(div.code)}
-                    className="w-3.5 h-3.5 rounded border-gray-300 accent-orange-500 shrink-0 cursor-pointer"
+                    className="w-3.5 h-3.5 rounded border-gray-300 accent-[#D4500A] shrink-0 cursor-pointer"
                   />
                   <button
                     onClick={() => scrollToDiv(div.code)}
                     className={`flex-1 text-left text-xs leading-snug transition-colors ${
                       isActive
-                        ? "text-gray-800 font-medium"
+                        ? "text-[color:var(--ink)] font-medium"
                         : "text-gray-400 hover:text-gray-600"
                     }`}
                   >
-                    <span className="font-mono text-orange-500 mr-1">{div.code}</span>
+                    <span className="font-mono text-[color:var(--brand-500)] mr-1">{div.code}</span>
                     {div.name}
                   </button>
                   {count > 0 && (
-                    <span className="text-[10px] text-gray-400 bg-gray-100 rounded-full px-1.5 py-0.5 shrink-0">
+                    <span className="text-[10px] tabular-nums text-gray-500 bg-[color:var(--surface-sunken)] rounded-full px-1.5 py-0.5 shrink-0">
                       {count}
                     </span>
                   )}

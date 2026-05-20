@@ -113,6 +113,21 @@ export default function TransmittalsClient({
     );
   });
 
+  const now = Date.now();
+  const privateCount = transmittals.filter((t) => t.private).length;
+  const sentThisMonthCount = transmittals.filter((t) => {
+    const ref = t.sent_date ?? t.created_at;
+    if (!ref) return false;
+    const ts = new Date(ref).getTime();
+    return !Number.isNaN(ts) && now - ts <= 30 * 24 * 60 * 60 * 1000 && ts <= now;
+  }).length;
+  const dueSoonCount = transmittals.filter((t) => {
+    if (!t.due_by) return false;
+    const ts = new Date(t.due_by + "T12:00:00").getTime();
+    if (Number.isNaN(ts)) return false;
+    return ts >= now && ts - now <= 7 * 24 * 60 * 60 * 1000;
+  }).length;
+
   function exportCSV() {
     const headers = ["#", "Subject", "To", "Sent Via", "Date"];
     const rows = filtered.map((t) => [
@@ -148,34 +163,26 @@ export default function TransmittalsClient({
 
       <ProjectNav projectId={projectId} />
 
-      <main className="max-w-7xl mx-auto px-6 py-6">
-        {/* Page header row */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <span className="font-display text-[18px] leading-tight text-[color:var(--ink)]">Transmittals</span>
-            {/* Tabs */}
-            <div className="flex items-end gap-1 ml-1">
-              <button
-                onClick={() => setActiveTab("items")}
-                className={`px-1 pb-0.5 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === "items"
-                    ? "border-orange-500 text-gray-900"
-                    : "border-transparent text-gray-400 hover:text-gray-600"
-                }`}
-              >
-                Items
-              </button>
-              <button
-                onClick={() => setActiveTab("recycle_bin")}
-                className={`px-3 pb-0.5 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === "recycle_bin"
-                    ? "border-orange-500 text-gray-900"
-                    : "border-transparent text-gray-400 hover:text-gray-600"
-                }`}
-              >
-                Recycle Bin
-              </button>
-            </div>
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Page header */}
+        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+          <div>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Transmittals</h1>
+            {!loading && transmittals.length > 0 && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">A documented record of correspondence</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{transmittals.length}</span> issued
+                <span className="sep">·</span>
+                <span className="num">{privateCount}</span> private
+                {filtered.length !== transmittals.length && (
+                  <>
+                    <span className="sep">·</span>
+                    <span className="num">{filtered.length}</span> shown
+                  </>
+                )}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -192,7 +199,7 @@ export default function TransmittalsClient({
             {/* Create button */}
             <a
               href={`/projects/${projectId}/transmittals/new`}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -202,9 +209,53 @@ export default function TransmittalsClient({
           </div>
         </div>
 
-        {/* Search bar */}
-        <div className="mb-5">
-          <div className="relative w-64">
+        {/* Stat strip */}
+        {!loading && transmittals.length > 0 && (
+          <div className="stats mb-6">
+            <div className="stat">
+              <div className="lbl">Total Issued</div>
+              <div className="val">{transmittals.length}</div>
+              <div className="delta">across this project</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Sent This Month</div>
+              <div className="val">{sentThisMonthCount}</div>
+              <div className="delta">last 30 days</div>
+            </div>
+            <div className={`stat${privateCount > 0 ? " warn" : ""}`}>
+              <div className="lbl">Private</div>
+              <div className="val">{privateCount}</div>
+              <div className="delta">restricted visibility</div>
+            </div>
+            <div className={`stat${dueSoonCount > 0 ? " alert" : ""}`}>
+              <div className="lbl">Due Soon</div>
+              <div className="val">{dueSoonCount}</div>
+              <div className="delta">within 7 days</div>
+            </div>
+          </div>
+        )}
+
+        {/* Tabs + search */}
+        <div className="flex items-center gap-3 mb-4 flex-wrap">
+          <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden bg-white">
+            <button
+              onClick={() => setActiveTab("items")}
+              className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                activeTab === "items" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              Items
+            </button>
+            <button
+              onClick={() => setActiveTab("recycle_bin")}
+              className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                activeTab === "recycle_bin" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              Recycle Bin
+            </button>
+          </div>
+          <div className="relative w-64 ml-auto">
             <input
               type="text"
               value={search}
@@ -226,57 +277,64 @@ export default function TransmittalsClient({
 
         {/* Content */}
         {activeTab === "recycle_bin" ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <svg className="w-12 h-12 text-gray-200 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <div className="bg-white border border-dashed hairline rounded-xl flex flex-col items-center justify-center py-24 text-center">
+            <svg className="w-12 h-12 text-[color:var(--brand-200)] mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
-            <p className="text-sm font-semibold text-gray-900 mb-1">Recycle Bin is Empty</p>
+            <p className="font-display text-lg text-[color:var(--ink)] mb-1">Recycle Bin is Empty</p>
             <p className="text-sm text-gray-500 max-w-xs">Deleted transmittals will appear here.</p>
           </div>
         ) : loading ? (
-          <div className="space-y-2">
+          <div className="bg-white border hairline rounded-xl divide-y divide-[color:var(--surface-sunken)]">
             {[...Array(4)].map((_, i) => (
-              <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
+              <div key={i} className="h-12 bg-[color:var(--surface-sunken)] animate-pulse" />
             ))}
           </div>
         ) : filtered.length === 0 && !search ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
+          <div className="bg-white border border-dashed hairline rounded-xl flex flex-col items-center justify-center py-24 text-center">
             <div className="mb-6">
               <TransmittalIcon />
             </div>
-            <p className="text-sm font-semibold text-gray-900 mb-1">No Transmittals Found</p>
+            <p className="font-display text-lg text-[color:var(--ink)] mb-1">No Transmittals Found</p>
             <p className="text-sm text-gray-500 max-w-xs">
               Transmittals is where you keep documented records of any correspondence.
             </p>
           </div>
         ) : filtered.length === 0 && search ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <p className="text-sm text-gray-400">No transmittals match &ldquo;{search}&rdquo;</p>
+          <div className="bg-white border border-dashed hairline rounded-xl flex flex-col items-center justify-center py-24 text-center">
+            <p className="text-sm text-gray-500">No transmittals match &ldquo;{search}&rdquo;</p>
           </div>
         ) : (
-          <div className="bg-white border border-gray-100 rounded-xl overflow-x-auto">
+          <div className="bg-white border hairline rounded-xl overflow-x-auto">
             <table className="w-full min-w-[700px]">
               <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">#</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Subject</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">To</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Sent Via</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Date</th>
+                <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">#</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Subject</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">To</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Sent Via</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Date</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((t) => (
                   <tr
                     key={t.id}
-                    className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0 cursor-pointer"
+                    className="border-b border-gray-50 hover:bg-[color:var(--surface-sunken)] transition-colors last:border-b-0 cursor-pointer"
                     onClick={() => { window.location.href = `/projects/${projectId}/transmittals/${t.id}`; }}
                   >
-                    <td className="px-4 py-3 text-sm font-mono text-gray-700">{t.transmittal_number}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{t.subject ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <span className="idx-italic">{String(t.transmittal_number).padStart(3, "0")}</span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900 font-medium">
+                      <span className="inline-flex items-center gap-2">
+                        {t.subject ?? "—"}
+                        {t.private && <span className="pill pill-warn">Private</span>}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{getContactNameById(directory, t.to_id)}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{t.sent_via ?? "—"}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{formatDate(t.created_at)}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500 tabular-nums">{formatDate(t.created_at)}</td>
                   </tr>
                 ))}
               </tbody>

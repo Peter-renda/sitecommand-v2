@@ -494,6 +494,15 @@ export default function SpecificationsClient({ projectId, username }: { projectI
     { key: "recycle-bin", label: "Recycle Bin" },
   ];
 
+  const activeSpecCount = useMemo(
+    () => specifications.filter((spec) => !spec.deleted_at).length,
+    [specifications]
+  );
+  const recycledSpecCount = useMemo(
+    () => specifications.filter((spec) => Boolean(spec.deleted_at)).length,
+    [specifications]
+  );
+
   return (
     <div className="min-h-screen bg-[#FAFAF7] text-gray-900">
       <AppHeader username={username} />
@@ -502,14 +511,31 @@ export default function SpecificationsClient({ projectId, username }: { projectI
       <div className="px-6 pt-8 pb-4 bg-[#FAFAF7]">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Specifications</h1>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
+              Specifications
+            </h1>
+            {!loading && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">The project record set</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{activeSpecCount}</span> sections
+                <span className="sep">·</span>
+                <span className="num">{visibleDivisions.length}</span> divisions
+                {recycledSpecCount > 0 && (
+                  <>
+                    <span className="sep">·</span>
+                    <span className="num">{recycledSpecCount}</span> recycled
+                  </>
+                )}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-2 text-sm">
             <button
               type="button"
               onClick={() => setShowUploadModal(true)}
-              className="rounded-md bg-[color:var(--ink)] px-4 py-2 text-sm font-semibold text-white hover:bg-black transition-colors"
+              className="btn-primary"
             >
               Upload
             </button>
@@ -518,7 +544,7 @@ export default function SpecificationsClient({ projectId, username }: { projectI
               onClick={handleOpenSpecBook}
               disabled={isOpeningSpecBook}
               title={specBookFilename ?? undefined}
-              className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              className="btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isOpeningSpecBook ? "Opening…" : "Open Specification Book"}
             </button>
@@ -527,24 +553,24 @@ export default function SpecificationsClient({ projectId, username }: { projectI
               <button
                 type="button"
                 onClick={() => setShowExportMenu((s) => !s)}
-                className="flex items-center gap-2 rounded border border-gray-300 bg-white px-3 py-2 font-medium text-gray-700 hover:bg-gray-50"
+                className="btn-secondary flex items-center gap-1.5"
               >
                 Export
                 <ChevronDown className="h-4 w-4" />
               </button>
               {showExportMenu && (
-                <div className="absolute right-0 z-20 mt-1 w-40 overflow-hidden rounded border border-gray-200 bg-white shadow-lg">
+                <div className="absolute right-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border hairline bg-white shadow-lg">
                   <button
                     type="button"
                     onClick={() => handleExport("pdf")}
-                    className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                    className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-[color:var(--surface-sunken)]"
                   >
                     Export as PDF
                   </button>
                   <button
                     type="button"
                     onClick={() => handleExport("csv")}
-                    className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                    className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-[color:var(--surface-sunken)]"
                   >
                     Export as CSV
                   </button>
@@ -554,7 +580,32 @@ export default function SpecificationsClient({ projectId, username }: { projectI
           </div>
         </div>
 
-        <div className="px-4">
+        {!loading && (
+          <div className="stats mt-5">
+            <div className="stat">
+              <div className="lbl">Specification Sections</div>
+              <div className="val">{activeSpecCount}</div>
+              <div className="delta">Active across the set</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Divisions</div>
+              <div className="val">{visibleDivisions.length}</div>
+              <div className="delta">MasterFormat structure</div>
+            </div>
+            <div className={`stat${specBookFilename ? " calm" : " warn"}`}>
+              <div className="lbl">Spec Book</div>
+              <div className="val">{specBookFilename ? "On file" : "None"}</div>
+              <div className="delta">{specBookFilename ? "PDF available to open" : "Upload to enable"}</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Recycle Bin</div>
+              <div className="val">{recycledSpecCount}</div>
+              <div className="delta">Removed sections</div>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5">
           <div className="flex gap-6 text-sm">
             {topTabs.map((tab) => {
               const active = activeTab === tab.key;
@@ -563,7 +614,7 @@ export default function SpecificationsClient({ projectId, username }: { projectI
                   key={tab.key}
                   type="button"
                   onClick={() => setActiveTab(tab.key)}
-                  className={`border-b-2 pb-2 pt-1 ${active ? "border-gray-900 font-semibold text-gray-900" : "border-transparent text-gray-600 hover:text-gray-900"}`}
+                  className={`border-b-2 pb-2 pt-1 transition-colors ${active ? "border-[color:var(--ink)] font-semibold text-[color:var(--ink)]" : "border-transparent text-gray-500 hover:text-[color:var(--ink)]"}`}
                 >
                   {tab.label}
                 </button>
@@ -573,22 +624,22 @@ export default function SpecificationsClient({ projectId, username }: { projectI
         </div>
       </div>
 
-      <div className="border-y border-gray-200 bg-gray-100 px-6 py-4">
+      <div className="border-y hairline bg-[color:var(--surface-sunken)] px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="relative min-w-[280px] flex-1 max-w-xl">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search"
-              className="w-full rounded border border-gray-400 bg-white py-2 pl-9 pr-3 text-sm outline-none ring-0 placeholder:text-gray-500 focus:border-gray-600"
+              placeholder="Search sections by number or description"
+              className="w-full rounded-md border hairline bg-white py-2 pl-9 pr-3 text-sm outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-gray-900"
             />
           </div>
-          <div className="flex items-center gap-5 text-sm font-medium text-gray-800">
+          <div className="flex items-center gap-3 text-sm font-semibold">
             <button
               type="button"
               onClick={() => setShowCreateDivisionModal(true)}
-              className="flex items-center gap-1 hover:text-black"
+              className="btn-quiet flex items-center gap-1"
             >
               <Plus className="h-4 w-4" />
               Create Division
@@ -596,7 +647,7 @@ export default function SpecificationsClient({ projectId, username }: { projectI
             <button
               type="button"
               onClick={openCreateSpecificationModal}
-              className="flex items-center gap-1 hover:text-black"
+              className="btn-quiet flex items-center gap-1"
             >
               <Plus className="h-4 w-4" />
               Create Specification

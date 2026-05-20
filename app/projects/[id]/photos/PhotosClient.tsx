@@ -514,47 +514,44 @@ export default function PhotosClient({
           onDragLeave={handleDragLeave}
         >
           {/* Page heading */}
-          <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0">
-            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Photos</h1>
-            {photos.length > 0 && (
-              <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
-                <span className="sep">·</span>
-                <span className="num" style={{ color: "var(--brand-500)" }}>{photos.length}</span> photos
-                <span className="sep">·</span>
-                <span className="num">{albums.length}</span> albums
-              </p>
-            )}
+          <div className="bg-white border-b border-black/[0.06] px-6 py-5 shrink-0">
+            <h1 className="font-display text-[28px] leading-tight tracking-[-0.012em] text-[color:var(--ink)]">Photo journal</h1>
+            <p className="sub mt-1.5">
+              <em>Field record for this project</em>
+              <span className="sep">·</span>
+              <span className="num" style={{ color: "var(--brand-500)" }}>{filteredPhotos.length}</span>{" "}
+              {activeAlbumFilter || searchQuery ? "shown" : "photos"}
+              <span className="sep">·</span>
+              <span className="num">{photos.length}</span> total
+              <span className="sep">·</span>
+              <span className="num">{albums.length}</span> albums
+            </p>
           </div>
           {/* Toolbar */}
-          <div className="bg-white border-b border-gray-100 px-6 py-3 flex items-center justify-between shrink-0">
+          <div className="bg-white border-b border-black/[0.06] px-6 py-3 flex items-center justify-between gap-3 flex-wrap shrink-0">
             <div className="flex items-center gap-3">
               {/* Tabs */}
-              <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+              <div className="seg">
                 <button
                   onClick={() => { setActiveTab("photos"); setActiveAlbumFilter(null); }}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    activeTab === "photos" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                  }`}
+                  className={activeTab === "photos" ? "active" : ""}
                 >
                   All Photos
                 </button>
                 <button
                   onClick={() => setActiveTab("albums")}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    activeTab === "albums" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                  }`}
+                  className={activeTab === "albums" ? "active" : ""}
                 >
                   Albums
                 </button>
               </div>
               {/* Active album filter badge */}
               {activeAlbumFilter && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-full text-xs font-medium text-blue-700">
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-[color:var(--brand-700)] bg-[color:var(--brand-50)] border border-[color:var(--brand-200)]">
                   {albumMap[activeAlbumFilter]}
                   <button
                     onClick={() => setActiveAlbumFilter(null)}
-                    className="hover:text-blue-900"
+                    className="hover:text-[color:var(--brand-900)]"
                   >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -565,8 +562,8 @@ export default function PhotosClient({
             </div>
             <div className="flex items-center gap-3">
               {/* Search */}
-              <div className="relative">
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <div className="search">
+                <svg className="w-4 h-4 text-[color:var(--ink-soft)] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
                 </svg>
                 <input
@@ -574,13 +571,12 @@ export default function PhotosClient({
                   placeholder="Search photos…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-52"
                 />
               </div>
               {/* Upload button */}
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                className="btn-primary flex items-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -601,8 +597,8 @@ export default function PhotosClient({
           {/* Content area */}
           <div className="flex-1 overflow-y-auto p-6">
             {loading ? (
-              <div className="flex items-center justify-center h-48 text-gray-400 text-sm">
-                Loading…
+              <div className="flex items-center justify-center h-48 text-[color:var(--ink-soft)] text-sm">
+                <span className="serif-italic">Loading the journal…</span>
               </div>
             ) : selectedPhoto && activeTab !== "albums" ? (
               // ── Enlarged photo viewer ──
@@ -645,15 +641,16 @@ export default function PhotosClient({
             ) : activeTab === "albums" && !activeAlbumFilter ? (
               // ── Albums grid ──
               <div>
+                <h2 className="h3-warm mb-4">Albums</h2>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                   {albumsWithMeta.map((album) => (
                     <div
                       key={album.id}
-                      className="group relative bg-white border border-gray-100 rounded-xl overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                      className="group relative bg-white border border-black/[0.08] rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
                       onClick={() => { setActiveAlbumFilter(album.id); setActiveTab("photos"); }}
                     >
                       {/* Cover */}
-                      <div className="aspect-square bg-gray-100 relative overflow-hidden">
+                      <div className="aspect-square bg-[color:var(--surface-sunken)] relative overflow-hidden border-b border-black/[0.06]">
                         {album.cover ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -663,20 +660,20 @@ export default function PhotosClient({
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
-                            <svg className="w-10 h-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                            <svg className="w-10 h-10 text-black/15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
                           </div>
                         )}
                       </div>
                       <div className="px-3 py-2 flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-gray-800 truncate">{album.name}</p>
-                          <p className="text-xs text-gray-400">{album.count} photo{album.count !== 1 ? "s" : ""}</p>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[color:var(--ink)] truncate">{album.name}</p>
+                          <p className="mono-label mt-0.5">{album.count} photo{album.count !== 1 ? "s" : ""}</p>
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); deleteAlbum(album.id); }}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-[color:var(--ink-soft)] hover:text-red-600 hover:bg-red-50 transition-all"
                           title="Delete album"
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -689,7 +686,7 @@ export default function PhotosClient({
 
                   {/* New album card */}
                   {showNewAlbumInput ? (
-                    <div className="bg-white border border-dashed border-gray-300 rounded-xl p-4 flex flex-col gap-2">
+                    <div className="bg-white border border-dashed border-black/20 rounded-lg p-4 flex flex-col gap-2">
                       <input
                         type="text"
                         placeholder="Album name"
@@ -697,19 +694,19 @@ export default function PhotosClient({
                         onChange={(e) => setNewAlbumName(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") createAlbum(); if (e.key === "Escape") setShowNewAlbumInput(false); }}
                         autoFocus
-                        className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="text-sm border border-black/[0.12] rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
                       />
                       <div className="flex gap-2">
                         <button
                           onClick={createAlbum}
                           disabled={creatingAlbum}
-                          className="flex-1 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                          className="btn-primary flex-1 justify-center disabled:opacity-50"
                         >
                           Create
                         </button>
                         <button
                           onClick={() => { setShowNewAlbumInput(false); setNewAlbumName(""); }}
-                          className="flex-1 py-1.5 border border-gray-200 text-xs font-medium rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                          className="btn-secondary flex-1 justify-center"
                         >
                           Cancel
                         </button>
@@ -718,7 +715,7 @@ export default function PhotosClient({
                   ) : (
                     <button
                       onClick={() => setShowNewAlbumInput(true)}
-                      className="aspect-square bg-white border border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center gap-2 text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors"
+                      className="aspect-square bg-white border border-dashed border-black/20 rounded-lg flex flex-col items-center justify-center gap-2 text-[color:var(--ink-soft)] hover:text-[color:var(--ink)] hover:border-black/35 transition-colors"
                     >
                       <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
