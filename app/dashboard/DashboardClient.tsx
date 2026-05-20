@@ -118,6 +118,20 @@ type Project = {
   members?: Member[];
 };
 
+type AddressSuggestion = {
+  place_id: number;
+  display_name: string;
+  address?: {
+    house_number?: string;
+    road?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    state?: string;
+    postcode?: string;
+  };
+};
+
 const ADMIN_EMAIL = "ptrenda1@gmail.com";
 
 const STATUS_PILL: Record<string, string> = {
@@ -351,6 +365,10 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const [city, setCity] = useState("");
   const [stateVal, setStateVal] = useState("");
   const [zipCode, setZipCode] = useState("");
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
+  const [addressLookupLoading, setAddressLookupLoading] = useState(false);
+  const addressLookupAbortRef = useRef<AbortController | null>(null);
   const [county, setCounty] = useState("");
   const [description, setDescription] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
@@ -385,6 +403,59 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      addressLookupAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const query = address.trim();
+
+    if (query.length < 4) {
+      setAddressSuggestions([]);
+      setAddressLookupLoading(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      addressLookupAbortRef.current?.abort();
+      const controller = new AbortController();
+      addressLookupAbortRef.current = controller;
+
+      try {
+        setAddressLookupLoading(true);
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=us&limit=5&q=${encodeURIComponent(query)}`,
+          {
+            headers: { Accept: "application/json" },
+            signal: controller.signal,
+          }
+        );
+        if (!response.ok) throw new Error("Failed address lookup");
+        const data = (await response.json()) as AddressSuggestion[];
+        setAddressSuggestions(data);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setAddressSuggestions([]);
+      } finally {
+        if (!controller.signal.aborted) setAddressLookupLoading(false);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [address]);
+
+  const applyAddressSuggestion = (suggestion: AddressSuggestion) => {
+    const addr = suggestion.address ?? {};
+    const street = [addr.house_number, addr.road].filter(Boolean).join(" ").trim();
+    setAddress(street || suggestion.display_name.split(",")[0]?.trim() || "");
+    setCity(addr.city || addr.town || addr.village || "");
+    setStateVal(addr.state || "");
+    setZipCode((addr.postcode || "").slice(0, 5));
+    setShowAddressSuggestions(false);
+  };
   const [settingsError, setSettingsError] = useState("");
   const [settingsSuccess, setSettingsSuccess] = useState("");
   const updatesWhileAway =
@@ -1307,11 +1378,41 @@ export default function DashboardClient({ username, email, role, companyRole, us
 
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Address <span className="text-gray-400 font-normal">(optional)</span></label>
-                  <input
-                    type="text" value={address} onChange={(e) => setAddress(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                    placeholder="Street address"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text" value={address}
+                      onChange={(e) => {
+                        setAddress(e.target.value);
+                        setShowAddressSuggestions(true);
+                      }}
+                      onFocus={() => {
+                        if (addressSuggestions.length) setShowAddressSuggestions(true);
+                      }}
+                      onBlur={() => {
+                        window.setTimeout(() => setShowAddressSuggestions(false), 150);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                      placeholder="Street address"
+                      autoComplete="off"
+                    />
+                    {showAddressSuggestions && (addressLookupLoading || addressSuggestions.length > 0) && (
+                      <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                        {addressLookupLoading && (
+                          <p className="px-3 py-2 text-xs text-gray-500">Looking up address…</p>
+                        )}
+                        {!addressLookupLoading && addressSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion.place_id}
+                            type="button"
+                            onClick={() => applyAddressSuggestion(suggestion)}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          >
+                            {suggestion.display_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">

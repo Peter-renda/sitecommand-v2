@@ -3,6 +3,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
 import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 import { addUserToDirectory } from "@/lib/directory";
+import { sendProjectMemberInviteEmail } from "@/lib/email";
 
 export async function GET() {
   const session = await getSession();
@@ -94,7 +95,6 @@ export async function POST(req: NextRequest) {
     project_number, sector, value, status,
     start_date, actual_start_date, completion_date,
     projected_finish_date, warranty_start_date, warranty_end_date,
-    company_id: bodyCompanyId,
     memberIds,
   } = await req.json();
   if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -136,6 +136,39 @@ export async function POST(req: NextRequest) {
     );
     await Promise.all(
       memberIds.map((uid: string) => addUserToDirectory(supabase, project.id, uid))
+    );
+
+    const [{ data: invitedUsers }, { data: companyData }] = await Promise.all([
+      supabase
+        .from("users")
+        .select("email, first_name, last_name, username")
+        .in("id", memberIds),
+      supabase
+        .from("companies")
+        .select("name")
+        .eq("id", companyId)
+        .single(),
+    ]);
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const acceptInviteUrl = `${appUrl}/login`;
+    const supportUrl = `${appUrl}/support`;
+    const companyName = companyData?.name || "Your company";
+
+    await Promise.allSettled(
+      (invitedUsers ?? [])
+        .filter((u: { email?: string | null }) => !!u.email)
+        .map((u: { email: string; first_name?: string | null; last_name?: string | null; username?: string | null }) => {
+          const recipientName = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username || "there";
+          return sendProjectMemberInviteEmail(
+            u.email,
+            recipientName,
+            companyName,
+            project.name,
+            acceptInviteUrl,
+            supportUrl,
+          );
+        })
     );
   }
 
