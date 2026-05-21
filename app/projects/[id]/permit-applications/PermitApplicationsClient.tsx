@@ -1,133 +1,405 @@
 "use client";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ProjectNav from "@/components/ProjectNav";
 
-type PermitFields = {
-  projectName: string;
-  projectAddress: string;
-  applicantName: string;
-  applicantEmail: string;
-  scopeSummary: string;
+type PermitFieldType = "text" | "multiline" | "checkbox" | "date";
+
+type PermitField = {
+  key: string;
+  label: string;
+  value: string;
+  acroField: string | null;
+  type: PermitFieldType;
 };
 
-const EMPTY_FIELDS: PermitFields = {
-  projectName: "",
-  projectAddress: "",
-  applicantName: "",
-  applicantEmail: "",
-  scopeSummary: "",
+type CompletedPermit = {
+  id: string;
+  title: string;
+  filename: string;
+  sourceFilename: string | null;
+  url: string | null;
+  createdAt: string;
+  createdBy: string | null;
 };
 
-export default function PermitApplicationsClient({ projectId, role, username }: { projectId: string; role: string; username: string }) {
+type ToolLevel = "none" | "read_only" | "standard" | "admin";
+
+function isTruthy(value: string): boolean {
+  return ["yes", "y", "true", "1", "x", "checked", "on"].includes(value.trim().toLowerCase());
+}
+
+export default function PermitApplicationsClient({
+  projectId,
+  userId,
+  toolLevel,
+}: {
+  projectId: string;
+  userId: string;
+  toolLevel: ToolLevel;
+}) {
+  const canEdit = toolLevel === "standard" || toolLevel === "admin";
+  const isAdmin = toolLevel === "admin";
+
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [readyToReview, setReadyToReview] = useState(false);
-  const [fields, setFields] = useState<PermitFields>(EMPTY_FIELDS);
+  const [title, setTitle] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [fields, setFields] = useState<PermitField[] | null>(null);
+  const [hasAcroForm, setHasAcroForm] = useState(false);
+
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+
+  const [completed, setCompleted] = useState<CompletedPermit[]>([]);
+  const [loadingCompleted, setLoadingCompleted] = useState(true);
+
+  const loadCompleted = useCallback(async () => {
+    setLoadingCompleted(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/permit-applications`);
+      if (res.ok) {
+        const data = await res.json();
+        setCompleted(Array.isArray(data.permitApplications) ? data.permitApplications : []);
+      }
+    } finally {
+      setLoadingCompleted(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void loadCompleted();
+  }, [loadCompleted]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/";
   }
 
-  async function handleFileSelected(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-    if (!file) return;
-
-    setUploadedFile(file);
-    setLoading(true);
-
+  async function runScan(selected: File) {
+    setScanning(true);
+    setScanError(null);
+    setApproveError(null);
+    setFields(null);
     try {
-      const [projectRes, tasksRes, rfisRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}`),
-        fetch(`/api/projects/${projectId}/tasks`),
-        fetch(`/api/projects/${projectId}/rfis`),
-      ]);
-      const project = projectRes.ok ? await projectRes.json() : {};
-      const tasks = tasksRes.ok ? await tasksRes.json() : [];
-      const rfis = rfisRes.ok ? await rfisRes.json() : [];
-
-      setFields({
-        projectName: project?.name ?? "",
-        projectAddress: project?.address ?? "",
-        applicantName: username,
-        applicantEmail: project?.contactEmail ?? "",
-        scopeSummary: `Auto-generated from project records: ${Array.isArray(tasks) ? tasks.length : 0} tasks and ${Array.isArray(rfis) ? rfis.length : 0} RFIs reviewed.`,
+      const formData = new FormData();
+      formData.append("file", selected);
+      const res = await fetch(`/api/projects/${projectId}/permit-applications/scan`, {
+        method: "POST",
+        body: formData,
       });
-      setReadyToReview(true);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error ?? `Scan failed (${res.status})`);
+      }
+      const data = await res.json();
+      setFields(Array.isArray(data.fields) ? data.fields : []);
+      setHasAcroForm(Boolean(data.hasAcroForm));
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Failed to scan permit application");
+      setFields(null);
     } finally {
-      setLoading(false);
+      setScanning(false);
     }
   }
 
-  async function handleApproveAndGenerate() {
-    const { default: jsPDF } = await import("jspdf");
-    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });
-
-    doc.setFontSize(18);
-    doc.text("Permit Application", 56, 64);
-    doc.setFontSize(11);
-    doc.text(`Source template: ${uploadedFile?.name ?? "Uploaded PDF"}`, 56, 90);
-
-    const lines: [string, string][] = [
-      ["Project Name", fields.projectName],
-      ["Project Address", fields.projectAddress],
-      ["Applicant Name", fields.applicantName],
-      ["Applicant Email", fields.applicantEmail],
-      ["Scope Summary", fields.scopeSummary],
-    ];
-
-    let y = 130;
-    for (const [label, value] of lines) {
-      doc.setFont(undefined, "bold");
-      doc.text(`${label}:`, 56, y);
-      doc.setFont(undefined, "normal");
-      const wrapped = doc.splitTextToSize(value || "-", 460);
-      doc.text(wrapped, 180, y);
-      y += 24 + (wrapped.length - 1) * 12;
+  function handleFileSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    const selected = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    if (!selected) return;
+    if (selected.type && selected.type !== "application/pdf") {
+      setScanError("Please choose a PDF file.");
+      return;
     }
-
-    doc.save("permit-application-filled.pdf");
+    setFile(selected);
+    if (!title.trim()) {
+      setTitle(selected.name.replace(/\.pdf$/i, ""));
+    }
+    void runScan(selected);
   }
+
+  function updateField(index: number, value: string) {
+    setFields((prev) => (prev ? prev.map((f, i) => (i === index ? { ...f, value } : f)) : prev));
+  }
+
+  function resetForm() {
+    setFile(null);
+    setFields(null);
+    setTitle("");
+    setScanError(null);
+    setApproveError(null);
+    setHasAcroForm(false);
+  }
+
+  async function handleApprove() {
+    if (!file || !fields) return;
+    if (!title.trim()) {
+      setApproveError("Please enter a title before approving.");
+      return;
+    }
+    setApproving(true);
+    setApproveError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("title", title.trim());
+      formData.append("fields", JSON.stringify(fields));
+      const res = await fetch(`/api/projects/${projectId}/permit-applications/approve`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error ?? `Approval failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const filename =
+        decodeURIComponent(res.headers.get("X-Permit-Filename") ?? "") || "permit-application.pdf";
+
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(downloadUrl);
+
+      resetForm();
+      await loadCompleted();
+    } catch (err) {
+      setApproveError(err instanceof Error ? err.message : "Failed to approve permit application");
+    } finally {
+      setApproving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!window.confirm("Delete this completed permit application? The PDF will be removed.")) {
+      return;
+    }
+    const res = await fetch(`/api/projects/${projectId}/permit-applications/${id}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      setCompleted((prev) => prev.filter((p) => p.id !== id));
+    } else {
+      const data = await res.json().catch(() => ({}));
+      window.alert(data?.error ?? "Failed to delete permit application");
+    }
+  }
+
+  const filledCount = fields ? fields.filter((f) => f.value.trim()).length : 0;
 
   return (
     <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
       <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
         <div className="font-semibold text-sm">SiteCommand</div>
-        <button onClick={handleLogout} className="text-xs text-black/60 hover:text-black">Logout</button>
+        <button onClick={handleLogout} className="text-xs text-black/60 hover:text-black">
+          Logout
+        </button>
       </header>
-      <ProjectNav projectId={projectId} role={role} username={username} />
-      <main className="max-w-3xl w-full mx-auto px-6 py-8">
+      <ProjectNav projectId={projectId} />
+
+      <main className="max-w-4xl w-full mx-auto px-6 py-8">
         <h1 className="text-2xl font-semibold">Permit Applications</h1>
-        <p className="text-sm text-black/60 mt-2">Upload a permit application PDF. We will scan project data to prefill fields, let you edit, and then save a completed PDF after approval.</p>
+        <p className="text-sm text-black/60 mt-2">
+          Upload a permit application PDF and give it a title. Gemini scans the form for fields
+          that need filling and searches this project for the answers. Review and edit what it
+          found, then approve to download the completed PDF.
+        </p>
 
-        <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={handleFileSelected} />
-        <button onClick={() => fileInputRef.current?.click()} className="mt-6 rounded-md bg-black text-white px-4 py-2 text-sm font-medium hover:bg-black/90">Upload Permit Application</button>
+        {canEdit ? (
+          <section className="mt-6 rounded-lg border border-black/10 bg-white p-5 space-y-4">
+            <h2 className="text-lg font-medium">New Permit Application</h2>
 
-        {loading && <p className="mt-4 text-sm">Searching project records and preparing application fields…</p>}
+            <label className="block text-sm">
+              <span className="block text-black/70 mb-1">Title</span>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. City of Austin Building Permit"
+                className="w-full rounded-md border border-black/15 px-3 py-2"
+              />
+            </label>
 
-        {readyToReview && (
-          <div className="mt-8 rounded-lg border border-black/10 bg-white p-5 space-y-4">
-            <h2 className="text-lg font-medium">Review & Edit Fields</h2>
-            {([
-              ["projectName", "Project Name"],
-              ["projectAddress", "Project Address"],
-              ["applicantName", "Applicant Name"],
-              ["applicantEmail", "Applicant Email"],
-              ["scopeSummary", "Scope Summary"],
-            ] as const).map(([key, label]) => (
-              <label key={key} className="block text-sm">
-                <span className="block text-black/70 mb-1">{label}</span>
-                {key === "scopeSummary" ? (
-                  <textarea value={fields[key]} onChange={(e) => setFields((prev) => ({ ...prev, [key]: e.target.value }))} rows={4} className="w-full rounded-md border border-black/15 px-3 py-2" />
-                ) : (
-                  <input value={fields[key]} onChange={(e) => setFields((prev) => ({ ...prev, [key]: e.target.value }))} className="w-full rounded-md border border-black/15 px-3 py-2" />
-                )}
-              </label>
-            ))}
-            <button onClick={handleApproveAndGenerate} className="rounded-md bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-700">Approve & Save Permit Application</button>
-          </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              className="hidden"
+              onChange={handleFileSelected}
+            />
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={scanning}
+                className="rounded-md bg-black text-white px-4 py-2 text-sm font-medium hover:bg-black/90 disabled:opacity-50"
+              >
+                {file ? "Replace Permit Application PDF" : "Upload Permit Application"}
+              </button>
+              {file && (
+                <span className="text-sm text-black/60">
+                  {file.name}
+                  {!scanning && (
+                    <button
+                      onClick={resetForm}
+                      className="ml-2 text-black/40 hover:text-black underline"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </span>
+              )}
+            </div>
+
+            {scanning && (
+              <p className="text-sm text-black/70">
+                Scanning the permit with Gemini and searching project records…
+              </p>
+            )}
+            {scanError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                {scanError}
+              </p>
+            )}
+          </section>
+        ) : (
+          <p className="mt-6 text-sm text-black/60 rounded-lg border border-black/10 bg-white p-4">
+            You have read-only access to Permit Applications. You can view completed permit
+            applications below.
+          </p>
         )}
+
+        {fields && (
+          <section className="mt-6 rounded-lg border border-black/10 bg-white p-5 space-y-4">
+            <div>
+              <h2 className="text-lg font-medium">Review &amp; Edit Fields</h2>
+              <p className="text-sm text-black/60 mt-1">
+                Gemini filled {filledCount} of {fields.length} field
+                {fields.length === 1 ? "" : "s"}. Edit anything that is wrong or missing, then
+                approve.
+              </p>
+              {!hasAcroForm && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mt-2">
+                  This PDF has no interactive form fields, so the answers will be added to the
+                  completed PDF as a summary page.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              {fields.map((field, index) => (
+                <div key={field.key} className="block text-sm">
+                  <span className="block text-black/70 mb-1">{field.label}</span>
+                  {field.type === "checkbox" ? (
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isTruthy(field.value)}
+                        onChange={(e) => updateField(index, e.target.checked ? "Yes" : "")}
+                        className="h-4 w-4"
+                      />
+                      <span className="text-black/70">
+                        {isTruthy(field.value) ? "Yes" : "No"}
+                      </span>
+                    </label>
+                  ) : field.type === "multiline" ? (
+                    <textarea
+                      value={field.value}
+                      onChange={(e) => updateField(index, e.target.value)}
+                      rows={3}
+                      className="w-full rounded-md border border-black/15 px-3 py-2"
+                    />
+                  ) : (
+                    <input
+                      value={field.value}
+                      onChange={(e) => updateField(index, e.target.value)}
+                      placeholder={field.type === "date" ? "MM/DD/YYYY" : ""}
+                      className="w-full rounded-md border border-black/15 px-3 py-2"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {approveError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                {approveError}
+              </p>
+            )}
+
+            <button
+              onClick={handleApprove}
+              disabled={approving}
+              className="rounded-md bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {approving ? "Generating PDF…" : "Approve & Download Permit Application"}
+            </button>
+          </section>
+        )}
+
+        <section className="mt-10">
+          <h2 className="text-lg font-medium">Completed Permit Applications</h2>
+          {loadingCompleted ? (
+            <p className="mt-3 text-sm text-black/50">Loading…</p>
+          ) : completed.length === 0 ? (
+            <p className="mt-3 text-sm text-black/50">
+              No completed permit applications yet.
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {completed.map((permit) => (
+                <li
+                  key={permit.id}
+                  className="flex items-center justify-between gap-4 rounded-lg border border-black/10 bg-white px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    {permit.url ? (
+                      <a
+                        href={permit.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-blue-600 hover:underline break-words"
+                      >
+                        {permit.title}
+                      </a>
+                    ) : (
+                      <span className="font-medium text-black/70 break-words">{permit.title}</span>
+                    )}
+                    <div className="text-xs text-black/45 mt-0.5">
+                      {permit.sourceFilename ? `From ${permit.sourceFilename} · ` : ""}
+                      {new Date(permit.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    {permit.url ? (
+                      <a
+                        href={permit.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sm text-black/70 hover:text-black"
+                      >
+                        Open PDF
+                      </a>
+                    ) : (
+                      <span className="text-sm text-black/30">Link unavailable</span>
+                    )}
+                    {(isAdmin || permit.createdBy === userId) && (
+                      <button
+                        onClick={() => handleDelete(permit.id)}
+                        className="text-sm text-red-500 hover:text-red-700"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </main>
     </div>
   );

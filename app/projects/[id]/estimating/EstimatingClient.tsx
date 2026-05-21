@@ -1060,7 +1060,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
               )}
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }

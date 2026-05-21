@@ -1373,3 +1373,37 @@ Recipients are also notified by email at assignment time.
 
 ### Email
 - `sendInvoiceAssignmentEmail({ to, projectName, invoiceFilename, notes, projectUrl, assignedBy })` in `lib/email.ts`. Uses Resend; no-ops without `RESEND_API_KEY`. The `to` is the full recipient list (CC is not used here since everyone in `to` is an intended recipient, not a copy).
+
+## Permit Applications – AI-Assisted Form Filling
+
+### Overview
+A project-level tool for completing permit application PDFs. The user uploads a blank permit form and gives it a title; Gemini scans the form for every fillable field and proposes a value for each by searching project data (address, city, state, contacts, phone numbers, etc.); the user reviews and edits the proposed values; and on approval the filled PDF is downloaded and saved under a **Completed Permit Applications** section.
+
+### Tool-Level Permissions
+- **Read Only** – can view the Completed Permit Applications list.
+- **Standard / Admin** – can upload, scan, review, and approve permit applications.
+- Delete is allowed for a Permit Applications **Admin** or the user who created the record.
+- The tool slug is `permit-applications`; the page redirects to the project home when the resolved tool level is `none`.
+
+### Workflow
+1. Open the project's **Permit Applications** tool.
+2. Enter a **Title** and click **Upload Permit Application** to choose a PDF (the title defaults to the filename when left blank).
+3. Gemini scans the form and the field list appears under **Review & Edit Fields**, prefilled from project data. Every value is editable.
+4. Click **Approve & Download Permit Application** — the completed PDF downloads and is added to **Completed Permit Applications** (title is a hyperlink that opens the PDF in a new tab).
+
+### Filling Behavior
+- When the PDF has interactive **AcroForm** fields, Gemini maps each detected field to a form field name; values are written into the form and the form is flattened.
+- When the PDF has **no** AcroForm fields (a flat/scanned form), the reviewed answers are appended to the completed PDF as a formatted summary page. Any field that cannot be mapped to a form field also goes on that page.
+
+### Implementation Notes (SiteCommand)
+- Processor: `lib/permit-application-processor.ts` — `extractAcroFields()` (pdf-lib AcroForm inspection), `scanPermitApplication()` (Gemini `gemini-2.5-flash` field detection + value proposal), `fillPermitApplication()` (pdf-lib fill + flatten, summary-page fallback), `normalizePermitFields()`.
+- Requires `GEMINI_API_KEY` (same key used by Transaction Orders and other AI features).
+- API routes under `app/api/projects/[id]/permit-applications/`:
+  - `GET /` — list completed permit applications with fresh 1-hour signed URLs (read_only+).
+  - `POST /scan` — multipart `file`; reads AcroForm fields, builds project context, runs Gemini; returns `{ fields, hasAcroForm }` (standard+). Nothing is persisted.
+  - `POST /approve` — multipart `file` + `title` + `fields`; fills the PDF, uploads it, inserts the record, and streams the filled PDF back for download (standard+).
+  - `DELETE /[permitId]` — admin or record creator; removes the row and the stored PDF.
+- Project context fed to Gemini (`buildProjectContext` in `scan/route.ts`): project fields (name/address/city/state/zip/county/number/sector/value/dates), company name, directory contacts (name/email/phone/company/job title/address/license), and contacts tagged with the **Project Manager** role.
+- Storage: completed PDFs live in the existing `project-drawings` bucket under `{projectId}/_permit-completed/...`.
+- Database: `project_permit_applications` (migration `140_permit_applications.sql`) — `title`, `source_filename`, `final_filename`, `final_storage_path`, `fields` JSONB, `created_by`, `created_at`.
+- UI: `app/projects/[id]/permit-applications/PermitApplicationsClient.tsx`.
