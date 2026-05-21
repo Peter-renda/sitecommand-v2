@@ -4,6 +4,7 @@ export default function Admin() {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<"users" | "settings">("users");
   useEffect(() => {
     fetch("/api/admin/users")
       .then((res) => {
@@ -23,8 +24,25 @@ export default function Admin() {
         <button onClick={() => navigate("/dashboard")} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Back to Dashboard</button>
       </header>
       <main className="max-w-6xl mx-auto px-6 py-10">
-        <h1 className="text-2xl font-bold text-gray-900 mb-8">System Users</h1>
-        {loading ? (
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Admin</h1>
+          <div className="flex items-center gap-2 border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab("users")}
+              className={`px-3 py-2 text-sm font-semibold border-b-2 transition-colors ${activeTab === "users" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-800"}`}
+            >
+              System Users
+            </button>
+            <button
+              onClick={() => setActiveTab("settings")}
+              className={`px-3 py-2 text-sm font-semibold border-b-2 transition-colors ${activeTab === "settings" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-800"}`}
+            >
+              Settings
+            </button>
+          </div>
+        </div>
+        {activeTab === "users" ? (
+        loading ? (
           <p className="text-sm text-gray-400">Loading...</p>
         ) : (
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
@@ -48,6 +66,10 @@ export default function Admin() {
                 ))}
               </tbody>
             </table>
+          </div>
+        ) : (
+          <div className="bg-white border border-gray-100 rounded-xl p-6 text-sm text-gray-500">
+            Settings content coming soon.
           </div>
         )}
       </main>
