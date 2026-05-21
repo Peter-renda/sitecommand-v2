@@ -93,7 +93,7 @@ export default function Drawings() {
     setCollapsedGroups(next);
   };
   return (
-    <div className="min-h-screen bg-[#f8f9fa]">
+    <div className="min-h-screen bg-[#f8f9fa] overflow-y-auto">
       <ProjectNav projectId={id!} />
       
       {/* Header */}
@@ -110,6 +110,20 @@ export default function Drawings() {
               <button className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded font-semibold text-sm transition-colors flex items-center gap-1">
                 Reports <ChevronDown className="w-4 h-4" />
               </button>
+              <div className="absolute right-0 z-20 mt-1 hidden min-w-[220px] rounded border border-gray-200 bg-white py-1 shadow-lg group-hover:block">
+                {[
+                  "All Sets and Revisions",
+                  "Sketches",
+                  "Measurements"
+                ].map((option) => (
+                  <button
+                    key={option}
+                    className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
             </div>
             <button className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded font-semibold text-sm transition-colors flex items-center gap-2">
               Create Locations
