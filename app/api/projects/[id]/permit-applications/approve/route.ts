@@ -5,7 +5,7 @@ import { requireToolLevel } from "@/lib/tool-permissions";
 import { fillPermitApplication, normalizePermitFields } from "@/lib/permit-application-processor";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 // Accepts the original permit PDF plus the user-reviewed field values
 // (multipart fields "file", "title", "fields"), fills the PDF, stores the

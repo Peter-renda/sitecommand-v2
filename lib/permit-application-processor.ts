@@ -23,12 +23,17 @@ import {
 
 export type PermitFieldType = "text" | "multiline" | "checkbox" | "date";
 
+export type BoundingBox = { x1: number; y1: number; x2: number; y2: number };
+
 export type PermitField = {
   key: string;
   label: string;
   value: string;
   acroField: string | null;
   type: PermitFieldType;
+  // Flat-form overlay coordinates (top-left origin, normalized 0–1).
+  pageIndex?: number;
+  boundingBox?: BoundingBox;
 };
 
 export type AcroFieldInfo = { name: string; type: string };
@@ -62,6 +67,48 @@ Rules:
 - Include every fillable field, even ones you cannot answer (use value "").
 - When ACROFORM FIELDS is non-empty, map each form field to exactly one acroField name by reading the form layout to understand what each technical name represents. Never reuse an acroField for two fields. If you genuinely cannot map one, use null.
 - When ACROFORM FIELDS is empty, set acroField to null for every field.
+- Never invent data. Only use values supported by PROJECT DATA.
+- Format dates as MM/DD/YYYY.
+- For checkboxes, "value" is "Yes" when the box should be checked, otherwise "".
+- Use "multiline" for long free-text fields (scope, description), "text" for short ones.
+- Keep the fields in the order they appear on the form. Return at most 120 fields.`;
+
+// Used for flat/scanned PDFs — same rules plus bounding-box coordinates so
+// values can be drawn directly on the original pages instead of a summary page.
+const SCAN_SYSTEM_INSTRUCTION_FLAT = `You are an expert assistant that fills out construction permit application forms.
+
+You receive:
+1. A permit application PDF that has NO interactive form fields (a flat or scanned form).
+2. A JSON object of known project data ("PROJECT DATA").
+
+Your job:
+- Identify EVERY field on the form that an applicant is expected to fill in.
+- For each field, supply the best value you can justify from PROJECT DATA. If the data does not clearly support an answer, leave the value as an empty string.
+- Also record exactly where on the page the answer should be written.
+
+Return ONLY a JSON array — no markdown fences, no commentary. Each element must be:
+{
+  "key": string,            // short snake_case identifier, e.g. "applicant_name"
+  "label": string,          // human-readable label exactly as a person reads it on the form
+  "value": string,          // best value from PROJECT DATA, or "" if unknown
+  "acroField": null,        // always null for flat forms
+  "type": "text" | "multiline" | "checkbox" | "date",
+  "pageIndex": integer,     // 0-based index of the page this field appears on
+  "boundingBox": {
+    "x1": float,            // left edge of the ANSWER area — NOT the label (0.0–1.0)
+    "y1": float,            // top edge of the answer area (0.0–1.0)
+    "x2": float,            // right edge of the answer area (0.0–1.0)
+    "y2": float             // bottom edge of the answer area (0.0–1.0)
+  }
+}
+Coordinates are normalized to the page size and measured from the TOP-LEFT corner
+(x increases rightward, y increases downward).
+- For blank-line fields: cover just the blank line where text is written.
+- For checkbox/circle fields: cover just the checkbox square or circle itself.
+- For multi-line areas: cover the full writing region.
+
+Rules:
+- Include every fillable field, even ones you cannot answer (use value "").
 - Never invent data. Only use values supported by PROJECT DATA.
 - Format dates as MM/DD/YYYY.
 - For checkboxes, "value" is "Yes" when the box should be checked, otherwise "".
@@ -111,7 +158,29 @@ export function normalizePermitFields(input: unknown): PermitField[] {
       typeof raw.acroField === "string" && raw.acroField.trim() ? raw.acroField : null;
     const value = String(raw.value ?? "").slice(0, 5000);
 
-    out.push({ key, label, value, acroField, type });
+    const pageIndex =
+      typeof raw.pageIndex === "number" && raw.pageIndex >= 0
+        ? Math.floor(raw.pageIndex)
+        : undefined;
+
+    const rawBb = raw.boundingBox as Record<string, unknown> | null | undefined;
+    const clamp = (n: unknown) =>
+      typeof n === "number" ? Math.max(0, Math.min(1, n)) : undefined;
+    const x1 = clamp(rawBb?.x1);
+    const y1 = clamp(rawBb?.y1);
+    const x2 = clamp(rawBb?.x2);
+    const y2 = clamp(rawBb?.y2);
+    const boundingBox: BoundingBox | undefined =
+      x1 !== undefined &&
+      y1 !== undefined &&
+      x2 !== undefined &&
+      y2 !== undefined &&
+      x2 > x1 &&
+      y2 > y1
+        ? { x1, y1, x2, y2 }
+        : undefined;
+
+    out.push({ key, label, value, acroField, type, pageIndex, boundingBox });
   }
 
   return out;
@@ -156,28 +225,18 @@ export async function scanPermitApplication(
 
   const ai = new GoogleGenAI({ apiKey });
 
-  const uploaded = await ai.files.upload({
-    file: new Blob([new Uint8Array(sourceBuffer)], { type: "application/pdf" }),
-    config: { mimeType: "application/pdf", displayName: filename },
-  });
-  if (!uploaded.uri || !uploaded.mimeType) {
-    throw new Error("Gemini upload returned no file reference.");
-  }
+  // Pass the PDF as inline base64 data to avoid the Files API upload round-trip.
+  const pdfBase64 = sourceBuffer.toString("base64");
 
-  const acroList =
-    acroFields.length > 0
-      ? acroFields.map((a) => `- ${a.name} (${a.type})`).join("\n")
-      : "(none — this PDF has no interactive form fields)";
+  const isFlat = acroFields.length === 0;
 
-  const promptText = `PROJECT DATA:
-\`\`\`json
-${JSON.stringify(context, null, 2)}
-\`\`\`
+  const acroList = isFlat
+    ? "(none — this PDF has no interactive form fields)"
+    : acroFields.map((a) => `- ${a.name} (${a.type})`).join("\n");
 
-ACROFORM FIELDS:
-${acroList}
-
-Scan this permit application PDF and return the JSON array of fields.`;
+  const promptText = isFlat
+    ? `PROJECT DATA:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\nScan this flat permit application PDF and return the JSON array of fields with bounding-box coordinates.`
+    : `PROJECT DATA:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\nACROFORM FIELDS:\n${acroList}\n\nScan this permit application PDF and return the JSON array of fields.`;
 
   const result = await ai.models.generateContent({
     model: "gemini-2.5-flash",
@@ -186,11 +245,13 @@ Scan this permit application PDF and return the JSON array of fields.`;
         role: "user",
         parts: [
           { text: promptText },
-          { fileData: { mimeType: uploaded.mimeType, fileUri: uploaded.uri } },
+          { inlineData: { mimeType: "application/pdf", data: pdfBase64 } },
         ],
       },
     ],
-    config: { systemInstruction: SCAN_SYSTEM_INSTRUCTION },
+    config: {
+      systemInstruction: isFlat ? SCAN_SYSTEM_INSTRUCTION_FLAT : SCAN_SYSTEM_INSTRUCTION,
+    },
   });
 
   const raw = (result.text ?? "")
@@ -395,6 +456,8 @@ export async function fillPermitApplication(
   title: string,
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.load(sourceBuffer, { ignoreEncryption: true });
+  // Capture original pages before appendSummaryPages adds new ones.
+  const originalPages = pdfDoc.getPages();
 
   let form: PDFForm | null = null;
   const acroNames = new Set<string>();
@@ -406,6 +469,8 @@ export async function fillPermitApplication(
   }
 
   const applied = new Set<string>();
+
+  // Phase 1 — fill interactive AcroForm fields and flatten.
   if (form && acroNames.size > 0) {
     for (const field of fields) {
       if (!field.acroField || !field.value.trim() || !acroNames.has(field.acroField)) {
@@ -415,8 +480,6 @@ export async function fillPermitApplication(
         applied.add(field.key);
       }
     }
-    // Flatten so values bake in. Some templates can't be flattened cleanly;
-    // fall back to baking appearance streams only.
     try {
       form.flatten();
     } catch {
@@ -428,9 +491,86 @@ export async function fillPermitApplication(
     }
   }
 
-  // Anything with a value that did not land in an AcroForm field (including
-  // every field when the PDF has no form at all) is written to a summary page.
-  const leftovers = fields.filter((f) => f.value.trim() && !applied.has(f.key));
+  // Phase 2 — draw text/marks directly on original pages using bounding-box
+  // coordinates returned by Gemini for flat (non-AcroForm) PDFs.
+  const overlaid = new Set<string>();
+  const withCoords = fields.filter(
+    (f) =>
+      !applied.has(f.key) &&
+      f.value.trim() &&
+      f.boundingBox !== undefined &&
+      f.pageIndex !== undefined,
+  );
+
+  if (withCoords.length > 0) {
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+    for (const field of withCoords) {
+      const page = originalPages[field.pageIndex!];
+      if (!page) continue;
+
+      const { width: pageWidth, height: pageHeight } = page.getSize();
+      const { x1, y1, x2, y2 } = field.boundingBox!;
+
+      const boxWidthPts = (x2 - x1) * pageWidth;
+      const boxHeightPts = (y2 - y1) * pageHeight;
+      // Gemini coords: top-left origin, y increases down.
+      // pdf-lib coords: bottom-left origin, y increases up.
+      // y2 is the bottom of the box in image space → PDF bottom = pageHeight - y2*pageHeight.
+      const pdfBoxBottom = pageHeight - y2 * pageHeight;
+      const pdfBoxLeft = x1 * pageWidth;
+
+      if (field.type === "checkbox") {
+        if (isTruthy(field.value)) {
+          const fontSize = Math.min(12, Math.max(6, boxHeightPts * 0.85));
+          // Center the X inside the checkbox square.
+          const cx = pdfBoxLeft + boxWidthPts / 2 - (fontSize * 0.3);
+          const cy = pdfBoxBottom + boxHeightPts / 2 - (fontSize * 0.35);
+          page.drawText("X", { x: cx, y: cy, size: fontSize, font, color: rgb(0, 0, 0) });
+        }
+      } else {
+        const sanitized = sanitizeForPdf(field.value).replace(/\r/g, "").trim();
+        if (!sanitized) continue;
+
+        const fontSize = Math.min(11, Math.max(6, boxHeightPts * 0.65));
+        const drawX = pdfBoxLeft + 2;
+        // Position text baseline slightly above the bottom of the box.
+        const drawY = pdfBoxBottom + boxHeightPts * 0.18;
+        const maxW = boxWidthPts - 4;
+
+        if (field.type === "multiline") {
+          // Wrap text within the box; stop adding lines when they'd overflow.
+          const lineH = fontSize * 1.3;
+          const lines = wrapText(sanitized, font, fontSize, maxW);
+          let lineY = pdfBoxBottom + boxHeightPts - fontSize - 2;
+          for (const line of lines) {
+            if (lineY < pdfBoxBottom) break;
+            if (line.trim()) {
+              page.drawText(line, { x: drawX, y: lineY, size: fontSize, font, color: rgb(0, 0, 0) });
+            }
+            lineY -= lineH;
+          }
+        } else {
+          // Single-line: truncate text to fit the box width.
+          let text = sanitized.split("\n")[0].trim();
+          while (text.length > 1 && font.widthOfTextAtSize(text, fontSize) > maxW) {
+            text = text.slice(0, -1);
+          }
+          if (text.trim()) {
+            page.drawText(text, { x: drawX, y: drawY, size: fontSize, font, color: rgb(0, 0, 0) });
+          }
+        }
+      }
+
+      overlaid.add(field.key);
+    }
+  }
+
+  // Phase 3 — anything not yet handled (no acroField, no coordinates, or
+  // coordinates that pointed to a non-existent page) goes on a summary page.
+  const leftovers = fields.filter(
+    (f) => f.value.trim() && !applied.has(f.key) && !overlaid.has(f.key),
+  );
   if (leftovers.length > 0) {
     await appendSummaryPages(pdfDoc, title, leftovers);
   }
