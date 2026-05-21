@@ -7,7 +7,7 @@
 // into them and the form is flattened; otherwise the reviewed answers
 // are appended as a formatted summary page.
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import {
   PDFDocument,
   PDFTextField,
@@ -84,38 +84,93 @@ You receive:
 Your job:
 - Identify EVERY field on the form that an applicant is expected to fill in.
 - For each field, supply the best value you can justify from PROJECT DATA. If the data does not clearly support an answer, leave the value as an empty string.
-- Also record exactly where on the page the answer should be written.
+- Locate the EXACT spot on the page where the answer must be written.
 
-Return ONLY a JSON array — no markdown fences, no commentary. Each element must be:
+Return a JSON array of field objects. Each element:
 {
-  "key": string,            // short snake_case identifier, e.g. "applicant_name"
-  "label": string,          // human-readable label exactly as a person reads it on the form
-  "value": string,          // best value from PROJECT DATA, or "" if unknown
-  "acroField": null,        // always null for flat forms
+  "key": short snake_case identifier, e.g. "applicant_name",
+  "label": the field's printed label, exactly as a person reads it,
+  "value": best value from PROJECT DATA, or "" if unknown,
   "type": "text" | "multiline" | "checkbox" | "date",
-  "pageIndex": integer,     // 0-based index of the page this field appears on
-  "boundingBox": {
-    "x1": float,            // left edge of the ANSWER area — NOT the label (0.0–1.0)
-    "y1": float,            // top edge of the answer area (0.0–1.0)
-    "x2": float,            // right edge of the answer area (0.0–1.0)
-    "y2": float             // bottom edge of the answer area (0.0–1.0)
-  }
+  "pageIndex": 0-based index of the page the field is on,
+  "box": [ymin, xmin, ymax, xmax]
 }
-Coordinates are normalized to the page size and measured from the TOP-LEFT corner
-(x increases rightward, y increases downward).
-- For blank-line fields: cover just the blank line where text is written.
-- For checkbox/circle fields: cover just the checkbox square or circle itself.
-- For multi-line areas: cover the full writing region.
+
+The "box" gives the location of the EMPTY SPACE where the answer goes — the
+blank line, the write-in box, or the checkbox square — NOT the printed label.
+Each number is an integer from 0 to 1000, normalized to the page that
+"pageIndex" names:
+- ymin = top edge, ymax = bottom edge (0 = top of page, 1000 = bottom).
+- xmin = left edge, xmax = right edge (0 = left of page, 1000 = right).
+Always return all four numbers in the order [ymin, xmin, ymax, xmax].
+
+Guidance for "box":
+- Blank underline ("Name: ______"): the box is the underline region itself,
+  starting just to the right of the label.
+- Write-in rectangle: the box is the full rectangle.
+- Checkbox / circle: the box is the small square or circle that gets ticked.
+- Multi-line area (scope, description): the box is the whole writing region.
 
 Rules:
 - Include every fillable field, even ones you cannot answer (use value "").
 - Never invent data. Only use values supported by PROJECT DATA.
 - Format dates as MM/DD/YYYY.
-- For checkboxes, "value" is "Yes" when the box should be checked, otherwise "".
+- For checkboxes, "value" is "Yes" when the box should be ticked, otherwise "".
 - Use "multiline" for long free-text fields (scope, description), "text" for short ones.
 - Keep the fields in the order they appear on the form. Return at most 120 fields.`;
 
+// Structured-output schema for flat PDFs — forces Gemini to return a "box"
+// for every field so values can be overlaid instead of dumped to a summary page.
+const FLAT_RESPONSE_SCHEMA = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      key: { type: Type.STRING },
+      label: { type: Type.STRING },
+      value: { type: Type.STRING },
+      type: { type: Type.STRING, enum: ["text", "multiline", "checkbox", "date"] },
+      pageIndex: { type: Type.INTEGER },
+      box: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+    },
+    required: ["key", "label", "value", "type", "pageIndex", "box"],
+    propertyOrdering: ["key", "label", "value", "type", "pageIndex", "box"],
+  },
+};
+
 // ── Field normalization ────────────────────────────────────────────────────
+
+// Accepts Gemini's native box array [ymin, xmin, ymax, xmax] (0–1000 scale,
+// the format the vision model is trained on) or a {x1,y1,x2,y2} object, and
+// returns a normalized 0–1 top-left-origin BoundingBox.
+function parseBoundingBox(raw: unknown): BoundingBox | undefined {
+  let ymin: number, xmin: number, ymax: number, xmax: number;
+
+  if (Array.isArray(raw) && raw.length >= 4) {
+    const n = raw.slice(0, 4).map(Number);
+    if (!n.every((v) => Number.isFinite(v))) return undefined;
+    [ymin, xmin, ymax, xmax] = n;
+  } else if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    const vals = [o.y1, o.x1, o.y2, o.x2].map(Number);
+    if (!vals.every((v) => Number.isFinite(v))) return undefined;
+    [ymin, xmin, ymax, xmax] = vals;
+  } else {
+    return undefined;
+  }
+
+  // Gemini returns 0–1000; tolerate a 0–1 response too.
+  const maxVal = Math.max(Math.abs(ymin), Math.abs(xmin), Math.abs(ymax), Math.abs(xmax));
+  const divisor = maxVal > 1 ? 1000 : 1;
+  const clamp = (v: number) => Math.max(0, Math.min(1, v / divisor));
+
+  const x1 = clamp(Math.min(xmin, xmax));
+  const y1 = clamp(Math.min(ymin, ymax));
+  const x2 = clamp(Math.max(xmin, xmax));
+  const y2 = clamp(Math.max(ymin, ymax));
+
+  return x2 > x1 && y2 > y1 ? { x1, y1, x2, y2 } : undefined;
+}
 
 export function normalizePermitFields(input: unknown): PermitField[] {
   let arr: unknown = input;
@@ -163,22 +218,7 @@ export function normalizePermitFields(input: unknown): PermitField[] {
         ? Math.floor(raw.pageIndex)
         : undefined;
 
-    const rawBb = raw.boundingBox as Record<string, unknown> | null | undefined;
-    const clamp = (n: unknown) =>
-      typeof n === "number" ? Math.max(0, Math.min(1, n)) : undefined;
-    const x1 = clamp(rawBb?.x1);
-    const y1 = clamp(rawBb?.y1);
-    const x2 = clamp(rawBb?.x2);
-    const y2 = clamp(rawBb?.y2);
-    const boundingBox: BoundingBox | undefined =
-      x1 !== undefined &&
-      y1 !== undefined &&
-      x2 !== undefined &&
-      y2 !== undefined &&
-      x2 > x1 &&
-      y2 > y1
-        ? { x1, y1, x2, y2 }
-        : undefined;
+    const boundingBox = parseBoundingBox(raw.box ?? raw.boundingBox);
 
     out.push({ key, label, value, acroField, type, pageIndex, boundingBox });
   }
@@ -235,8 +275,16 @@ export async function scanPermitApplication(
     : acroFields.map((a) => `- ${a.name} (${a.type})`).join("\n");
 
   const promptText = isFlat
-    ? `PROJECT DATA:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\nScan this flat permit application PDF and return the JSON array of fields with bounding-box coordinates.`
+    ? `PROJECT DATA:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\nScan this flat permit application PDF. Return the JSON array of fields. For EVERY field include "pageIndex" and a "box" of [ymin, xmin, ymax, xmax] (integers 0-1000) locating the blank space where the answer is written.`
     : `PROJECT DATA:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\nACROFORM FIELDS:\n${acroList}\n\nScan this permit application PDF and return the JSON array of fields.`;
+
+  const config: Record<string, unknown> = {
+    systemInstruction: isFlat ? SCAN_SYSTEM_INSTRUCTION_FLAT : SCAN_SYSTEM_INSTRUCTION,
+    responseMimeType: "application/json",
+  };
+  if (isFlat) {
+    config.responseSchema = FLAT_RESPONSE_SCHEMA;
+  }
 
   const result = await ai.models.generateContent({
     model: "gemini-2.5-flash",
@@ -249,9 +297,7 @@ export async function scanPermitApplication(
         ],
       },
     ],
-    config: {
-      systemInstruction: isFlat ? SCAN_SYSTEM_INSTRUCTION_FLAT : SCAN_SYSTEM_INSTRUCTION,
-    },
+    config,
   });
 
   const raw = (result.text ?? "")
@@ -522,7 +568,7 @@ export async function fillPermitApplication(
 
       if (field.type === "checkbox") {
         if (isTruthy(field.value)) {
-          const fontSize = Math.min(12, Math.max(6, boxHeightPts * 0.85));
+          const fontSize = Math.min(13, Math.max(8, boxHeightPts * 0.9));
           // Center the X inside the checkbox square.
           const cx = pdfBoxLeft + boxWidthPts / 2 - (fontSize * 0.3);
           const cy = pdfBoxBottom + boxHeightPts / 2 - (fontSize * 0.35);
@@ -532,7 +578,12 @@ export async function fillPermitApplication(
         const sanitized = sanitizeForPdf(field.value).replace(/\r/g, "").trim();
         if (!sanitized) continue;
 
-        const fontSize = Math.min(11, Math.max(6, boxHeightPts * 0.65));
+        // Keep overlaid text at a legible size — a blank underline often has a
+        // very short box, so don't let height alone shrink the text too far.
+        const fontSize =
+          field.type === "multiline"
+            ? Math.min(10, Math.max(8, boxHeightPts * 0.3))
+            : Math.min(10.5, Math.max(8, boxHeightPts * 0.7));
         const drawX = pdfBoxLeft + 2;
         // Position text baseline slightly above the bottom of the box.
         const drawY = pdfBoxBottom + boxHeightPts * 0.18;

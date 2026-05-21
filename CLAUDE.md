@@ -1393,10 +1393,14 @@ A project-level tool for completing permit application PDFs. The user uploads a 
 
 ### Filling Behavior
 - When the PDF has interactive **AcroForm** fields, Gemini maps each detected field to a form field name; values are written into the form and the form is flattened.
-- When the PDF has **no** AcroForm fields (a flat/scanned form), the reviewed answers are appended to the completed PDF as a formatted summary page. Any field that cannot be mapped to a form field also goes on that page.
+- When the PDF has **no** AcroForm fields (a flat/scanned form), Gemini also returns a per-field bounding box and `fillPermitApplication` draws the reviewed text — and an "X" for ticked checkboxes — directly onto the original form pages at those coordinates.
+- Bounding boxes use Gemini's native vision format: `box: [ymin, xmin, ymax, xmax]` integers on a 0–1000 scale, top-left origin. `parseBoundingBox()` converts them to a normalized 0–1 `BoundingBox`; the fill step converts that to pdf-lib's bottom-left coordinate space.
+- For flat PDFs the scan uses a structured-output schema (`responseSchema` + `responseMimeType: "application/json"`) so every field comes back with a `box`.
+- The appended summary page is now only a **fallback** — used for any field whose coordinates are missing or point to a non-existent page (and for AcroForm fields that could not be mapped).
 
 ### Implementation Notes (SiteCommand)
-- Processor: `lib/permit-application-processor.ts` — `extractAcroFields()` (pdf-lib AcroForm inspection), `scanPermitApplication()` (Gemini `gemini-2.5-flash` field detection + value proposal), `fillPermitApplication()` (pdf-lib fill + flatten, summary-page fallback), `normalizePermitFields()`.
+- Processor: `lib/permit-application-processor.ts` — `extractAcroFields()` (pdf-lib AcroForm inspection), `scanPermitApplication()` (Gemini `gemini-2.5-flash` field detection + value proposal + bounding boxes for flat PDFs), `parseBoundingBox()`, `fillPermitApplication()` (pdf-lib AcroForm fill + flatten → coordinate overlay → summary-page fallback), `normalizePermitFields()`.
+- The Gemini call passes the PDF as inline base64 data (no Files API round-trip); `scan` and `approve` routes set `maxDuration = 120`.
 - Requires `GEMINI_API_KEY` (same key used by Transaction Orders and other AI features).
 - API routes under `app/api/projects/[id]/permit-applications/`:
   - `GET /` — list completed permit applications with fresh 1-hour signed URLs (read_only+).
