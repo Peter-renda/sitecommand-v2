@@ -34,7 +34,9 @@
       "Bash(gunzip -c /tmp/design.gz)",
       "Read(//tmp/**)",
       "Bash(cp /root/.claude/projects/-home-user-SiteCommand/97c3d04c-6bae-4f01-be80-708a7b4883b1/tool-results/webfetch-1777390768792-z47n2s.bin /tmp/design.bin.gz)",
-      "Bash(gunzip -f /tmp/design.bin.gz)"
+      "Bash(gunzip -f /tmp/design.bin.gz)",
+      "Bash(cp /root/.claude/projects/-home-user-SiteCommand/b774361b-1b89-4069-afc4-3baa9482b0e9/tool-results/webfetch-1779467060436-kxw9ol.bin /tmp/design.gz)",
+      "Bash(gunzip -f /tmp/design.gz)"
     ]
   }
 }
