@@ -29,6 +29,7 @@ export default function SettingsNav({
   return (
     <nav className="w-44 shrink-0 space-y-0.5">
       {navItem("/settings/account", "Account")}
+      {navItem("/settings/dashboard", "Dashboard Settings")}
       {isSiteAdmin && navItem("/settings/platform", "Platform")}
     </nav>
   );
