@@ -1388,26 +1388,31 @@ A project-level tool for completing permit application PDFs. The user uploads a 
 ### Workflow
 1. Open the project's **Permit Applications** tool.
 2. Enter a **Title** and click **Upload Permit Application** to choose a PDF (the title defaults to the filename when left blank).
-3. Gemini scans the form and the field list appears under **Review & Edit Fields**, prefilled from project data. Every value is editable.
+3. Gemini scans the form, then the PDF itself is rendered under **Review & Edit on the Form** with each proposed value sitting in a **yellow editable box** exactly where it will appear on the saved PDF. Every box is editable in place; checkboxes toggle on click.
 4. Click **Approve & Download Permit Application** — the completed PDF downloads and is added to **Completed Permit Applications** (title is a hyperlink that opens the PDF in a new tab).
 
+### In-PDF Editing Preview
+- After a scan, `PdfFieldEditor` renders every page of the uploaded PDF with `pdfjs-dist` (legacy build, worker at `public/pdf.worker.min.mjs`) and overlays an editable yellow box on each detected field.
+- Box positions come from the scan response: flat fields carry `drawX`/`drawY`/`drawW`/`drawMode` (text-layout coordinates); AcroForm fields carry a `rect` (the widget rectangle). All coordinates are normalized 0–1, so overlays are positioned with a `ResizeObserver`-measured page width and stay correct at any display size.
+- Editing a box calls back into `PermitApplicationsClient` (`updateField`), so the value the user sees on the form is exactly what `fillPermitApplication` writes on approve — the preview is faithful.
+- Any field that cannot be positioned (an AcroForm field whose widget rectangle was not found) is listed below the pages under **Other fields**; it is still filled into the matching form field, or onto a summary page if unmapped.
+
 ### Filling Behavior
-- When the PDF has interactive **AcroForm** fields, Gemini maps each detected field to a form field name; values are written into the form and the form is flattened.
-- When the PDF has **no** AcroForm fields (a flat/scanned form), Gemini also returns a per-field bounding box and `fillPermitApplication` draws the reviewed text — and an "X" for ticked checkboxes — directly onto the original form pages at those coordinates.
-- Bounding boxes use Gemini's native vision format: `box: [ymin, xmin, ymax, xmax]` integers on a 0–1000 scale, top-left origin. `parseBoundingBox()` converts them to a normalized 0–1 `BoundingBox`; the fill step converts that to pdf-lib's bottom-left coordinate space.
-- For flat PDFs the scan uses a structured-output schema (`responseSchema` + `responseMimeType: "application/json"`) so every field comes back with a `box`.
-- The appended summary page is now only a **fallback** — used for any field whose coordinates are missing or point to a non-existent page (and for AcroForm fields that could not be mapped).
+- When the PDF has interactive **AcroForm** fields, Gemini maps each detected field to a form field name; values are written into the form and the form is flattened. `extractAcroFieldPositions()` additionally resolves each field's widget rectangle so the preview can show it.
+- When the PDF has **no** AcroForm fields (a flat/scanned form), Stage 1 (`extractTextLayout`) reads every text item and its exact coordinates with `pdfjs-dist`; Gemini receives a **numbered list** of those items and returns, per fill action, a `fieldNum` (integer index — impossible to hallucinate), a `value`, and a `drawMode` (`fill` = right of label, `fill_below` = below label, `check` = X to the left of an option). `resolveDrawPosition()` converts the chosen item + drawMode into deterministic draw coordinates.
+- `fillPermitApplication()` draws flat-PDF values — and an "X" for ticked checkboxes — directly onto the original pages at those coordinates, honoring `drawW` for text width.
+- The appended summary page is only a **last-resort fallback** — used for any field with no resolvable position and no AcroForm mapping.
 
 ### Implementation Notes (SiteCommand)
-- Processor: `lib/permit-application-processor.ts` — `extractAcroFields()` (pdf-lib AcroForm inspection), `scanPermitApplication()` (Gemini `gemini-2.5-flash` field detection + value proposal + bounding boxes for flat PDFs), `parseBoundingBox()`, `fillPermitApplication()` (pdf-lib AcroForm fill + flatten → coordinate overlay → summary-page fallback), `normalizePermitFields()`.
-- The Gemini call passes the PDF as inline base64 data (no Files API round-trip); `scan` and `approve` routes set `maxDuration = 120`.
+- Processor: `lib/permit-application-processor.ts` — `extractAcroFields()` (pdf-lib AcroForm inspection), `extractAcroFieldPositions()` (widget rectangles for the preview), `extractTextLayout()` (pdfjs text + coordinates), `scanPermitApplication()` (Gemini `gemini-2.5-flash`: AcroForm-vision path or flat numbered-field path), `resolveDrawPosition()`, `fillPermitApplication()` (AcroForm fill + flatten → coordinate overlay → summary-page fallback), `normalizePermitFields()`.
+- For flat PDFs the scan uses a structured-output schema (`responseSchema` + `responseMimeType: "application/json"`); for AcroForm PDFs the PDF is passed to Gemini as inline base64. `scan` and `approve` routes set `maxDuration = 120`.
 - Requires `GEMINI_API_KEY` (same key used by Transaction Orders and other AI features).
 - API routes under `app/api/projects/[id]/permit-applications/`:
   - `GET /` — list completed permit applications with fresh 1-hour signed URLs (read_only+).
-  - `POST /scan` — multipart `file`; reads AcroForm fields, builds project context, runs Gemini; returns `{ fields, hasAcroForm }` (standard+). Nothing is persisted.
+  - `POST /scan` — multipart `file`; reads AcroForm fields, builds project context, runs Gemini; returns `{ fields, hasAcroForm }` where each field carries its draw position (standard+). Nothing is persisted.
   - `POST /approve` — multipart `file` + `title` + `fields`; fills the PDF, uploads it, inserts the record, and streams the filled PDF back for download (standard+).
   - `DELETE /[permitId]` — admin or record creator; removes the row and the stored PDF.
 - Project context fed to Gemini (`buildProjectContext` in `scan/route.ts`): project fields (name/address/city/state/zip/county/number/sector/value/dates), company name, directory contacts (name/email/phone/company/job title/address/license), and contacts tagged with the **Project Manager** role.
 - Storage: completed PDFs live in the existing `project-drawings` bucket under `{projectId}/_permit-completed/...`.
 - Database: `project_permit_applications` (migration `140_permit_applications.sql`) — `title`, `source_filename`, `final_filename`, `final_storage_path`, `fields` JSONB, `created_by`, `created_at`.
-- UI: `app/projects/[id]/permit-applications/PermitApplicationsClient.tsx`.
+- UI: `app/projects/[id]/permit-applications/PermitApplicationsClient.tsx` (page shell, upload, completed list) and `PdfFieldEditor.tsx` (in-PDF rendering + yellow editable overlays).

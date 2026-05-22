@@ -1,16 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ProjectNav from "@/components/ProjectNav";
-
-type PermitFieldType = "text" | "multiline" | "checkbox" | "date";
-
-type PermitField = {
-  key: string;
-  label: string;
-  value: string;
-  acroField: string | null;
-  type: PermitFieldType;
-};
+import PdfFieldEditor, { type PermitField } from "./PdfFieldEditor";
 
 type CompletedPermit = {
   id: string;
@@ -23,10 +14,6 @@ type CompletedPermit = {
 };
 
 type ToolLevel = "none" | "read_only" | "standard" | "admin";
-
-function isTruthy(value: string): boolean {
-  return ["yes", "y", "true", "1", "x", "checked", "on"].includes(value.trim().toLowerCase());
-}
 
 export default function PermitApplicationsClient({
   projectId,
@@ -47,7 +34,6 @@ export default function PermitApplicationsClient({
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [fields, setFields] = useState<PermitField[] | null>(null);
-  const [hasAcroForm, setHasAcroForm] = useState(false);
 
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
@@ -95,7 +81,6 @@ export default function PermitApplicationsClient({
       }
       const data = await res.json();
       setFields(Array.isArray(data.fields) ? data.fields : []);
-      setHasAcroForm(Boolean(data.hasAcroForm));
     } catch (err) {
       setScanError(err instanceof Error ? err.message : "Failed to scan permit application");
       setFields(null);
@@ -129,7 +114,6 @@ export default function PermitApplicationsClient({
     setTitle("");
     setScanError(null);
     setApproveError(null);
-    setHasAcroForm(false);
   }
 
   async function handleApprove() {
@@ -272,57 +256,23 @@ export default function PermitApplicationsClient({
           </p>
         )}
 
-        {fields && (
+        {fields && file && (
           <section className="mt-6 rounded-lg border border-black/10 bg-white p-5 space-y-4">
             <div>
-              <h2 className="text-lg font-medium">Review &amp; Edit Fields</h2>
+              <h2 className="text-lg font-medium">Review &amp; Edit on the Form</h2>
               <p className="text-sm text-black/60 mt-1">
                 Gemini filled {filledCount} of {fields.length} field
-                {fields.length === 1 ? "" : "s"}. Edit anything that is wrong or missing, then
-                approve.
+                {fields.length === 1 ? "" : "s"}. Each value sits in a yellow box exactly where it
+                will appear on the saved PDF — edit any box directly, then approve.
               </p>
-              {!hasAcroForm && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mt-2">
-                  This PDF has no interactive form fields, so the answers will be added to the
-                  completed PDF as a summary page.
-                </p>
-              )}
             </div>
 
-            <div className="space-y-4">
-              {fields.map((field, index) => (
-                <div key={field.key} className="block text-sm">
-                  <span className="block text-black/70 mb-1">{field.label}</span>
-                  {field.type === "checkbox" ? (
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={isTruthy(field.value)}
-                        onChange={(e) => updateField(index, e.target.checked ? "Yes" : "")}
-                        className="h-4 w-4"
-                      />
-                      <span className="text-black/70">
-                        {isTruthy(field.value) ? "Yes" : "No"}
-                      </span>
-                    </label>
-                  ) : field.type === "multiline" ? (
-                    <textarea
-                      value={field.value}
-                      onChange={(e) => updateField(index, e.target.value)}
-                      rows={3}
-                      className="w-full rounded-md border border-black/15 px-3 py-2"
-                    />
-                  ) : (
-                    <input
-                      value={field.value}
-                      onChange={(e) => updateField(index, e.target.value)}
-                      placeholder={field.type === "date" ? "MM/DD/YYYY" : ""}
-                      className="w-full rounded-md border border-black/15 px-3 py-2"
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
+            <PdfFieldEditor
+              file={file}
+              fields={fields}
+              onChange={updateField}
+              disabled={approving}
+            />
 
             {approveError && (
               <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">

@@ -18,6 +18,10 @@ import {
   PDFDropdown,
   PDFRadioGroup,
   PDFOptionList,
+  PDFName,
+  PDFArray,
+  PDFDict,
+  PDFNumber,
   StandardFonts,
   rgb,
   type PDFFont,
@@ -30,6 +34,10 @@ export type PermitFieldType = "text" | "multiline" | "checkbox" | "date";
 
 // Normalized 0–1 bounding box, top-left origin (legacy — kept for AcroForm path).
 export type BoundingBox = { x1: number; y1: number; x2: number; y2: number };
+
+// Normalized 0–1 rectangle, top-left origin (used by the in-PDF editor to
+// position an editable box over an AcroForm widget).
+export type FieldRect = { page: number; x: number; y: number; w: number; h: number };
 
 export type PermitField = {
   key: string;
@@ -46,7 +54,12 @@ export type PermitField = {
   // pdf-lib space (bottom-left origin, y increases upward).
   drawX?: number;
   drawY?: number;
+  drawW?: number; // normalized width of the fill area
   drawMode?: "fill" | "fill_below" | "check";
+
+  // AcroForm widget rectangle (normalized, top-left origin) — lets the
+  // in-PDF editor draw an editable box exactly over the form field.
+  rect?: FieldRect;
 };
 
 export type AcroFieldInfo = { name: string; type: string };
@@ -209,13 +222,14 @@ function formatTextLayout(items: TextLayoutItem[]): string {
 
 // Convert anchorId + drawMode → normalized draw position stored on PermitField.
 // drawX / drawY are in pdf-lib space (bottom-left origin, 0–1 normalized).
+// drawW is the normalized width of the area available to write into.
 function resolveDrawPosition(
   anchorId: string,
   drawMode: "fill" | "fill_below" | "check",
   items: TextLayoutItem[],
   pageWidths: number[],
   pageHeights: number[],
-): { drawX: number; drawY: number; pageIndex: number } | null {
+): { drawX: number; drawY: number; drawW: number; pageIndex: number } | null {
   const item = items.find((i) => i.id === anchorId);
   if (!item) return null;
 
@@ -223,27 +237,40 @@ function resolveDrawPosition(
   const pageH = pageHeights[item.pageIndex] ?? 792;
   const PADDING = 4;
   const CHECK_OFFSET = 12;
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
   let x: number;
   let y: number;
+  let w: number;
 
   if (drawMode === "fill") {
-    // Right of label, same baseline.
+    // Right of label, same baseline. Width stops before the next text item
+    // on the same line so the value never overruns a neighbouring label.
     x = item.x + item.width + PADDING;
     y = item.y;
+    let nextX = pageW * 0.97;
+    for (const other of items) {
+      if (other.pageIndex !== item.pageIndex || other.id === item.id) continue;
+      if (Math.abs(other.y - item.y) > 5) continue;
+      if (other.x > x + 2 && other.x < nextX) nextX = other.x;
+    }
+    w = Math.max(40, nextX - x - PADDING);
   } else if (drawMode === "fill_below") {
     // First line below the label.
     x = item.x;
     y = item.y - 12;
+    w = Math.max(60, pageW * 0.92 - x);
   } else {
     // "check" — just to the left of the option text.
     x = item.x - CHECK_OFFSET;
     y = item.y;
+    w = 14;
   }
 
   return {
-    drawX: Math.max(0, Math.min(1, x / pageW)),
-    drawY: Math.max(0, Math.min(1, y / pageH)),
+    drawX: clamp01(x / pageW),
+    drawY: clamp01(y / pageH),
+    drawW: clamp01(w / pageW),
     pageIndex: item.pageIndex,
   };
 }
@@ -329,20 +356,40 @@ export function normalizePermitFields(input: unknown): PermitField[] {
     const boundingBox = parseBoundingBox(raw.box ?? raw.boundingBox);
 
     // Pass-through draw coordinates from flat-PDF path (already resolved).
-    const drawX =
-      typeof raw.drawX === "number" ? Math.max(0, Math.min(1, raw.drawX)) : undefined;
-    const drawY =
-      typeof raw.drawY === "number" ? Math.max(0, Math.min(1, raw.drawY)) : undefined;
+    const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+    const drawX = typeof raw.drawX === "number" ? clamp01(raw.drawX) : undefined;
+    const drawY = typeof raw.drawY === "number" ? clamp01(raw.drawY) : undefined;
+    const drawW = typeof raw.drawW === "number" ? clamp01(raw.drawW) : undefined;
     const rawMode = raw.drawMode;
     const drawMode =
       rawMode === "fill" || rawMode === "fill_below" || rawMode === "check"
         ? (rawMode as "fill" | "fill_below" | "check")
         : undefined;
 
-    out.push({ key, label, value, acroField, type, pageIndex, boundingBox, drawX, drawY, drawMode });
+    const rect = parseFieldRect(raw.rect);
+
+    out.push({
+      key, label, value, acroField, type, pageIndex,
+      boundingBox, drawX, drawY, drawW, drawMode, rect,
+    });
   }
 
   return out;
+}
+
+// Validate a normalized FieldRect coming back from the client on approve.
+function parseFieldRect(raw: unknown): FieldRect | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const page = Number(o.page);
+  const x = Number(o.x);
+  const y = Number(o.y);
+  const w = Number(o.w);
+  const h = Number(o.h);
+  if (![page, x, y, w, h].every((v) => Number.isFinite(v))) return undefined;
+  if (page < 0 || w <= 0 || h <= 0) return undefined;
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+  return { page: Math.floor(page), x: clamp01(x), y: clamp01(y), w: clamp01(w), h: clamp01(h) };
 }
 
 // ── AcroForm inspection ────────────────────────────────────────────────────
@@ -366,6 +413,85 @@ export async function extractAcroFields(sourceBuffer: Buffer): Promise<AcroField
   } catch {
     return [];
   }
+}
+
+// Resolve the fully-qualified field name of a widget annotation by walking the
+// T / Parent chain (a widget may be its own field, or a kid of a parent field).
+function resolveAcroFieldName(annot: PDFDict, doc: PDFDocument): string | null {
+  let node: PDFDict | undefined = annot;
+  const parts: string[] = [];
+  const seen = new Set<PDFDict>();
+  while (node && !seen.has(node)) {
+    seen.add(node);
+    const t = node.get(PDFName.of("T")) as unknown;
+    const partial =
+      t && typeof (t as { decodeText?: () => string }).decodeText === "function"
+        ? (t as { decodeText: () => string }).decodeText()
+        : null;
+    if (partial) parts.unshift(partial);
+    const parent = node.get(PDFName.of("Parent"));
+    if (!parent) break;
+    try {
+      const resolved = doc.context.lookup(parent);
+      node = resolved instanceof PDFDict ? resolved : undefined;
+    } catch {
+      break;
+    }
+  }
+  return parts.length > 0 ? parts.join(".") : null;
+}
+
+// Map each AcroForm field name → its widget rectangle (normalized 0–1,
+// top-left origin) so the in-PDF editor can overlay an editable box on it.
+export async function extractAcroFieldPositions(
+  sourceBuffer: Buffer,
+): Promise<Map<string, FieldRect>> {
+  const map = new Map<string, FieldRect>();
+  try {
+    const doc = await PDFDocument.load(sourceBuffer, { ignoreEncryption: true });
+    const pages = doc.getPages();
+    pages.forEach((page, pageIndex) => {
+      const pw = page.getWidth();
+      const ph = page.getHeight();
+      if (pw <= 0 || ph <= 0) return;
+      const annots = page.node.Annots();
+      if (!annots) return;
+      for (const ref of annots.asArray()) {
+        try {
+          const annot = doc.context.lookup(ref);
+          if (!(annot instanceof PDFDict)) continue;
+          const subtype = annot.get(PDFName.of("Subtype"));
+          if (!subtype || !subtype.toString().includes("Widget")) continue;
+          const rectObj = doc.context.lookupMaybe(annot.get(PDFName.of("Rect")), PDFArray);
+          if (!rectObj || rectObj.size() < 4) continue;
+          const nums = [0, 1, 2, 3].map((i) => {
+            const el = rectObj.get(i);
+            return el instanceof PDFNumber ? el.asNumber() : NaN;
+          });
+          if (nums.some((v) => !Number.isFinite(v))) continue;
+          const x1 = Math.min(nums[0], nums[2]);
+          const y1 = Math.min(nums[1], nums[3]);
+          const x2 = Math.max(nums[0], nums[2]);
+          const y2 = Math.max(nums[1], nums[3]);
+          if (x2 - x1 <= 0 || y2 - y1 <= 0) continue;
+          const name = resolveAcroFieldName(annot, doc);
+          if (!name || map.has(name)) continue;
+          map.set(name, {
+            page: pageIndex,
+            x: x1 / pw,
+            y: (ph - y2) / ph, // PDF bottom-left → screen top-left
+            w: (x2 - x1) / pw,
+            h: (y2 - y1) / ph,
+          });
+        } catch {
+          // skip malformed annotation
+        }
+      }
+    });
+  } catch {
+    // return whatever was collected
+  }
+  return map;
 }
 
 // ── Gemini scan ────────────────────────────────────────────────────────────
@@ -489,6 +615,7 @@ export async function scanPermitApplication(
         pageIndex: pos.pageIndex,
         drawX: pos.drawX,
         drawY: pos.drawY,
+        drawW: pos.drawW,
         drawMode,
       });
 
@@ -533,10 +660,12 @@ export async function scanPermitApplication(
   catch { throw new Error("Could not read the AI response while scanning the permit."); }
 
   const acroSet = new Set(acroFields.map((a) => a.name));
-  const fields = normalizePermitFields(parsed).map((f) => ({
-    ...f,
-    acroField: f.acroField && acroSet.has(f.acroField) ? f.acroField : null,
-  }));
+  const positions = await extractAcroFieldPositions(sourceBuffer);
+  const fields = normalizePermitFields(parsed).map((f) => {
+    const acroField = f.acroField && acroSet.has(f.acroField) ? f.acroField : null;
+    const rect = acroField ? positions.get(acroField) : undefined;
+    return { ...f, acroField, rect, pageIndex: rect ? rect.page : f.pageIndex };
+  });
 
   if (fields.length === 0) {
     throw new Error("The AI did not detect any fillable fields in this PDF.");
@@ -696,6 +825,10 @@ export async function fillPermitApplication(
       const x = field.drawX! * W;
       const y = field.drawY! * H;
 
+      // Width of the writable area: prefer the resolved drawW, fall back to
+      // the remaining page width.
+      const drawWpx = field.drawW !== undefined ? field.drawW * W : undefined;
+
       if (field.drawMode === "check") {
         if (isTruthy(field.value)) {
           page.drawText("X", { x, y, size: FONT_SIZE, font, color: rgb(0, 0, 0) });
@@ -703,7 +836,7 @@ export async function fillPermitApplication(
       } else if (field.drawMode === "fill_below") {
         const sanitized = sanitizeForPdf(field.value).trim();
         if (!sanitized) continue;
-        const maxW = W - x - 40;
+        const maxW = drawWpx ?? W - x - 40;
         const lines = wrapText(sanitized, font, FONT_SIZE, maxW > 10 ? maxW : 200);
         let lineY = y;
         for (const line of lines) {
@@ -715,7 +848,7 @@ export async function fillPermitApplication(
         // "fill" — single line to the right of the label
         const sanitized = sanitizeForPdf(field.value).replace(/\n/g, " ").trim();
         if (!sanitized) continue;
-        const maxW = W - x - 36;
+        const maxW = drawWpx ?? W - x - 36;
         let text = sanitized;
         while (text.length > 1 && font.widthOfTextAtSize(text, FONT_SIZE) > maxW) {
           text = text.slice(0, -1);
