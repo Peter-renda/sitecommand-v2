@@ -96,62 +96,58 @@ Rules:
 - Use "multiline" for long free-text fields (scope, description), "text" for short ones.
 - Keep the fields in the order they appear on the form. Return at most 120 fields.`;
 
-// Used for flat / scanned PDFs. Receives the text layout extracted from the
-// PDF (no PDF image) so it only does semantic mapping — not coordinate guessing.
-const SCAN_SYSTEM_INSTRUCTION_FLAT = `You are an expert assistant that fills out construction permit application forms.
+// Used for flat / scanned PDFs. Gemini receives a numbered list of text items
+// and returns (fieldNum, value, drawMode) — no coordinate guessing required.
+const SCAN_SYSTEM_INSTRUCTION_FLAT = `You are filling out a flat construction permit application form.
 
 You receive:
-1. FORM LAYOUT: every visible text element extracted from the flat permit form, each with an ID, page number, y position (higher = higher on the page, origin at bottom-left), x position, approximate width, and the text string.
-2. PROJECT DATA: values available to fill in.
+1. FORM FIELDS: a numbered list of text items extracted from the form. Each entry shows:
+   Field N | page=P y=YYY x=XXX | "text"
+2. PROJECT DATA: the values available to fill in.
 
-Your task:
-- Identify every fillable field (blank lines, text boxes, checkboxes, radio buttons).
-- For each field, choose a value from PROJECT DATA and reference the exact text item to anchor the fill position.
+Your task: for each field that should be filled OR checked, return an instruction.
 
-Return a JSON array. Each element:
+Return ONLY a JSON array. Each element:
 {
-  "key": snake_case identifier,
-  "label": human-readable label shown to the user,
-  "value": value from PROJECT DATA, or "" if not applicable,
-  "type": "text" | "date" | "checkbox",
-  "anchorId": ID of the text item from FORM LAYOUT that anchors the draw position,
+  "fieldNum": integer,      // the Field N number from FORM FIELDS — return the exact number
+  "label": string,          // the exact text of that field (for display to the user)
+  "value": string,          // value from PROJECT DATA; use "Yes" for checkboxes to check
   "drawMode": "fill" | "fill_below" | "check"
 }
 
-drawMode:
-- "fill"       — value is written immediately to the RIGHT of the anchor text (same baseline).
-                 Use for inline fields where the blank line follows the label (e.g. "Email:", "Phone:").
-- "fill_below" — value is written on the line(s) BELOW the anchor text.
-                 Use for large text areas (e.g. "Provide a detailed project description:").
-- "check"      — an X mark is drawn immediately to the LEFT of the anchor text.
-                 Use for checkboxes and radio options that should be selected.
-                 The anchor must be the OPTION text ("New Building", "Yes"), NOT the group label.
-
-For "check": set value to "Yes" when this option should be marked, "" when not.
-Only return a "check" entry for options that SHOULD be marked — omit unchecked options.
+drawMode meanings:
+- "fill"       — value written immediately to the RIGHT of this label on the same line.
+                 Use when the label ends with ":" and expects an answer on the same line
+                 (e.g. "Email:", "Phone:", "Application Date:", "Project Address:").
+- "fill_below" — value written on the line(s) BELOW this label.
+                 Use for large text areas or when the label introduces a block of content.
+- "check"      — draw an X mark to the LEFT of this item's text.
+                 Use ONLY for a checkbox/radio OPTION text that should be selected
+                 (e.g. "Standard Review", "New Building", "Yes").
+                 Do NOT use "check" on a group header label.
 
 Rules:
-- Only include fields where PROJECT DATA has a relevant value, or a checkbox must be checked.
-- Never invent data. Only use values from PROJECT DATA.
+- Only return entries where PROJECT DATA supplies a concrete value.
+- "check" entries: only include options that SHOULD be marked; omit unchecked options.
 - Format dates as MM/DD/YYYY.
-- anchorId must be an ID that appears exactly in FORM LAYOUT.
-- Return at most 80 fields/actions.`;
+- Never invent data not present in PROJECT DATA.
+- Return at most 60 entries.`;
 
-// Schema for flat-PDF scan: Gemini returns anchor IDs, not coordinates.
+// Schema for flat-PDF scan: Gemini returns field numbers (integers), not anchor IDs.
+// Field numbers are 1-indexed positions into the sorted candidate list we build locally,
+// so there is no risk of the model hallucinating an invalid string ID.
 const FLAT_RESPONSE_SCHEMA = {
   type: Type.ARRAY,
   items: {
     type: Type.OBJECT,
     properties: {
-      key:      { type: Type.STRING },
+      fieldNum: { type: Type.INTEGER },
       label:    { type: Type.STRING },
       value:    { type: Type.STRING },
-      type:     { type: Type.STRING, enum: ["text", "date", "checkbox"] },
-      anchorId: { type: Type.STRING },
       drawMode: { type: Type.STRING, enum: ["fill", "fill_below", "check"] },
     },
-    required: ["key", "label", "value", "type", "anchorId", "drawMode"],
-    propertyOrdering: ["key", "label", "value", "type", "anchorId", "drawMode"],
+    required: ["fieldNum", "label", "value", "drawMode"],
+    propertyOrdering: ["fieldNum", "label", "value", "drawMode"],
   },
 };
 
@@ -402,9 +398,29 @@ export async function scanPermitApplication(
     const pageWidths  = pages.map((p) => p.getWidth());
     const pageHeights = pages.map((p) => p.getHeight());
 
-    // Stage 2: Gemini does semantic mapping only (receives text layout, not PDF).
-    const layoutText = formatTextLayout(textItems);
-    const promptText = `FORM LAYOUT:\n${layoutText}\n\nPROJECT DATA:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\nReturn the JSON array of fill actions.`;
+    // Build a numbered candidate list from text items (short labels + options only).
+    // Gemini returns an integer fieldNum that indexes into this array, which is
+    // impossible to hallucinate wrong — unlike opaque string IDs.
+    const LABEL_WIDTH_LIMIT = 200;
+    const candidates = textItems
+      .filter((i) => i.width <= LABEL_WIDTH_LIMIT && i.text.length >= 2)
+      .sort((a, b) => a.pageIndex - b.pageIndex || b.y - a.y || a.x - b.x);
+
+    const fieldListLines = candidates.map(
+      (item, idx) =>
+        `Field ${idx + 1} | page=${item.pageIndex + 1} y=${item.y.toFixed(0)} x=${item.x.toFixed(0)} | "${item.text}"`,
+    );
+
+    // Stage 2: Gemini receives numbered field list + project data → returns fieldNum + value.
+    const promptText = [
+      "FORM FIELDS:",
+      fieldListLines.join("\n"),
+      "",
+      "PROJECT DATA:",
+      JSON.stringify(context, null, 2),
+      "",
+      "Return the JSON array of fill instructions.",
+    ].join("\n");
 
     const result = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -427,7 +443,7 @@ export async function scanPermitApplication(
       throw new Error("Could not read the AI response while scanning the permit.");
     }
 
-    // Stage 3 prep: resolve anchorId → draw coordinates, then normalise.
+    // Stage 3 prep: resolve fieldNum → candidate → draw coordinates.
     const rawArr = Array.isArray(parsed) ? parsed : [];
     const fields: PermitField[] = [];
     const seenKeys = new Set<string>();
@@ -436,31 +452,33 @@ export async function scanPermitApplication(
       if (!raw || typeof raw !== "object") continue;
       const r = raw as Record<string, unknown>;
 
-      const label = String(r.label ?? r.key ?? "").trim().slice(0, 250);
+      const fieldNum = typeof r.fieldNum === "number" ? Math.round(r.fieldNum) : NaN;
+      const candidate = candidates[fieldNum - 1]; // 1-indexed → 0-indexed
+      if (!candidate) continue;
+
+      const label = String(r.label ?? candidate.text).trim().slice(0, 250);
       if (!label) continue;
 
-      let baseKey = String(r.key ?? "").trim().toLowerCase()
-        .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+      let baseKey = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
       if (!baseKey) baseKey = `field_${fields.length + 1}`;
       let key = baseKey;
       let n = 2;
       while (seenKeys.has(key)) { key = `${baseKey}_${n}`; n++; }
       seenKeys.add(key);
 
-      const typeRaw = String(r.type ?? "text");
-      const type: PermitFieldType = FIELD_TYPES.includes(typeRaw as PermitFieldType)
-        ? (typeRaw as PermitFieldType) : "text";
       const value = String(r.value ?? "").slice(0, 5000);
-      const anchorId = String(r.anchorId ?? "");
+      if (!value.trim()) continue; // skip truly empty entries
+
       const rawMode = r.drawMode;
       const drawMode: "fill" | "fill_below" | "check" =
         rawMode === "fill_below" ? "fill_below"
         : rawMode === "check"    ? "check"
         : "fill";
 
-      // Resolve anchor → draw coordinates.
-      const pos = resolveDrawPosition(anchorId, drawMode, textItems, pageWidths, pageHeights);
-      if (!pos) continue; // skip fields whose anchor ID wasn't found
+      const type: PermitFieldType = drawMode === "check" ? "checkbox" : "text";
+
+      const pos = resolveDrawPosition(candidate.id, drawMode, textItems, pageWidths, pageHeights);
+      if (!pos) continue;
 
       fields.push({
         key,
