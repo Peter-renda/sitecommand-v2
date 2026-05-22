@@ -38,6 +38,15 @@ type DrawingPage = {
 // ── Nav ───────────────────────────────────────────────────────────────────────
 
 
+// ── Search types ──────────────────────────────────────────────────────────────
+
+type SearchResult = {
+  drawing: DrawingPage;
+  matchCount: number;
+};
+
+type HighlightRect = { left: number; top: number; width: number; height: number };
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string) {
@@ -51,6 +60,17 @@ function drawingLabel(d: DrawingPage) {
     return `${d.drawing_no ?? ""}${d.drawing_no && d.title ? " — " : ""}${d.title ?? ""}`.trim();
   }
   return `Page ${d.page_number} of ${d.filename}`;
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let idx = haystack.indexOf(needle);
+  while (idx !== -1) {
+    count++;
+    idx = haystack.indexOf(needle, idx + needle.length);
+  }
+  return count;
 }
 
 const DISCIPLINE_LABELS: Record<string, string> = {
@@ -324,6 +344,7 @@ function DrawingPdfViewerModal({
   userRole,
   userName,
   userId,
+  search,
 }: {
   drawing: DrawingPage;
   allDrawings: DrawingPage[];
@@ -334,6 +355,16 @@ function DrawingPdfViewerModal({
   userRole: string;
   userName: string;
   userId: string;
+  search: {
+    query: string;
+    results: SearchResult[];
+    building: boolean;
+    panelOpen: boolean;
+    onTogglePanel: () => void;
+    onRun: (q: string) => void;
+    thumbnails: Map<string, string>;
+    thumbVersion: number;
+  };
 }) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const safeViewerPage = drawing.viewer_page > 0 ? drawing.viewer_page : 1;
@@ -356,6 +387,16 @@ function DrawingPdfViewerModal({
   const zoomReset = () => setZoom(1);
   // Reset zoom whenever the rendered page changes
   useEffect(() => { setZoom(1); }, [drawing.id, safeViewerPage]);
+
+  // ── PDF text-search highlight state ───────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pageRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fitViewportRef = useRef<any>(null);
+  const [highlights, setHighlights] = useState<HighlightRect[]>([]);
+  const [panelQuery, setPanelQuery] = useState(search.query);
+  const firstHighlightRef = useRef<HTMLDivElement>(null);
+  const autoScrolledRef = useRef<string>("");
 
   // ── Annotation state ──────────────────────────────────────────────────────
   const [annotationMode, setAnnotationMode] = useState(false);
@@ -391,6 +432,8 @@ function DrawingPdfViewerModal({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") { onClose(); return; }
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
       const idx = allDrawings.findIndex((d) => d.id === drawing.id);
       if (e.key === "ArrowLeft" && idx > 0) onNavigate(allDrawings[idx - 1]);
       if (e.key === "ArrowRight" && idx < allDrawings.length - 1) onNavigate(allDrawings[idx + 1]);
@@ -487,6 +530,7 @@ function DrawingPdfViewerModal({
         if (cancelled) return;
         const page = await pdf.getPage(safeViewerPage);
         if (cancelled) return;
+        pageRef.current = page;
         const containerW = Math.max((containerRef.current?.clientWidth ?? 900) - 32, 200);
         const containerH = Math.max((containerRef.current?.clientHeight ?? 700) - 32, 200);
         const baseVp = page.getViewport({ scale: 1 });
@@ -503,6 +547,7 @@ function DrawingPdfViewerModal({
         );
         const renderScale = Math.min(fitScale * desiredSupersample, maxScaleByPixels);
         const fitVp = page.getViewport({ scale: fitScale });
+        fitViewportRef.current = fitVp;
         const vp = page.getViewport({ scale: renderScale });
         // Render to an offscreen canvas — never touched by React
         const offscreen = document.createElement("canvas");
@@ -532,6 +577,82 @@ function DrawingPdfViewerModal({
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawing.id, drawing.storage_path, safeViewerPage, supabaseUrl]);
+
+  // Compute highlight boxes for the active search query on the rendered page
+  useEffect(() => {
+    let cancelled = false;
+    async function computeHighlights() {
+      const page = pageRef.current;
+      const vp = fitViewportRef.current;
+      const q = search.query.trim().toLowerCase();
+      if (!page || !vp || !q) { setHighlights([]); return; }
+      try {
+        const tc = await page.getTextContent();
+        if (cancelled) return;
+        // Concatenate item text (separated by a space, matching the search
+        // index) so a match spanning adjacent text items is still found.
+        const segs: { str: string; start: number; transform: number[]; width: number; height: number }[] = [];
+        let full = "";
+        for (const it of tc.items) {
+          if (typeof it.str !== "string") continue;
+          segs.push({ str: it.str, start: full.length, transform: it.transform, width: it.width ?? 0, height: it.height ?? 0 });
+          full += it.str + " ";
+        }
+        const lowerFull = full.toLowerCase();
+        const rects: HighlightRect[] = [];
+        let matchIdx = lowerFull.indexOf(q);
+        while (matchIdx !== -1 && rects.length < 1000) {
+          const matchEnd = matchIdx + q.length;
+          for (const seg of segs) {
+            const len = seg.str.length;
+            if (len === 0) continue;
+            const itemStart = seg.start;
+            const itemEnd = seg.start + len;
+            const overlapStart = Math.max(matchIdx, itemStart);
+            const overlapEnd = Math.min(matchEnd, itemEnd);
+            if (overlapStart >= overlapEnd) continue;
+            const w = seg.width;
+            if (w <= 0) continue;
+            const e = seg.transform[4];
+            const f = seg.transform[5];
+            const h = seg.height > 0 ? seg.height : Math.abs(seg.transform[3]) || 8;
+            const startFrac = (overlapStart - itemStart) / len;
+            const endFrac = (overlapEnd - itemStart) / len;
+            const p0 = vp.convertToViewportPoint(e + w * startFrac, f + h);
+            const p1 = vp.convertToViewportPoint(e + w * endFrac, f);
+            rects.push({
+              left: Math.min(p0[0], p1[0]) / vp.width,
+              top: Math.min(p0[1], p1[1]) / vp.height,
+              width: Math.abs(p1[0] - p0[0]) / vp.width,
+              height: Math.abs(p1[1] - p0[1]) / vp.height,
+            });
+          }
+          matchIdx = lowerFull.indexOf(q, matchEnd);
+        }
+        if (!cancelled) setHighlights(rects);
+      } catch {
+        if (!cancelled) setHighlights([]);
+      }
+    }
+    computeHighlights();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfDataUrl, search.query]);
+
+  // Scroll the first match into view once per drawing/query
+  useEffect(() => {
+    if (highlights.length === 0) return;
+    const key = `${drawing.id}|${search.query}`;
+    if (autoScrolledRef.current === key) return;
+    autoScrolledRef.current = key;
+    const raf = requestAnimationFrame(() => {
+      firstHighlightRef.current?.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [highlights, drawing.id, search.query]);
+
+  // Keep the panel input in sync with the active query
+  useEffect(() => { setPanelQuery(search.query); }, [search.query]);
 
   function toRel(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
     const rect = canvas.getBoundingClientRect();
@@ -915,6 +1036,13 @@ function DrawingPdfViewerModal({
 
         {/* Right actions */}
         <div className="flex items-center gap-2 shrink-0">
+          <button onClick={search.onTogglePanel} title="Search drawing text"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${search.panelOpen ? "bg-blue-500 border-blue-400 text-white" : "text-gray-300 border-gray-600 hover:bg-gray-700"}`}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+            </svg>
+            Search
+          </button>
           <button onClick={onEditDetails} title="Edit drawing details"
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-300 border border-gray-600 rounded-md hover:bg-gray-700 transition-colors">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -957,6 +1085,8 @@ function DrawingPdfViewerModal({
         </div>
       </div>
 
+      {/* Body: PDF viewer + optional search results panel */}
+      <div className="flex flex-1 min-h-0">
       {/* PDF canvas + annotation overlay in a scrollable container */}
       <div className="relative flex-1 min-h-0">
       <div ref={containerRef} className="absolute inset-0 overflow-auto bg-gray-950">
@@ -995,6 +1125,26 @@ function DrawingPdfViewerModal({
             {renderError && (
               <div className="absolute top-2 left-2 right-2 z-20 rounded bg-yellow-100 text-yellow-900 border border-yellow-300 px-3 py-2 text-xs">
                 {renderError}
+              </div>
+            )}
+            {pdfDataUrl && search.query && highlights.length > 0 && (
+              <div className="absolute inset-0" style={{ zIndex: 5, pointerEvents: "none" }}>
+                {highlights.map((h, i) => (
+                  <div
+                    key={i}
+                    ref={i === 0 ? firstHighlightRef : undefined}
+                    style={{
+                      position: "absolute",
+                      left: `${h.left * 100}%`,
+                      top: `${h.top * 100}%`,
+                      width: `${h.width * 100}%`,
+                      height: `${h.height * 100}%`,
+                      background: "rgba(250, 204, 21, 0.4)",
+                      boxShadow: "0 0 0 1.5px rgba(202, 138, 4, 0.85)",
+                      borderRadius: "1px",
+                    }}
+                  />
+                ))}
               </div>
             )}
             {annotationsVisible && (
@@ -1048,6 +1198,106 @@ function DrawingPdfViewerModal({
               </svg>
             </button>
           </div>
+        )}
+        </div>
+        {search.panelOpen && (
+          <aside className="w-80 shrink-0 flex flex-col bg-gray-900 border-l border-gray-800">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
+              <h3 className="text-sm font-semibold text-white">Search</h3>
+              <button onClick={search.onTogglePanel} title="Close search"
+                className="p-1 text-gray-400 hover:text-white rounded transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-3 py-3 border-b border-gray-800 shrink-0">
+              <form onSubmit={(e) => { e.preventDefault(); search.onRun(panelQuery); }}>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={panelQuery}
+                    onChange={(e) => setPanelQuery(e.target.value)}
+                    placeholder="Search all drawings…"
+                    className="w-full bg-gray-800 text-white text-sm rounded-md pl-3 pr-14 py-2 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
+                  />
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
+                    {panelQuery && (
+                      <button type="button" onClick={() => setPanelQuery("")} title="Clear"
+                        className="p-1 text-gray-500 hover:text-white transition-colors">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                    <button type="submit" title="Search"
+                      className="p-1 text-blue-400 hover:text-blue-300 transition-colors">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+            <div className="flex-1 overflow-auto">
+              {search.building ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-12 text-gray-400 text-sm">
+                  <svg className="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Indexing drawings…
+                </div>
+              ) : !search.query ? (
+                <div className="px-4 py-12 text-center text-gray-500 text-sm leading-relaxed">
+                  Type a word or phrase to search the text inside every drawing in this project.
+                </div>
+              ) : search.results.length === 0 ? (
+                <div className="px-4 py-12 text-center text-gray-400 text-sm">
+                  No drawings contain “{search.query}”.
+                </div>
+              ) : (
+                <>
+                  <div className="px-4 py-2 text-xs text-gray-400 border-b border-gray-800">
+                    {search.results.length} drawing{search.results.length !== 1 ? "s" : ""} ·{" "}
+                    {search.results.reduce((sum, r) => sum + r.matchCount, 0)} matches
+                  </div>
+                  {search.results.map((r) => {
+                    const active = r.drawing.id === drawing.id;
+                    const thumb = search.thumbnails.get(r.drawing.id);
+                    void search.thumbVersion;
+                    return (
+                      <button
+                        key={r.drawing.id}
+                        onClick={() => onNavigate(r.drawing)}
+                        className={`block w-full text-left px-3 py-3 border-b border-gray-800 transition-colors ${active ? "bg-blue-600/20 border-l-2 border-l-blue-500" : "hover:bg-gray-800 border-l-2 border-l-transparent"}`}
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <span className={`text-xs font-medium leading-snug ${active ? "text-white" : "text-gray-200"}`}>
+                            {drawingLabel(r.drawing)}
+                          </span>
+                          <span className="shrink-0 text-[10px] font-semibold text-yellow-900 bg-yellow-400 rounded px-1.5 py-0.5">
+                            {r.matchCount} Found
+                          </span>
+                        </div>
+                        {thumb ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={thumb} alt={drawingLabel(r.drawing)} className="w-full max-h-40 object-contain bg-white rounded" />
+                        ) : (
+                          <div className="w-full h-28 flex items-center justify-center bg-gray-800 rounded text-gray-600">
+                            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          </aside>
         )}
       </div>
     </div>
@@ -1395,6 +1645,10 @@ export default function DrawingsClient({
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewerSearch, setViewerSearch] = useState<{ query: string; results: SearchResult[] } | null>(null);
+  const [viewerSearchPanelOpen, setViewerSearchPanelOpen] = useState(false);
+  const [searchIndexBuilding, setSearchIndexBuilding] = useState(false);
+  const pageTextIndex = useRef<Map<string, string>>(new Map());
   const [showUploadsPanel, setShowUploadsPanel] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -1673,6 +1927,77 @@ export default function DrawingsClient({
     window.location.href = "/";
   }
 
+  // ── PDF full-text search ─────────────────────────────────────────────────────
+
+  // Builds (lazily, on first search) a map of drawingId → lowercased page text
+  // by extracting the text layer of every drawing PDF with pdfjs.
+  const ensureSearchIndex = useCallback(async () => {
+    await ensurePdfJs();
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) return;
+
+    // Group not-yet-indexed pages by PDF so each document loads only once
+    const byPath = new Map<string, DrawingPage[]>();
+    for (const d of drawings) {
+      if (pageTextIndex.current.has(d.id)) continue;
+      const group = byPath.get(d.storage_path) ?? [];
+      group.push(d);
+      byPath.set(d.storage_path, group);
+    }
+
+    for (const [storagePath, pages] of byPath) {
+      const url = `${supabaseUrl}/storage/v1/object/public/project-drawings/${storagePath}`;
+      try {
+        const pdf = await getDocument(url).promise;
+        for (const d of pages) {
+          try {
+            const pageInDoc = d.viewer_page > 0 ? d.viewer_page : d.page_number;
+            const page = await pdf.getPage(pageInDoc);
+            const tc = await page.getTextContent();
+            const text = tc.items
+              .map((it) => ("str" in it && typeof it.str === "string" ? it.str : ""))
+              .join(" ");
+            pageTextIndex.current.set(d.id, text.toLowerCase());
+          } catch {
+            pageTextIndex.current.set(d.id, "");
+          }
+        }
+      } catch {
+        for (const d of pages) pageTextIndex.current.set(d.id, "");
+      }
+    }
+  }, [drawings]);
+
+  const runPdfSearch = useCallback(async (rawQuery: string) => {
+    const query = rawQuery.trim();
+    if (!query) return;
+    setSearchIndexBuilding(true);
+    try {
+      await ensureSearchIndex();
+    } finally {
+      setSearchIndexBuilding(false);
+    }
+    const q = query.toLowerCase();
+    const results: SearchResult[] = [];
+    for (const d of drawings) {
+      const text = pageTextIndex.current.get(d.id);
+      if (!text) continue;
+      const matchCount = countOccurrences(text, q);
+      if (matchCount > 0) results.push({ drawing: d, matchCount });
+    }
+    setViewerSearch({ query, results });
+    setViewerSearchPanelOpen(true);
+    if (results.length > 0) {
+      setViewingDrawing(results[0].drawing);
+    } else if (!viewingDrawing) {
+      // Nothing open and nothing matched — surface a lightweight notice
+      alert(`No drawings contain “${query}”.`);
+      setViewerSearch(null);
+      setViewerSearchPanelOpen(false);
+    }
+  }, [drawings, ensureSearchIndex, viewingDrawing]);
+
   // ── Filter ───────────────────────────────────────────────────────────────────
 
   const filteredDrawings = drawings.filter((d) => {
@@ -1813,14 +2138,37 @@ export default function DrawingsClient({
         <DrawingPdfViewerModal
           key={viewingDrawing.id}
           drawing={viewingDrawing}
-          allDrawings={filteredDrawings}
-          onClose={() => setViewingDrawing(null)}
+          allDrawings={
+            viewerSearch && viewerSearch.results.length > 0
+              ? viewerSearch.results.map((r) => r.drawing)
+              : filteredDrawings
+          }
+          onClose={() => {
+            setViewingDrawing(null);
+            setViewerSearch(null);
+            setViewerSearchPanelOpen(false);
+          }}
           onNavigate={setViewingDrawing}
-          onEditDetails={() => { setSelected(viewingDrawing); setViewingDrawing(null); }}
+          onEditDetails={() => {
+            setSelected(viewingDrawing);
+            setViewingDrawing(null);
+            setViewerSearch(null);
+            setViewerSearchPanelOpen(false);
+          }}
           projectId={projectId}
           userRole={role}
           userName={username}
           userId={userId}
+          search={{
+            query: viewerSearch?.query ?? "",
+            results: viewerSearch?.results ?? [],
+            building: searchIndexBuilding,
+            panelOpen: viewerSearchPanelOpen,
+            onTogglePanel: () => setViewerSearchPanelOpen((o) => !o),
+            onRun: runPdfSearch,
+            thumbnails: thumbnails.current,
+            thumbVersion,
+          }}
         />
       )}
 
@@ -1959,14 +2307,36 @@ export default function DrawingsClient({
       <div className="bg-white border-b border-black/[0.06] px-6 py-3 shrink-0">
         <div className="filters">
           <div className="search">
-            <svg className="w-4 h-4 shrink-0" style={{ color: "var(--brand-500)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
-            </svg>
+            <button
+              type="button"
+              onClick={() => runPdfSearch(searchQuery)}
+              disabled={searchIndexBuilding || !searchQuery.trim()}
+              title="Search the text inside every drawing PDF"
+              className="shrink-0 flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}
+            >
+              {searchIndexBuilding ? (
+                <svg className="w-4 h-4 animate-spin" style={{ color: "var(--brand-500)" }} fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" style={{ color: "var(--brand-500)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+                </svg>
+              )}
+            </button>
             <input
               type="text"
-              placeholder="Search by sheet number, title, revision…"
+              placeholder="Search drawings — press Enter to search inside PDFs"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runPdfSearch(searchQuery);
+                }
+              }}
             />
           </div>
           <button className="btn-secondary">
