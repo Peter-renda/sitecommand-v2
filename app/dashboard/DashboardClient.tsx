@@ -37,6 +37,21 @@ type MyOpenItem = {
   href?: string;
 };
 
+// Normalized shape shared by the "My open items" and "While you were away"
+// rows so a single detail modal can render and paginate either list.
+type DashDetailItem = {
+  key: string;
+  variant: "open_item" | "activity";
+  typeLabel: string;
+  pillClass: string;
+  title: string;
+  projectName: string;
+  status?: string;
+  dueDate?: string | null;
+  timestamp?: string;
+  href: string;
+};
+
 const ALL_TYPES = ["rfi", "submittal", "document", "daily_log", "task", "drawing", "quick_note", "photo", "transmittal"];
 
 const TYPE_LABELS: Record<string, string> = {
@@ -62,6 +77,14 @@ function timeAgo(ts: string): string {
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
+}
+
+function dueDateLabel(due: string): string {
+  const d = new Date(due);
+  const days = Math.floor((d.getTime() - Date.now()) / 86_400_000);
+  if (days < 0) return `${Math.abs(days)}d overdue`;
+  if (days === 0) return "Due today";
+  return `Due ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
 
 function ActivityIcon({ type }: { type: ActivityItem["type"] }) {
@@ -376,6 +399,10 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const myOpenItemsRef = useRef<HTMLElement>(null);
   const whileAwayRef = useRef<HTMLElement>(null);
 
+  // Detail modal state — paginates through a snapshot of one of the two lists.
+  const [detailItems, setDetailItems] = useState<DashDetailItem[]>([]);
+  const [detailIndex, setDetailIndex] = useState<number | null>(null);
+
   // Form state
   const [name, setName] = useState("");
   const [projectNumber, setProjectNumber] = useState("");
@@ -607,6 +634,18 @@ export default function DashboardClient({ username, email, role, companyRole, us
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  // Keyboard navigation for the detail modal (Esc to close, arrows to page).
+  useEffect(() => {
+    if (detailIndex === null) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setDetailIndex(null);
+      else if (e.key === "ArrowLeft") setDetailIndex((i) => (i !== null && i > 0 ? i - 1 : i));
+      else if (e.key === "ArrowRight") setDetailIndex((i) => (i !== null && i < detailItems.length - 1 ? i + 1 : i));
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [detailIndex, detailItems.length]);
+
   const searchQuery = dashboardSearch.trim();
 
   // Debounced server-side search across the entire portfolio of accessible projects.
@@ -658,6 +697,15 @@ export default function DashboardClient({ username, email, role, companyRole, us
     setStartDate(""); setActualStartDate(""); setCompletionDate("");
     setProjectedFinishDate(""); setWarrantyStartDate(""); setWarrantyEndDate("");
     setFormError("");
+  }
+
+  function openDetail(items: DashDetailItem[], index: number) {
+    setDetailItems(items);
+    setDetailIndex(index);
+  }
+
+  function closeDetail() {
+    setDetailIndex(null);
   }
 
   async function handleLogout() {
@@ -731,6 +779,32 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const totalValue = projects.reduce((sum, p) => sum + (p.value || 0), 0);
   const activeCount = projects.filter((p) => p.status === "course of construction").length;
   const completedCount = projects.filter((p) => p.status === "post-construction" || p.status === "warranty").length;
+
+  const openItemDetailList: DashDetailItem[] = myOpenItems.map((item) => ({
+    key: `${item.type}-${item.id}`,
+    variant: "open_item",
+    typeLabel:
+      item.type === "transaction_order_assignment"
+        ? "assigned invoice"
+        : item.type.replace(/_/g, " "),
+    pillClass: item.due_date && new Date(item.due_date) < new Date() ? "pill-danger" : "pill-warn",
+    title: item.title,
+    projectName: item.project_name || "Project",
+    status: item.status || "Open",
+    dueDate: item.due_date,
+    href: openItemHref(item),
+  }));
+
+  const awayDetailList: DashDetailItem[] = updatesWhileAway.map((item) => ({
+    key: `${item.type}-${item.id}`,
+    variant: "activity",
+    typeLabel: TYPE_LABELS[item.type] ?? item.type,
+    pillClass: "pill-info",
+    title: item.title,
+    projectName: item.project_name,
+    timestamp: item.changed_at || item.created_at,
+    href: item.href,
+  }));
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1233,38 +1307,28 @@ export default function DashboardClient({ username, email, role, companyRole, us
             </div>
           </div>
 
-          {myOpenItems.length > 0 && (
+          {openItemDetailList.length > 0 && (
             <ul className="divide-y divide-gray-50 border hairline rounded-xl bg-white">
-              {myOpenItems.map((item) => (
-                <li key={`${item.type}-${item.id}`}>
-                  <a
-                    href={openItemHref(item)}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+              {openItemDetailList.map((d, idx) => (
+                <li key={d.key}>
+                  <button
+                    type="button"
+                    onClick={() => openDetail(openItemDetailList, idx)}
+                    className="w-full text-left flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
                   >
-                    <span className={`pill ${item.due_date && new Date(item.due_date) < new Date() ? "pill-danger" : "pill-warn"} shrink-0`}>
-                      {item.type === "transaction_order_assignment"
-                        ? "assigned invoice"
-                        : item.type.replace(/_/g, " ")}
-                    </span>
+                    <span className={`pill ${d.pillClass} shrink-0`}>{d.typeLabel}</span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm text-gray-900 truncate">{item.title}</p>
+                      <p className="text-sm text-gray-900 truncate">{d.title}</p>
                       <p className="text-xs text-gray-400 truncate">
-                        {item.project_name || "Project"} · {item.status || "Open"}
+                        {d.projectName} · {d.status}
                       </p>
                     </div>
-                    {item.due_date && (
+                    {d.dueDate && (
                       <span className="text-xs text-gray-500 shrink-0 mono-label">
-                        {(() => {
-                          const d = new Date(item.due_date);
-                          const now = new Date();
-                          const days = Math.floor((d.getTime() - now.getTime()) / 86_400_000);
-                          if (days < 0) return `${Math.abs(days)}d overdue`;
-                          if (days === 0) return "Due today";
-                          return `Due ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-                        })()}
+                        {dueDateLabel(d.dueDate)}
                       </span>
                     )}
-                  </a>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -1281,23 +1345,26 @@ export default function DashboardClient({ username, email, role, companyRole, us
             </div>
           </div>
 
-          {updatesWhileAway.length > 0 ? (
+          {awayDetailList.length > 0 ? (
             <ul className="divide-y divide-gray-50 border hairline rounded-xl bg-white">
-              {updatesWhileAway.map((item) => (
-                <li key={`${item.type}-${item.id}`}>
-                  <a
-                    href={item.href}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+              {awayDetailList.map((d, idx) => (
+                <li key={d.key}>
+                  <button
+                    type="button"
+                    onClick={() => openDetail(awayDetailList, idx)}
+                    className="w-full text-left flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
                   >
-                    <ActivityIcon type={item.type} />
+                    <span className={`pill ${d.pillClass} shrink-0`}>{d.typeLabel}</span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm text-gray-900 truncate">{item.title}</p>
-                      <p className="text-xs text-gray-400 truncate">
-                        {TYPE_LABELS[item.type]} · {item.project_name}
-                      </p>
+                      <p className="text-sm text-gray-900 truncate">{d.title}</p>
+                      <p className="text-xs text-gray-400 truncate">{d.projectName}</p>
                     </div>
-                    <span className="text-xs text-gray-500 shrink-0 mono-label">{timeAgo(item.created_at)}</span>
-                  </a>
+                    {d.timestamp && (
+                      <span className="text-xs text-gray-500 shrink-0 mono-label">
+                        {timeAgo(d.timestamp)}
+                      </span>
+                    )}
+                  </button>
                 </li>
               ))}
             </ul>
@@ -1649,6 +1716,109 @@ export default function DashboardClient({ username, email, role, companyRole, us
           </div>
         </div>
       )}
+
+      {/* Item detail modal — paginates through "My open items" / "While you were away" */}
+      {detailIndex !== null && detailItems[detailIndex] && (() => {
+        const d = detailItems[detailIndex];
+        const hasPrev = detailIndex > 0;
+        const hasNext = detailIndex < detailItems.length - 1;
+        return (
+          <div
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4 py-8"
+            onClick={closeDetail}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="bg-white rounded-xl w-full max-w-md shadow-xl flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <h2 className="text-sm font-semibold text-gray-900">
+                  {d.variant === "open_item" ? "Open item" : "Recent update"}
+                  <span className="ml-2 font-normal text-gray-400 tabular-nums">
+                    {detailIndex + 1} of {detailItems.length}
+                  </span>
+                </h2>
+                <button
+                  onClick={closeDetail}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label="Close"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="px-6 py-5">
+                <span className={`pill ${d.pillClass}`}>{d.typeLabel}</span>
+                <h3 className="font-display text-[24px] leading-snug text-[color:var(--ink)] mt-3">
+                  {d.title}
+                </h3>
+                <div className="mt-4 divide-y divide-gray-50 border hairline rounded-lg">
+                  <div className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+                    <span className="text-xs text-gray-400 shrink-0">Project</span>
+                    <span className="text-sm text-gray-900 font-medium text-right truncate">{d.projectName}</span>
+                  </div>
+                  {d.status && (
+                    <div className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+                      <span className="text-xs text-gray-400 shrink-0">Status</span>
+                      <span className="text-sm text-gray-900 font-medium text-right capitalize">{d.status}</span>
+                    </div>
+                  )}
+                  {d.dueDate && (
+                    <div className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+                      <span className="text-xs text-gray-400 shrink-0">Due</span>
+                      <span className="text-sm text-gray-900 font-medium text-right">{dueDateLabel(d.dueDate)}</span>
+                    </div>
+                  )}
+                  {d.timestamp && (
+                    <div className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+                      <span className="text-xs text-gray-400 shrink-0">Updated</span>
+                      <span className="text-sm text-gray-900 font-medium text-right">{timeAgo(d.timestamp)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer — previous (left) · open · next (right) */}
+              <div className="flex items-center gap-2 px-6 py-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => hasPrev && setDetailIndex(detailIndex - 1)}
+                  disabled={!hasPrev}
+                  aria-label="Previous item"
+                  className="w-9 h-9 shrink-0 grid place-items-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <a
+                  href={d.href}
+                  className="flex-1 text-center py-2 bg-[color:var(--ink)] text-white text-sm font-semibold rounded-md hover:bg-gray-800 transition-colors"
+                >
+                  Open item
+                </a>
+                <button
+                  type="button"
+                  onClick={() => hasNext && setDetailIndex(detailIndex + 1)}
+                  disabled={!hasNext}
+                  aria-label="Next item"
+                  className="w-9 h-9 shrink-0 grid place-items-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
