@@ -1054,6 +1054,459 @@ function DrawingPdfViewerModal({
   );
 }
 
+// ── Upload Drawings Modal ─────────────────────────────────────────────────────
+
+type DrawingSet = {
+  id: string;
+  name: string;
+  default_drawing_date: string | null;
+  default_received_date: string | null;
+  default_revision: string | null;
+  drawing_no_rev_mode: string | null;
+  get_number_from_filename: boolean | null;
+  drawing_language: string | null;
+};
+
+type DrawingNoRevMode = "none" | "first_decimal" | "first_underscore" | "last_underscore";
+
+const REV_MODE_OPTIONS: Array<{ value: DrawingNoRevMode; label: string }> = [
+  { value: "none", label: "No Rev in Drawing Number" },
+  { value: "first_decimal", label: "Rev is after First Decimal" },
+  { value: "first_underscore", label: "Rev is after First Underscore" },
+  { value: "last_underscore", label: "Rev is after Last Underscore" },
+];
+
+const LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "en", label: "English" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+  { value: "de", label: "German" },
+  { value: "pt", label: "Portuguese" },
+  { value: "it", label: "Italian" },
+  { value: "ja", label: "Japanese" },
+  { value: "zh", label: "Chinese" },
+];
+
+export type UploadDrawingsSubmission = {
+  files: File[];
+  setId: string;
+  setName: string;
+  defaultDrawingDate: string;
+  defaultReceivedDate: string;
+  defaultRevision: string;
+  drawingNoRevMode: DrawingNoRevMode;
+  getNumberFromFilename: boolean;
+  drawingLanguage: string;
+};
+
+function UploadDrawingsModal({
+  projectId,
+  initialFiles,
+  onClose,
+  onSubmit,
+}: {
+  projectId: string;
+  initialFiles?: File[];
+  onClose: () => void;
+  onSubmit: (data: UploadDrawingsSubmission) => Promise<void> | void;
+}) {
+  const NEW_SET_VALUE = "__new__";
+
+  const [sets, setSets] = useState<DrawingSet[]>([]);
+  const [setsLoading, setSetsLoading] = useState(true);
+  const [files, setFiles] = useState<File[]>(() => initialFiles ?? []);
+  const [setId, setSetId] = useState<string>("");
+  const [newSetName, setNewSetName] = useState("");
+  const [defaultDrawingDate, setDefaultDrawingDate] = useState("");
+  const [defaultReceivedDate, setDefaultReceivedDate] = useState("");
+  const [defaultRevision, setDefaultRevision] = useState("");
+  const [drawingNoRevMode, setDrawingNoRevMode] = useState<DrawingNoRevMode>("none");
+  const [getNumberFromFilename, setGetNumberFromFilename] = useState(false);
+  const [drawingLanguage, setDrawingLanguage] = useState("en");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/drawings/sets`);
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setSets(data.sets ?? []);
+        }
+      } finally {
+        if (!cancelled) setSetsLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  // Pre-fill defaults from the chosen existing set so the form mirrors
+  // how the set was originally created.
+  useEffect(() => {
+    if (!setId || setId === NEW_SET_VALUE) return;
+    const set = sets.find((s) => s.id === setId);
+    if (!set) return;
+    setDefaultDrawingDate(set.default_drawing_date ?? "");
+    setDefaultReceivedDate(set.default_received_date ?? "");
+    setDefaultRevision(set.default_revision ?? "");
+    if (set.drawing_no_rev_mode) {
+      const mode = REV_MODE_OPTIONS.find((m) => m.value === set.drawing_no_rev_mode);
+      if (mode) setDrawingNoRevMode(mode.value);
+    }
+    setGetNumberFromFilename(!!set.get_number_from_filename);
+    if (set.drawing_language) setDrawingLanguage(set.drawing_language);
+  }, [setId, sets]);
+
+  function addFiles(incoming: FileList | File[]) {
+    const next: File[] = [];
+    const list = Array.from(incoming);
+    for (const f of list) {
+      if (!f.name.toLowerCase().endsWith(".pdf")) continue;
+      if (files.some((existing) => existing.name === f.name && existing.size === f.size)) continue;
+      next.push(f);
+    }
+    if (next.length === 0) return;
+    setFiles((prev) => [...prev, ...next]);
+  }
+
+  function removeFile(index: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function handleDropFiles(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
+  }
+
+  function handleDragOverFiles(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDragLeaveFiles(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+  }
+
+  const isCreatingNewSet = setId === NEW_SET_VALUE;
+  const requiredSetReady = isCreatingNewSet
+    ? newSetName.trim().length > 0
+    : setId.length > 0;
+  const canSubmit = files.length > 0 && requiredSetReady && !submitting;
+
+  async function handleProcess() {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      let resolvedSetId = setId;
+      let resolvedSetName = sets.find((s) => s.id === setId)?.name ?? "";
+
+      if (isCreatingNewSet) {
+        const createRes = await fetch(`/api/projects/${projectId}/drawings/sets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: newSetName.trim(),
+            default_drawing_date: defaultDrawingDate || null,
+            default_received_date: defaultReceivedDate || null,
+            default_revision: defaultRevision || null,
+            drawing_no_rev_mode: drawingNoRevMode,
+            get_number_from_filename: getNumberFromFilename,
+            drawing_language: drawingLanguage,
+          }),
+        });
+        if (!createRes.ok) {
+          const errBody = await createRes.json().catch(() => ({}));
+          throw new Error(errBody.error ?? "Could not create drawing set");
+        }
+        const created = await createRes.json();
+        resolvedSetId = created.id;
+        resolvedSetName = created.name;
+      }
+
+      await onSubmit({
+        files,
+        setId: resolvedSetId,
+        setName: resolvedSetName,
+        defaultDrawingDate,
+        defaultReceivedDate,
+        defaultRevision,
+        drawingNoRevMode,
+        getNumberFromFilename,
+        drawingLanguage,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-lg font-semibold text-gray-900">Upload Drawings</h2>
+          <div className="flex items-center gap-2">
+            <span
+              title="Each page becomes a drawing you can tag with sheet number, title, revision, etc."
+              className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-500 text-xs font-medium cursor-help"
+            >
+              ?
+            </span>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {/* Attach files */}
+          <div
+            onDrop={handleDropFiles}
+            onDragOver={handleDragOverFiles}
+            onDragLeave={handleDragLeaveFiles}
+            className={`rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors ${
+              isDragging ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-gray-50"
+            }`}
+          >
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-4 py-1.5 bg-gray-700 text-white text-sm font-medium rounded-md hover:bg-gray-800 transition-colors"
+              type="button"
+            >
+              Attach Files
+            </button>
+            <p className="text-xs text-gray-500 mt-2">or Drag &amp; Drop</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.length) addFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+
+          {files.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {files.map((file, i) => (
+                <span
+                  key={`${file.name}-${i}`}
+                  className="inline-flex items-center gap-1.5 max-w-full pl-3 pr-1.5 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium"
+                >
+                  <span className="truncate max-w-[260px]" title={file.name}>{file.name}</span>
+                  <button
+                    onClick={() => removeFile(i)}
+                    className="flex items-center justify-center w-5 h-5 rounded-full hover:bg-blue-200 transition-colors"
+                    title="Remove file"
+                    type="button"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Drawing Set */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-800 mb-1">
+              Drawing Set<span className="text-red-500 ml-0.5">*</span>
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              Group and label drawings into a collection as they are issued to keep them organized.
+            </p>
+            <select
+              value={setId}
+              onChange={(e) => setSetId(e.target.value)}
+              disabled={setsLoading}
+              className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">{setsLoading ? "Loading…" : "Select or Create set"}</option>
+              {sets.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+              <option value={NEW_SET_VALUE}>+ Create new set…</option>
+            </select>
+            {isCreatingNewSet && (
+              <input
+                type="text"
+                value={newSetName}
+                onChange={(e) => setNewSetName(e.target.value)}
+                placeholder="New set name"
+                className="mt-2 w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            )}
+          </div>
+
+          {/* Default dates */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">Default Drawing Date</label>
+              <p className="text-xs text-gray-500 mb-2">Enter the date the drawing was authored.</p>
+              <input
+                type="date"
+                value={defaultDrawingDate}
+                onChange={(e) => setDefaultDrawingDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">Default Received Date</label>
+              <p className="text-xs text-gray-500 mb-2">Enter the date the drawings were received from the design team.</p>
+              <input
+                type="date"
+                value={defaultReceivedDate}
+                onChange={(e) => setDefaultReceivedDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Advanced */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              className="flex items-center gap-2 text-sm font-semibold text-gray-800"
+            >
+              <span
+                className={`flex items-center justify-center w-7 h-7 border border-gray-300 rounded-md transition-transform ${advancedOpen ? "rotate-90" : ""}`}
+              >
+                <svg className="w-3.5 h-3.5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </span>
+              Advanced Options
+              <span
+                title="These settings guide how the AI scans each sheet's title block."
+                className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 text-gray-500 text-xs font-medium cursor-help"
+              >
+                ?
+              </span>
+            </button>
+
+            {advancedOpen && (
+              <div className="mt-4 space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Default Revision</label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Enter your drawing set&apos;s default revision number or letter, if applicable.
+                  </p>
+                  <input
+                    type="text"
+                    value={defaultRevision}
+                    onChange={(e) => setDefaultRevision(e.target.value)}
+                    className="w-24 border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Drawing No. Contains Rev</label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Select the option that applies to your drawing revision number.
+                  </p>
+                  <select
+                    value={drawingNoRevMode}
+                    onChange={(e) => setDrawingNoRevMode(e.target.value as DrawingNoRevMode)}
+                    className="w-full max-w-xs border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    {REV_MODE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Drawing Number</label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Have the AI pull the number and title of an individual drawing based off the filename.
+                  </p>
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={getNumberFromFilename}
+                      onChange={(e) => setGetNumberFromFilename(e.target.checked)}
+                      className="rounded border-gray-300 focus:ring-blue-500"
+                    />
+                    Get From Filename
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Drawing Language</label>
+                  <p className="text-xs text-gray-500 mb-2">Select the language your drawings are in.</p>
+                  <select
+                    value={drawingLanguage}
+                    onChange={(e) => setDrawingLanguage(e.target.value)}
+                    className="w-40 border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    {LANGUAGE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+          <p className="text-xs text-gray-500"><span className="text-red-500">*</span> Required fields</p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="px-4 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-md transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleProcess}
+              disabled={!canSubmit}
+              className={`px-5 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                canSubmit
+                  ? "bg-blue-600 text-white hover:bg-blue-700"
+                  : "bg-rose-200 text-rose-400 cursor-not-allowed"
+              }`}
+            >
+              {submitting ? "Processing…" : "Process"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Review Extracted Metadata Modal ───────────────────────────────────────────
 
 type ReviewRow = {
@@ -1412,13 +1865,16 @@ export default function DrawingsClient({
   // Review modal state — opens after upload so user can approve auto-extracted metadata
   const [reviewModal, setReviewModal] = useState<{ uploadId: string; drawings: DrawingPage[] } | null>(null);
 
+  // Upload Drawings modal — the new Procore-style entry point for uploading.
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [prefillFiles, setPrefillFiles] = useState<File[]>([]);
+
   // Thumbnail cache: drawingId → dataUrl
   const thumbnails = useRef<Map<string, string>>(new Map());
   const [thumbVersion, setThumbVersion] = useState(0); // force re-render when thumb ready
 
   const [showReportsMenu, setShowReportsMenu] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadsPanelRef = useRef<HTMLDivElement>(null);
   const reportsMenuRef = useRef<HTMLDivElement>(null);
 
@@ -1512,10 +1968,20 @@ export default function DrawingsClient({
 
   // ── Upload ───────────────────────────────────────────────────────────────────
 
-  async function handleUpload(file: File) {
+  type HandleUploadOptions = {
+    setId?: string;
+    defaultDrawingDate?: string;
+    defaultReceivedDate?: string;
+    defaultRevision?: string;
+    drawingNoRevMode?: DrawingNoRevMode;
+    getNumberFromFilename?: boolean;
+    drawingLanguage?: string;
+  };
+
+  async function handleUpload(file: File, opts: HandleUploadOptions = {}): Promise<DrawingUpload | null> {
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       alert("Only PDF files are accepted.");
-      return;
+      return null;
     }
 
     setUploading(true);
@@ -1545,7 +2011,17 @@ export default function DrawingsClient({
       const processRes = await fetch(`/api/projects/${projectId}/drawings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storagePath, filename: file.name }),
+        body: JSON.stringify({
+          storagePath,
+          filename: file.name,
+          setId: opts.setId ?? null,
+          defaultDrawingDate: opts.defaultDrawingDate ?? null,
+          defaultReceivedDate: opts.defaultReceivedDate ?? null,
+          defaultRevision: opts.defaultRevision ?? null,
+          drawingNoRevMode: opts.drawingNoRevMode ?? "none",
+          getNumberFromFilename: opts.getNumberFromFilename ?? false,
+          drawingLanguage: opts.drawingLanguage ?? "en",
+        }),
       });
 
       if (!processRes.ok) {
@@ -1563,26 +2039,41 @@ export default function DrawingsClient({
       if (data.upload?.id && newDrawings.length > 0) {
         setReviewModal({ uploadId: data.upload.id as string, drawings: newDrawings });
       }
+      return data.upload as DrawingUpload;
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed");
       setUploadStatus("");
+      return null;
     } finally {
       setUploading(false);
     }
   }
 
-  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files?.[0]) {
-      handleUpload(e.target.files[0]);
-      e.target.value = "";
+  async function handleUploadModalSubmit(data: UploadDrawingsSubmission) {
+    setShowUploadModal(false);
+    for (const file of data.files) {
+      await handleUpload(file, {
+        setId: data.setId,
+        defaultDrawingDate: data.defaultDrawingDate,
+        defaultReceivedDate: data.defaultReceivedDate,
+        defaultRevision: data.defaultRevision,
+        drawingNoRevMode: data.drawingNoRevMode,
+        getNumberFromFilename: data.getNumberFromFilename,
+        drawingLanguage: data.drawingLanguage,
+      });
     }
   }
 
   function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) handleUpload(file);
+    // Drag-and-drop onto the page surfaces the Upload Drawings modal
+    // with the dropped file(s) attached, so the user still picks a set
+    // and reviews defaults before processing.
+    const dropped = Array.from(e.dataTransfer.files ?? []).filter((f) => f.name.toLowerCase().endsWith(".pdf"));
+    if (dropped.length === 0) return;
+    setPrefillFiles(dropped);
+    setShowUploadModal(true);
   }
 
   function handleDragOver(e: DragEvent<HTMLDivElement>) {
@@ -1754,7 +2245,7 @@ export default function DrawingsClient({
             <svg className="w-12 h-12 text-gray-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            <p className="text-base font-semibold text-gray-700 mb-1">Drop a PDF drawing set here</p>
+            <p className="text-base font-semibold text-gray-700 mb-1">Upload Drawings</p>
             <p className="text-sm text-gray-400 mb-6">Each page becomes a drawing you can tag with No., Title, Rev…</p>
             {uploading ? (
               <div className="flex items-center justify-center gap-2 text-sm text-blue-600">
@@ -1766,21 +2257,22 @@ export default function DrawingsClient({
               </div>
             ) : (
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => { setPrefillFiles([]); setShowUploadModal(true); }}
                 className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
               >
-                Choose File
+                Upload Drawings
               </button>
             )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              className="hidden"
-              onChange={handleFileInput}
-            />
           </div>
         </div>
+        {showUploadModal && (
+          <UploadDrawingsModal
+            projectId={projectId}
+            initialFiles={prefillFiles}
+            onClose={() => { setShowUploadModal(false); setPrefillFiles([]); }}
+            onSubmit={handleUploadModalSubmit}
+          />
+        )}
       </div>
     );
   }
@@ -1835,7 +2327,14 @@ export default function DrawingsClient({
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Logout</button>
         </div>
       </header>
-      <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileInput} />
+      {showUploadModal && (
+        <UploadDrawingsModal
+          projectId={projectId}
+          initialFiles={prefillFiles}
+          onClose={() => { setShowUploadModal(false); setPrefillFiles([]); }}
+          onSubmit={handleUploadModalSubmit}
+        />
+      )}
 
       <ProjectNav projectId={projectId} />
 
@@ -1897,7 +2396,7 @@ export default function DrawingsClient({
             <button className="btn-secondary">View Locations</button>
             <button className="btn-secondary">Export</button>
             <button
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => { setPrefillFiles([]); setShowUploadModal(true); }}
               disabled={uploading}
               className="btn-primary disabled:opacity-50"
             >

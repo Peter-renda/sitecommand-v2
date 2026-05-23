@@ -66,8 +66,22 @@ export async function POST(
   const supabase = getSupabase();
 
   // Accept JSON: the client already uploaded the file directly to Supabase
-  // using a signed URL (bypassing Vercel's 4.5 MB body limit).
-  const { storagePath, filename } = await req.json() as { storagePath: string; filename: string };
+  // using a signed URL (bypassing Vercel's 4.5 MB body limit). The Upload
+  // Drawings modal also forwards the set selection and the upload-time
+  // defaults (dates, default revision, scan hints) so they can be applied
+  // on creation and read back during the AI title-block extraction.
+  const body = await req.json() as {
+    storagePath: string;
+    filename: string;
+    setId?: string | null;
+    defaultDrawingDate?: string | null;
+    defaultReceivedDate?: string | null;
+    defaultRevision?: string | null;
+    drawingNoRevMode?: string | null;
+    getNumberFromFilename?: boolean;
+    drawingLanguage?: string | null;
+  };
+  const { storagePath, filename } = body;
 
   if (!storagePath || !filename) {
     return NextResponse.json({ error: "storagePath and filename are required" }, { status: 400 });
@@ -75,6 +89,17 @@ export async function POST(
   if (!filename.toLowerCase().endsWith(".pdf")) {
     return NextResponse.json({ error: "Only PDF files are accepted" }, { status: 400 });
   }
+
+  const VALID_REV_MODES = new Set(["none", "first_decimal", "first_underscore", "last_underscore"]);
+  const drawingNoRevMode = typeof body.drawingNoRevMode === "string" && VALID_REV_MODES.has(body.drawingNoRevMode)
+    ? body.drawingNoRevMode
+    : "none";
+  const defaultDrawingDate = body.defaultDrawingDate || null;
+  const defaultReceivedDate = body.defaultReceivedDate || null;
+  const defaultRevision = body.defaultRevision || null;
+  const drawingLanguage = body.drawingLanguage || "en";
+  const getNumberFromFilename = !!body.getNumberFromFilename;
+  const setId = body.setId || null;
 
   // Download the file from Supabase Storage (internal — no Vercel body limit)
   const { data: fileBlob, error: downloadError } = await supabase.storage
@@ -111,6 +136,13 @@ export async function POST(
       filename,
       page_count: pageCount,
       uploaded_by_name: session.username,
+      set_id: setId,
+      default_drawing_date: defaultDrawingDate,
+      default_received_date: defaultReceivedDate,
+      default_revision: defaultRevision,
+      drawing_no_rev_mode: drawingNoRevMode,
+      get_number_from_filename: getNumberFromFilename,
+      drawing_language: drawingLanguage,
     })
     .select()
     .single();
@@ -139,7 +171,9 @@ export async function POST(
         continue; // skip this page rather than failing the whole upload
       }
 
-      // Insert project_drawings row with its own storage_path
+      // Insert project_drawings row with its own storage_path. Default
+      // dates/revision from the upload settings are stamped now so the
+      // sheet has a baseline even before the user reviews AI extraction.
       const { data: drawing, error: drawingError } = await supabase
         .from("project_drawings")
         .insert({
@@ -147,6 +181,9 @@ export async function POST(
           upload_id: uploadRow.id,
           page_number: i + 1,
           storage_path: pagePath,
+          drawing_date: defaultDrawingDate,
+          received_date: defaultReceivedDate,
+          revision: defaultRevision,
         })
         .select()
         .single();
