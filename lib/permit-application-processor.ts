@@ -1,14 +1,17 @@
-// Server-side Permit Application processor — 3-stage pipeline.
+// Server-side Permit Application processor.
 //
-// AcroForm PDFs (Stage 1→2→3):
-//   1. extractAcroFields — enumerate form field names (pdf-lib)
-//   2. Gemini — map project data → field values (JSON in / JSON out)
+// AcroForm PDFs:
+//   1. extractAcroFormPlacements — enumerate every form field's widget rect (pdf-lib)
+//   2. Gemini — fill values keyed by field number, with the PDF as visual context
 //   3. fillPermitApplication — write values into AcroForm, flatten (pdf-lib)
 //
-// Flat / scanned PDFs (Stage 1→2→3):
+// Flat / scanned PDFs:
 //   1. extractTextLayout — extract all text + coordinates (pdfjs-dist)
-//   2. Gemini — semantic mapping using text layout (no PDF image sent)
+//   2. Gemini — return (fieldNum, value, drawMode) keyed off a numbered text list
 //   3. fillPermitApplication — draw text/marks at computed positions (pdf-lib)
+//
+// Either path produces PermitField[] where every field has a position on the
+// PDF, so the in-PDF editor can render an editable yellow box for each one.
 
 import { GoogleGenAI, Type } from "@google/genai";
 import {
@@ -32,9 +35,6 @@ import {
 
 export type PermitFieldType = "text" | "multiline" | "checkbox" | "date";
 
-// Normalized 0–1 bounding box, top-left origin (legacy — kept for AcroForm path).
-export type BoundingBox = { x1: number; y1: number; x2: number; y2: number };
-
 // Normalized 0–1 rectangle, top-left origin (used by the in-PDF editor to
 // position an editable box over an AcroForm widget).
 export type FieldRect = { page: number; x: number; y: number; w: number; h: number };
@@ -47,18 +47,15 @@ export type PermitField = {
   type: PermitFieldType;
   pageIndex?: number;
 
-  // Legacy bounding-box overlay (AcroForm fallback path).
-  boundingBox?: BoundingBox;
-
-  // Text-layout overlay (flat-PDF path). Coordinates are normalized 0–1 in
-  // pdf-lib space (bottom-left origin, y increases upward).
+  // Flat-PDF overlay: text-layout coordinates from the flat scan path. Values
+  // are normalized 0–1 in pdf-lib space (bottom-left origin, y increases up).
   drawX?: number;
   drawY?: number;
-  drawW?: number; // normalized width of the fill area
+  drawW?: number;
   drawMode?: "fill" | "fill_below" | "check";
 
-  // AcroForm widget rectangle (normalized, top-left origin) — lets the
-  // in-PDF editor draw an editable box exactly over the form field.
+  // AcroForm overlay: widget rectangle (normalized, top-left origin). Used by
+  // the editor to render an editable box exactly over the form field.
   rect?: FieldRect;
 };
 
@@ -80,34 +77,43 @@ const MAX_FIELDS = 150;
 
 // ── Gemini system instructions ─────────────────────────────────────────────
 
-const SCAN_SYSTEM_INSTRUCTION = `You are an expert assistant that fills out construction permit application forms.
+const SCAN_SYSTEM_INSTRUCTION = `You are filling out an interactive construction permit application form.
 
 You receive:
-1. A permit application PDF (a blank or partially-blank form).
-2. A JSON object of known project data ("PROJECT DATA").
-3. A list of the PDF's interactive AcroForm field names ("ACROFORM FIELDS"), which may be empty.
+1. The permit application PDF (a blank or partially-blank form).
+2. PROJECT DATA: a JSON object of known information about the project.
+3. FORM FIELDS: a numbered list of the PDF's interactive AcroForm fields:
+   Field N | name="<acroname>" | type=<text|checkbox|dropdown|optionlist>
 
-Your job:
-- Identify EVERY field on the form that an applicant is expected to fill in.
-- For each field, supply the best value you can justify from PROJECT DATA. If the data does not clearly support an answer, leave the value as an empty string.
+Your task: for every field that should be filled OR checked from PROJECT DATA, return an entry. Look at the PDF visually to understand what each field is asking for (the field name alone is rarely enough).
 
-Return ONLY a JSON array — no markdown fences, no commentary. Each element must be:
+Return ONLY a JSON array — no markdown fences, no commentary. Each element:
 {
-  "key": string,            // short snake_case identifier, e.g. "applicant_name"
-  "label": string,          // human-readable label exactly as a person reads it on the form
-  "value": string,          // best value from PROJECT DATA, or "" if unknown
-  "acroField": string|null, // the matching name from ACROFORM FIELDS, or null
-  "type": "text" | "multiline" | "checkbox" | "date"
+  "fieldNum": integer,   // the Field N number — return the exact number
+  "label": string,       // a human-readable description of what this field asks for, as a person reads it on the form (e.g. "Applicant Name", "Project Address", "Phone Number")
+  "value": string        // value from PROJECT DATA; for checkboxes use "Yes" when it should be checked, otherwise omit the entry
 }
 
 Rules:
-- Include every fillable field, even ones you cannot answer (use value "").
-- When ACROFORM FIELDS is non-empty, map each form field to exactly one acroField name. Never reuse an acroField for two fields. If you cannot map one, use null.
-- Never invent data. Only use values supported by PROJECT DATA.
+- Only return entries you can justify from PROJECT DATA. Never invent data.
+- Skip fields you cannot fill — do NOT return them with an empty value.
+- For checkboxes, only include the entry when it should be checked.
 - Format dates as MM/DD/YYYY.
-- For checkboxes, "value" is "Yes" when the box should be checked, otherwise "".
-- Use "multiline" for long free-text fields (scope, description), "text" for short ones.
-- Keep the fields in the order they appear on the form. Return at most 120 fields.`;
+- Each fieldNum may appear at most once.`;
+
+const ACROFORM_RESPONSE_SCHEMA = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      fieldNum: { type: Type.INTEGER },
+      label:    { type: Type.STRING },
+      value:    { type: Type.STRING },
+    },
+    required: ["fieldNum", "label", "value"],
+    propertyOrdering: ["fieldNum", "label", "value"],
+  },
+};
 
 // Used for flat / scanned PDFs. Gemini receives a numbered list of text items
 // and returns (fieldNum, value, drawMode) — no coordinate guessing required.
@@ -196,30 +202,6 @@ export async function extractTextLayout(buffer: Buffer): Promise<TextLayoutItem[
   return items;
 }
 
-// Build the compact text representation sent to Gemini. Filters out long
-// instruction paragraphs (width > 200) so the prompt stays focused on labels
-// and options only.
-function formatTextLayout(items: TextLayoutItem[]): string {
-  const LABEL_WIDTH_LIMIT = 200;
-  const filtered = items.filter((i) => i.width <= LABEL_WIDTH_LIMIT && i.text.length >= 2);
-
-  const byPage = new Map<number, TextLayoutItem[]>();
-  for (const item of filtered) {
-    const list = byPage.get(item.pageIndex) ?? [];
-    list.push(item);
-    byPage.set(item.pageIndex, list);
-  }
-
-  const lines: string[] = [];
-  for (const [pg, pageItems] of [...byPage.entries()].sort((a, b) => a[0] - b[0])) {
-    lines.push(`--- Page ${pg + 1} (y=0 is bottom, y=792 is top of letter page) ---`);
-    for (const item of pageItems.sort((a, b) => b.y - a.y || a.x - b.x)) {
-      lines.push(`  ${item.id}  y=${item.y.toFixed(0)}  x=${item.x.toFixed(0)}  w=${item.width.toFixed(0)}  "${item.text}"`);
-    }
-  }
-  return lines.join("\n");
-}
-
 // Convert anchorId + drawMode → normalized draw position stored on PermitField.
 // drawX / drawY are in pdf-lib space (bottom-left origin, 0–1 normalized).
 // drawW is the normalized width of the area available to write into.
@@ -277,36 +259,9 @@ function resolveDrawPosition(
 
 // ── Field normalization ────────────────────────────────────────────────────
 
-// Accepts Gemini's native box array [ymin, xmin, ymax, xmax] (0–1000 scale)
-// or {x1,y1,x2,y2} object; returns normalized 0–1 top-left-origin BoundingBox.
-function parseBoundingBox(raw: unknown): BoundingBox | undefined {
-  let ymin: number, xmin: number, ymax: number, xmax: number;
-
-  if (Array.isArray(raw) && raw.length >= 4) {
-    const n = raw.slice(0, 4).map(Number);
-    if (!n.every((v) => Number.isFinite(v))) return undefined;
-    [ymin, xmin, ymax, xmax] = n;
-  } else if (raw && typeof raw === "object") {
-    const o = raw as Record<string, unknown>;
-    const vals = [o.y1, o.x1, o.y2, o.x2].map(Number);
-    if (!vals.every((v) => Number.isFinite(v))) return undefined;
-    [ymin, xmin, ymax, xmax] = vals;
-  } else {
-    return undefined;
-  }
-
-  const maxVal = Math.max(Math.abs(ymin), Math.abs(xmin), Math.abs(ymax), Math.abs(xmax));
-  const divisor = maxVal > 1 ? 1000 : 1;
-  const clamp = (v: number) => Math.max(0, Math.min(1, v / divisor));
-
-  const x1 = clamp(Math.min(xmin, xmax));
-  const y1 = clamp(Math.min(ymin, ymax));
-  const x2 = clamp(Math.max(xmin, xmax));
-  const y2 = clamp(Math.max(ymin, ymax));
-
-  return x2 > x1 && y2 > y1 ? { x1, y1, x2, y2 } : undefined;
-}
-
+// Validate the field payload coming back from the client on approve. Fields
+// already carry resolved positions (rect for AcroForm, drawX/drawY/drawW for
+// flat PDFs) — we just trust and clamp.
 export function normalizePermitFields(input: unknown): PermitField[] {
   let arr: unknown = input;
   if (
@@ -353,9 +308,6 @@ export function normalizePermitFields(input: unknown): PermitField[] {
         ? Math.floor(raw.pageIndex)
         : undefined;
 
-    const boundingBox = parseBoundingBox(raw.box ?? raw.boundingBox);
-
-    // Pass-through draw coordinates from flat-PDF path (already resolved).
     const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
     const drawX = typeof raw.drawX === "number" ? clamp01(raw.drawX) : undefined;
     const drawY = typeof raw.drawY === "number" ? clamp01(raw.drawY) : undefined;
@@ -370,7 +322,7 @@ export function normalizePermitFields(input: unknown): PermitField[] {
 
     out.push({
       key, label, value, acroField, type, pageIndex,
-      boundingBox, drawX, drawY, drawW, drawMode, rect,
+      drawX, drawY, drawW, drawMode, rect,
     });
   }
 
@@ -415,83 +367,107 @@ export async function extractAcroFields(sourceBuffer: Buffer): Promise<AcroField
   }
 }
 
-// Resolve the fully-qualified field name of a widget annotation by walking the
-// T / Parent chain (a widget may be its own field, or a kid of a parent field).
-function resolveAcroFieldName(annot: PDFDict, doc: PDFDocument): string | null {
-  let node: PDFDict | undefined = annot;
-  const parts: string[] = [];
-  const seen = new Set<PDFDict>();
-  while (node && !seen.has(node)) {
-    seen.add(node);
-    const t = node.get(PDFName.of("T")) as unknown;
-    const partial =
-      t && typeof (t as { decodeText?: () => string }).decodeText === "function"
-        ? (t as { decodeText: () => string }).decodeText()
-        : null;
-    if (partial) parts.unshift(partial);
-    const parent = node.get(PDFName.of("Parent"));
-    if (!parent) break;
-    try {
-      const resolved = doc.context.lookup(parent);
-      node = resolved instanceof PDFDict ? resolved : undefined;
-    } catch {
-      break;
-    }
-  }
-  return parts.length > 0 ? parts.join(".") : null;
-}
-
-// Map each AcroForm field name → its widget rectangle (normalized 0–1,
-// top-left origin) so the in-PDF editor can overlay an editable box on it.
-export async function extractAcroFieldPositions(
+// Deterministic placement for every AcroForm field: walk `form.getFields()`
+// and use pdf-lib's own widget API to read each widget's rectangle and host
+// page. This avoids the T/Parent name-resolution issues that left some fields
+// without a position in the older approach. We emit at most one placement per
+// field name (the first widget) so checkboxes/text fields that render in
+// multiple places don't get filled twice, and we skip radio groups since
+// each widget represents an option rather than the field itself.
+export async function extractAcroFormPlacements(
   sourceBuffer: Buffer,
-): Promise<Map<string, FieldRect>> {
-  const map = new Map<string, FieldRect>();
+): Promise<Array<{ acroField: string; type: PermitFieldType | "dropdown" | "optionlist"; rect: FieldRect }>> {
+  let doc: PDFDocument;
   try {
-    const doc = await PDFDocument.load(sourceBuffer, { ignoreEncryption: true });
-    const pages = doc.getPages();
-    pages.forEach((page, pageIndex) => {
-      const pw = page.getWidth();
-      const ph = page.getHeight();
-      if (pw <= 0 || ph <= 0) return;
-      const annots = page.node.Annots();
-      if (!annots) return;
-      for (const ref of annots.asArray()) {
-        try {
-          const annot = doc.context.lookup(ref);
-          if (!(annot instanceof PDFDict)) continue;
-          const subtype = annot.get(PDFName.of("Subtype"));
-          if (!subtype || !subtype.toString().includes("Widget")) continue;
-          const rectObj = doc.context.lookupMaybe(annot.get(PDFName.of("Rect")), PDFArray);
-          if (!rectObj || rectObj.size() < 4) continue;
-          const nums = [0, 1, 2, 3].map((i) => {
-            const el = rectObj.get(i);
-            return el instanceof PDFNumber ? el.asNumber() : NaN;
-          });
-          if (nums.some((v) => !Number.isFinite(v))) continue;
-          const x1 = Math.min(nums[0], nums[2]);
-          const y1 = Math.min(nums[1], nums[3]);
-          const x2 = Math.max(nums[0], nums[2]);
-          const y2 = Math.max(nums[1], nums[3]);
-          if (x2 - x1 <= 0 || y2 - y1 <= 0) continue;
-          const name = resolveAcroFieldName(annot, doc);
-          if (!name || map.has(name)) continue;
-          map.set(name, {
+    doc = await PDFDocument.load(sourceBuffer, { ignoreEncryption: true });
+  } catch {
+    return [];
+  }
+
+  const pages = doc.getPages();
+  const widgetToField = new Map<
+    PDFDict,
+    { name: string; type: PermitFieldType | "dropdown" | "optionlist" }
+  >();
+
+  try {
+    const form = doc.getForm();
+    for (const field of form.getFields()) {
+      let type: PermitFieldType | "dropdown" | "optionlist" = "text";
+      if (field instanceof PDFCheckBox) type = "checkbox";
+      else if (field instanceof PDFDropdown) type = "dropdown";
+      else if (field instanceof PDFOptionList) type = "optionlist";
+      else if (field instanceof PDFRadioGroup) continue; // skip for now
+      else if (field instanceof PDFTextField) type = "text";
+      const name = field.getName();
+      try {
+        for (const widget of field.acroField.getWidgets()) {
+          widgetToField.set(widget.dict, { name, type });
+        }
+      } catch { /* skip malformed widget list */ }
+    }
+  } catch {
+    return [];
+  }
+
+  const out: Array<{ acroField: string; type: PermitFieldType | "dropdown" | "optionlist"; rect: FieldRect }> = [];
+  const seenNames = new Set<string>();
+
+  pages.forEach((page, pageIndex) => {
+    const pw = page.getWidth();
+    const ph = page.getHeight();
+    if (pw <= 0 || ph <= 0) return;
+    const annots = page.node.Annots();
+    if (!annots) return;
+    for (const ref of annots.asArray()) {
+      try {
+        const annot = doc.context.lookup(ref);
+        if (!(annot instanceof PDFDict)) continue;
+        const fieldInfo = widgetToField.get(annot);
+        if (!fieldInfo) continue;
+        if (seenNames.has(fieldInfo.name)) continue;
+        const rectObj = doc.context.lookupMaybe(annot.get(PDFName.of("Rect")), PDFArray);
+        if (!rectObj || rectObj.size() < 4) continue;
+        const nums = [0, 1, 2, 3].map((i) => {
+          const el = rectObj.get(i);
+          return el instanceof PDFNumber ? el.asNumber() : NaN;
+        });
+        if (nums.some((v) => !Number.isFinite(v))) continue;
+        const x1 = Math.min(nums[0], nums[2]);
+        const y1 = Math.min(nums[1], nums[3]);
+        const x2 = Math.max(nums[0], nums[2]);
+        const y2 = Math.max(nums[1], nums[3]);
+        if (x2 - x1 <= 0 || y2 - y1 <= 0) continue;
+        seenNames.add(fieldInfo.name);
+        out.push({
+          acroField: fieldInfo.name,
+          type: fieldInfo.type,
+          rect: {
             page: pageIndex,
             x: x1 / pw,
-            y: (ph - y2) / ph, // PDF bottom-left → screen top-left
+            y: (ph - y2) / ph,
             w: (x2 - x1) / pw,
             h: (y2 - y1) / ph,
-          });
-        } catch {
-          // skip malformed annotation
-        }
+          },
+        });
+      } catch {
+        // skip malformed annotation
       }
-    });
-  } catch {
-    // return whatever was collected
-  }
-  return map;
+    }
+  });
+
+  return out;
+}
+
+// Turn an AcroForm field name into a readable fallback label, e.g.
+// "OwnerName" → "Owner Name", "owner_address" → "owner address".
+function humanizeAcroFieldName(name: string): string {
+  return name
+    .replace(/^.*\./, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // ── Gemini scan ────────────────────────────────────────────────────────────
@@ -630,10 +606,31 @@ export async function scanPermitApplication(
     return fields;
   }
 
-  // ── AcroForm PDF: vision path ────────────────────────────────────────────
+  // ── AcroForm PDF: deterministic-placement path ───────────────────────────
+  // We enumerate every AcroForm field + its widget rectangle ourselves, then
+  // ask Gemini to fill values keyed by field number. This way every field
+  // shown to the user is guaranteed to be positioned on the PDF.
+  const placements = await extractAcroFormPlacements(sourceBuffer);
+  if (placements.length === 0) {
+    throw new Error("No interactive form fields could be positioned on this PDF.");
+  }
+
+  const fieldListLines = placements.map(
+    (p, idx) => `Field ${idx + 1} | name="${p.acroField}" | type=${p.type}`,
+  );
+
   const pdfBase64 = sourceBuffer.toString("base64");
-  const acroList = acroFields.map((a) => `- ${a.name} (${a.type})`).join("\n");
-  const promptText = `PROJECT DATA:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\nACROFORM FIELDS:\n${acroList}\n\nScan this permit application PDF and return the JSON array of fields.`;
+  const promptText = [
+    "PROJECT DATA:",
+    "```json",
+    JSON.stringify(context, null, 2),
+    "```",
+    "",
+    "FORM FIELDS:",
+    fieldListLines.join("\n"),
+    "",
+    "Return the JSON array of fill instructions.",
+  ].join("\n");
 
   const result = await ai.models.generateContent({
     model: "gemini-2.5-flash",
@@ -649,6 +646,7 @@ export async function scanPermitApplication(
     config: {
       systemInstruction: SCAN_SYSTEM_INSTRUCTION,
       responseMimeType: "application/json",
+      responseSchema: ACROFORM_RESPONSE_SCHEMA,
       thinkingConfig: { thinkingBudget: 0 },
     },
   });
@@ -661,17 +659,48 @@ export async function scanPermitApplication(
   try { parsed = JSON.parse(raw); }
   catch { throw new Error("Could not read the AI response while scanning the permit."); }
 
-  const acroSet = new Set(acroFields.map((a) => a.name));
-  const positions = await extractAcroFieldPositions(sourceBuffer);
-  const fields = normalizePermitFields(parsed).map((f) => {
-    const acroField = f.acroField && acroSet.has(f.acroField) ? f.acroField : null;
-    const rect = acroField ? positions.get(acroField) : undefined;
-    return { ...f, acroField, rect, pageIndex: rect ? rect.page : f.pageIndex };
-  });
-
-  if (fields.length === 0) {
-    throw new Error("The AI did not detect any fillable fields in this PDF.");
+  // Index Gemini's responses by fieldNum (1-based).
+  const fills = new Map<number, { label?: string; value: string }>();
+  if (Array.isArray(parsed)) {
+    for (const raw of parsed) {
+      if (!raw || typeof raw !== "object") continue;
+      const r = raw as Record<string, unknown>;
+      const fieldNum = typeof r.fieldNum === "number" ? Math.round(r.fieldNum) : NaN;
+      if (!Number.isFinite(fieldNum) || fieldNum < 1 || fieldNum > placements.length) continue;
+      const value = String(r.value ?? "").slice(0, 5000);
+      const label = typeof r.label === "string" ? r.label.trim().slice(0, 250) : undefined;
+      fills.set(fieldNum, { label, value });
+    }
   }
+
+  // Emit one PermitField per placement, so every field has a position on the
+  // PDF whether or not Gemini filled it. Users can edit any value directly.
+  const fields: PermitField[] = [];
+  const seenKeys = new Set<string>();
+  placements.forEach((placement, idx) => {
+    const fill = fills.get(idx + 1);
+    const label = (fill?.label && fill.label.length > 0)
+      ? fill.label
+      : humanizeAcroFieldName(placement.acroField) || `Field ${idx + 1}`;
+    let baseKey = placement.acroField.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!baseKey) baseKey = `field_${idx + 1}`;
+    let key = baseKey;
+    let n = 2;
+    while (seenKeys.has(key)) { key = `${baseKey}_${n}`; n++; }
+    seenKeys.add(key);
+
+    const type: PermitFieldType = placement.type === "checkbox" ? "checkbox" : "text";
+
+    fields.push({
+      key,
+      label,
+      value: fill?.value ?? "",
+      acroField: placement.acroField,
+      type,
+      pageIndex: placement.rect.page,
+      rect: placement.rect,
+    });
+  });
 
   return fields;
 }
@@ -692,7 +721,6 @@ function sanitizeForPdf(value: string): string {
     .replace(/…/g, "...")
     .replace(/[•·]/g, "-")
     .replace(/\t/g, "  ")
-    // eslint-disable-next-line no-control-regex
     .replace(/[^\x0A\x0D\x20-\xFF]/g, "");
 }
 
@@ -858,51 +886,6 @@ export async function fillPermitApplication(
         if (text.trim()) page.drawText(text, { x, y, size: FONT_SIZE, font, color: rgb(0, 0, 0) });
       }
 
-      overlaid.add(field.key);
-    }
-  }
-
-  // Phase 2b — legacy bounding-box overlay (fallback for Gemini-vision fields).
-  const withBox = fields.filter(
-    (f) => !applied.has(f.key) && !overlaid.has(f.key) && f.value.trim() && f.boundingBox && f.pageIndex !== undefined,
-  );
-
-  if (withBox.length > 0) {
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    for (const field of withBox) {
-      const page = originalPages[field.pageIndex!];
-      if (!page) continue;
-      const { width: W, height: H } = page.getSize();
-      const { x1, y1, x2, y2 } = field.boundingBox!;
-      const bW = (x2 - x1) * W;
-      const bH = (y2 - y1) * H;
-      const bLeft = x1 * W;
-      const bBottom = H - y2 * H;
-
-      if (field.type === "checkbox") {
-        if (isTruthy(field.value)) {
-          const sz = Math.min(13, Math.max(8, bH * 0.9));
-          page.drawText("X", { x: bLeft + bW / 2 - sz * 0.3, y: bBottom + bH / 2 - sz * 0.35, size: sz, font, color: rgb(0, 0, 0) });
-        }
-      } else {
-        const sanitized = sanitizeForPdf(field.value).replace(/\r/g, "").trim();
-        if (!sanitized) continue;
-        const sz = field.type === "multiline" ? Math.min(10, Math.max(8, bH * 0.3)) : Math.min(10.5, Math.max(8, bH * 0.7));
-        if (field.type === "multiline") {
-          const lineH = sz * 1.3;
-          const lines = wrapText(sanitized, font, sz, bW - 4);
-          let lineY = bBottom + bH - sz - 2;
-          for (const line of lines) {
-            if (lineY < bBottom) break;
-            if (line.trim()) page.drawText(line, { x: bLeft + 2, y: lineY, size: sz, font, color: rgb(0, 0, 0) });
-            lineY -= lineH;
-          }
-        } else {
-          let text = sanitized.split("\n")[0].trim();
-          while (text.length > 1 && font.widthOfTextAtSize(text, sz) > bW - 4) text = text.slice(0, -1);
-          if (text.trim()) page.drawText(text, { x: bLeft + 2, y: bBottom + bH * 0.18, size: sz, font, color: rgb(0, 0, 0) });
-        }
-      }
       overlaid.add(field.key);
     }
   }

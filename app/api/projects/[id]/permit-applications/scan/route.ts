@@ -14,17 +14,66 @@ export const maxDuration = 120;
 type SessionLike = { id: string; username?: string; email?: string };
 
 // Gathers the project data Gemini searches when proposing field values.
+// In addition to project metadata + directory, we include recent RFIs,
+// submittals, drawings, specifications, and daily log notes so Gemini can
+// answer permit questions about scope of work, design references, etc.
 async function buildProjectContext(
   projectId: string,
   session: SessionLike,
 ): Promise<PermitProjectContext> {
   const supabase = getSupabase();
 
-  const { data: project } = await supabase
-    .from("projects")
-    .select("*")
-    .eq("id", projectId)
-    .maybeSingle();
+  const [
+    projectRes,
+    contactsRes,
+    rfisRes,
+    submittalsRes,
+    drawingsRes,
+    specsRes,
+    dailyLogsRes,
+  ] = await Promise.all([
+    supabase.from("projects").select("*").eq("id", projectId).maybeSingle(),
+    supabase
+      .from("directory_contacts")
+      .select(
+        "id, type, first_name, last_name, email, phone, business_phone, company, job_title, address, license_number, city, state, zip",
+      )
+      .eq("project_id", projectId)
+      .limit(80),
+    supabase
+      .from("rfis")
+      .select("rfi_number, subject, question, status, drawing_number")
+      .eq("project_id", projectId)
+      .or("is_deleted.is.null,is_deleted.eq.false")
+      .order("rfi_number", { ascending: false })
+      .limit(30),
+    supabase
+      .from("submittals")
+      .select("submittal_number, title, status, description, submittal_type, cost_code")
+      .eq("project_id", projectId)
+      .or("is_deleted.is.null,is_deleted.eq.false")
+      .order("submittal_number", { ascending: false })
+      .limit(30),
+    supabase
+      .from("project_drawings")
+      .select("drawing_no, title, revision, drawing_date")
+      .eq("project_id", projectId)
+      .order("drawing_no")
+      .limit(60),
+    supabase
+      .from("project_specifications")
+      .select("spec_number, title")
+      .eq("project_id", projectId)
+      .limit(60),
+    supabase
+      .from("daily_logs")
+      .select("log_date, weather_conditions, notes, manpower")
+      .eq("project_id", projectId)
+      .order("log_date", { ascending: false })
+      .limit(10),
+  ]);
+
+  const project = projectRes.data;
 
   let companyName = "";
   if (project?.company_id) {
@@ -36,14 +85,6 @@ async function buildProjectContext(
     companyName = company?.name ?? "";
   }
 
-  const { data: contacts } = await supabase
-    .from("directory_contacts")
-    .select(
-      "id, type, first_name, last_name, email, phone, business_phone, company, job_title, address, license_number, city, state, zip",
-    )
-    .eq("project_id", projectId)
-    .limit(80);
-
   const roles = (project?.project_roles ?? {}) as Record<string, string[]>;
   const contactRoles: Record<string, string[]> = {};
   for (const [roleName, ids] of Object.entries(roles)) {
@@ -53,7 +94,7 @@ async function buildProjectContext(
     }
   }
 
-  const directory = (contacts ?? [])
+  const directory = (contactsRes.data ?? [])
     .map((c) => {
       const name =
         c.type === "company"
@@ -75,6 +116,49 @@ async function buildProjectContext(
     })
     .filter((c) => c.name || c.email);
 
+  const rfis = (rfisRes.data ?? []).map((r) => ({
+    number: r.rfi_number,
+    subject: r.subject ?? "",
+    question: r.question ?? "",
+    status: r.status ?? "",
+    drawingRef: r.drawing_number ?? "",
+  }));
+
+  const submittals = (submittalsRes.data ?? []).map((s) => ({
+    number: s.submittal_number,
+    title: s.title ?? "",
+    type: s.submittal_type ?? "",
+    status: s.status ?? "",
+    costCode: s.cost_code ?? "",
+    description: (s.description ?? "").slice(0, 400),
+  }));
+
+  const drawings = (drawingsRes.data ?? [])
+    .filter((d) => d.drawing_no || d.title)
+    .map((d) => ({
+      drawingNo: d.drawing_no ?? "",
+      title: d.title ?? "",
+      revision: d.revision ?? "",
+      drawingDate: d.drawing_date ?? "",
+    }));
+
+  const specifications = (specsRes.data ?? [])
+    .filter((s) => s.spec_number || s.title)
+    .map((s) => ({
+      specNumber: s.spec_number ?? "",
+      title: s.title ?? "",
+    }));
+
+  const dailyLogs = (dailyLogsRes.data ?? []).map((l) => {
+    const manpower = Array.isArray(l.manpower) ? l.manpower : [];
+    return {
+      date: l.log_date ?? "",
+      weather: l.weather_conditions ?? "",
+      notes: (l.notes ?? "").slice(0, 600),
+      crewCount: manpower.length,
+    };
+  });
+
   return {
     project: {
       name: project?.name ?? "",
@@ -94,6 +178,11 @@ async function buildProjectContext(
     applicant: { name: session.username ?? "", email: session.email ?? "" },
     projectManagers: directory.filter((d) => d.projectRoles.includes("Project Manager")),
     directory,
+    rfis,
+    submittals,
+    drawings,
+    specifications,
+    recentDailyLogs: dailyLogs,
   };
 }
 
