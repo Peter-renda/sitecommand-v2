@@ -1108,8 +1108,8 @@ function DrawingPdfViewerModal({
                 draggable={false}
                 style={
                   pdfDisplaySize
-                    ? { width: pdfDisplaySize.w * zoom, height: pdfDisplaySize.h * zoom }
-                    : undefined
+                    ? { width: pdfDisplaySize.w * zoom, height: pdfDisplaySize.h * zoom, maxWidth: "none" }
+                    : { maxWidth: "none" }
                 }
               />
             )}
