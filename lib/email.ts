@@ -181,6 +181,89 @@ export async function sendWebhookEventEmail(
   });
 }
 
+async function sendRFITrackingEmail({
+  to,
+  companyName,
+  projectName,
+  rfiNumber,
+  rfiSubject,
+  rfiUrl,
+  comment,
+  event,
+  eventTime,
+  viewOnlineUrl,
+  recipientRoleNote,
+  label,
+  emailSubject,
+}: {
+  to: string;
+  companyName: string;
+  projectName: string;
+  rfiNumber: number;
+  rfiSubject: string | null;
+  rfiUrl: string;
+  comment: string | null;
+  event: string;
+  eventTime: Date;
+  viewOnlineUrl: string;
+  recipientRoleNote: string;
+  label: string;
+  emailSubject: string;
+}) {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const dateStr = `${eventTime.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "2-digit" })} at ${eventTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase()}`;
+  const rfiName = `RFI #${rfiNumber}: ${rfiSubject || "No subject"}`;
+  const rfiCell = `<a href="${escape(rfiUrl)}" style="color:#1d6fa5;text-decoration:underline;">${escape(rfiName)}</a>`;
+
+  await sendEmail(label, {
+    to,
+    subject: emailSubject,
+    html: `
+      <div style="font-family:Helvetica,Arial,sans-serif;max-width:720px;margin:0 auto;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+          <tr>
+            <td style="background:#3b3b3b;color:#fff;padding:18px 24px;font-size:22px;font-weight:600;">
+              ${escape(companyName)}
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#d8d8d8;margin-bottom:16px;">
+          <tr>
+            <td style="padding:8px 16px;font-size:13px;color:#333;">
+              More details: <a href="${escape(viewOnlineUrl)}" style="color:#1d6fa5;text-decoration:underline;">View online</a>
+            </td>
+          </tr>
+        </table>
+        <h2 style="color:#d76027;font-weight:400;font-size:22px;line-height:1.3;margin:0 0 16px;">
+          The following 1 item has changed within the RFIs Tool.
+        </h2>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#eee;color:#333;">
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;"></th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">RFI</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Current Version Comments</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Events</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(projectName)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${rfiCell}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${comment ? escape(comment) : ""}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(event)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${dateStr}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="color:#888;font-size:11px;margin-top:18px;">${escape(recipientRoleNote)}</p>
+      </div>
+    `,
+  });
+}
+
 export async function sendRFIBallInCourtEmail(
   to: string,
   recipientName: string,
@@ -189,19 +272,24 @@ export async function sendRFIBallInCourtEmail(
   rfiSubject: string | null,
   projectName: string,
   rfiUrl: string,
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
-  const subject = rfiSubject || "No subject";
-  await sendEmail("rfi-ball-in-court", {
+  void recipientName;
+  await sendRFITrackingEmail({
     to,
-    subject: `The ball is in your court for RFI #${rfiNumber}: ${subject} — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;">The ball is in your court on <strong>RFI #${rfiNumber}: ${subject}</strong> for <strong>${projectName}</strong>.</p>
-      <p style="font-size:13px;color:#555;"><strong>${senderName}</strong> assigned this RFI to you.</p>
-      <p style="font-size:13px;color:#555;">This RFI requires your attention.</p>
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you are assigned to this RFI on SiteCommand.</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment: `${senderName} placed the ball in your court.`,
+    event: "Ball in court",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: "You are receiving this because the ball is in your court for this RFI on SiteCommand.",
+    label: "rfi-ball-in-court",
+    emailSubject: `The ball is in your court for RFI #${rfiNumber}: ${subject} — ${projectName}`,
   });
 }
 
@@ -216,14 +304,15 @@ export async function sendRFICreatedEmail(
   projectName: string,
   rfiUrl: string,
   role: "manager" | "assignee" | "distribution",
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
+  void recipientName;
   const subject = rfiSubject || "No subject";
-  const questionLine = rfiQuestion
-    ? `<blockquote style="border-left:3px solid #e5e7eb;margin:12px 0;padding:8px 16px;color:#555;font-size:13px;white-space:pre-wrap;">${rfiQuestion}</blockquote>`
-    : "";
   const dueLine = dueDate
-    ? `<p style="font-size:13px;color:#555;"><strong>Due:</strong> ${new Date(dueDate + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>`
+    ? `Due ${new Date(dueDate + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}. `
     : "";
+  const comment = `${dueLine}${senderName} opened this RFI.${rfiQuestion ? ` Question: ${rfiQuestion}` : ""}`;
   const roleNote =
     role === "manager"
       ? "You are receiving this because you are the RFI manager on SiteCommand."
@@ -231,18 +320,20 @@ export async function sendRFICreatedEmail(
         ? "You are receiving this because you are assigned to this RFI on SiteCommand."
         : "You are receiving this because you are on the distribution list for this RFI on SiteCommand.";
 
-  await sendEmail("rfi-created", {
+  await sendRFITrackingEmail({
     to,
-    subject: `RFI #${rfiNumber} opened: ${subject} — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;"><strong>${senderName}</strong> opened <strong>RFI #${rfiNumber}: ${subject}</strong> on <strong>${projectName}</strong>.</p>
-      ${questionLine}
-      ${dueLine}
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#888;font-size:11px;">You'll need a SiteCommand account with access to this project to open the RFI.</p>
-      <p style="color:#aaa;font-size:11px;">${roleNote}</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment,
+    event: "RFI opened",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: roleNote,
+    label: "rfi-created",
+    emailSubject: `RFI #${rfiNumber} opened: ${subject} — ${projectName}`,
   });
 }
 
@@ -254,17 +345,24 @@ export async function sendRFIClosedEmail(
   rfiSubject: string | null,
   projectName: string,
   rfiUrl: string,
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
-  const subject = rfiSubject || "No subject";
-  await sendEmail("rfi-closed", {
+  void recipientName;
+  await sendRFITrackingEmail({
     to,
-    subject: `RFI #${rfiNumber} has been closed — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;"><strong>${closedByName}</strong> has closed <strong>RFI #${rfiNumber}: ${subject}</strong> on <strong>${projectName}</strong>.</p>
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you are on the distribution list, assigned to, or otherwise associated with this RFI on SiteCommand.</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment: `${closedByName} closed this RFI.`,
+    event: "RFI closed",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: "You are receiving this because you are on the distribution list, assigned to, or otherwise associated with this RFI on SiteCommand.",
+    label: "rfi-closed",
+    emailSubject: `RFI #${rfiNumber} has been closed — ${projectName}`,
   });
 }
 
@@ -276,17 +374,24 @@ export async function sendRFIReopenedEmail(
   rfiSubject: string | null,
   projectName: string,
   rfiUrl: string,
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
-  const subject = rfiSubject || "No subject";
-  await sendEmail("rfi-reopened", {
+  void recipientName;
+  await sendRFITrackingEmail({
     to,
-    subject: `RFI #${rfiNumber} has been reopened — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;"><strong>${reopenedByName}</strong> has reopened <strong>RFI #${rfiNumber}: ${subject}</strong> on <strong>${projectName}</strong>.</p>
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you are on the distribution list for this RFI on SiteCommand.</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment: `${reopenedByName} reopened this RFI.`,
+    event: "RFI reopened",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: "You are receiving this because you are on the distribution list for this RFI on SiteCommand.",
+    label: "rfi-reopened",
+    emailSubject: `RFI #${rfiNumber} has been reopened — ${projectName}`,
   });
 }
 
@@ -351,18 +456,24 @@ export async function sendRFIResponseEmail(
   projectName: string,
   rfiUrl: string,
   responseBody: string,
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
-  const subject = rfiSubject || "No subject";
-  await sendEmail("rfi-response", {
+  void recipientName;
+  await sendRFITrackingEmail({
     to,
-    subject: `New response on RFI #${rfiNumber}: ${subject} — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;"><strong>${responderName}</strong> has added a response to <strong>RFI #${rfiNumber}: ${subject}</strong> on <strong>${projectName}</strong>.</p>
-      <blockquote style="border-left:3px solid #e5e7eb;margin:12px 0;padding:8px 16px;color:#555;font-size:13px;">${responseBody}</blockquote>
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you are the RFI manager, assignee, or on the distribution list for this RFI on SiteCommand.</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment: `${responderName}: ${responseBody}`,
+    event: "Response added",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: "You are receiving this because you are the RFI manager, assignee, or on the distribution list for this RFI on SiteCommand.",
+    label: "rfi-response",
+    emailSubject: `New response on RFI #${rfiNumber}: ${subject} — ${projectName}`,
   });
 }
 

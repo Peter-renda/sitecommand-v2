@@ -104,13 +104,22 @@ export async function POST(
         .single(),
       supabase
         .from("projects")
-        .select("name")
+        .select("name, company_id")
         .eq("id", projectId)
         .single(),
     ]);
 
     const rfiData = rfiRes.data;
     const projectName = projectRes.data?.name ?? "";
+    let companyName = "SiteCommand";
+    if (projectRes.data?.company_id) {
+      const { data: company } = await supabase
+        .from("companies")
+        .select("name")
+        .eq("id", projectRes.data.company_id)
+        .maybeSingle();
+      if (company?.name) companyName = company.name;
+    }
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
     const rfiUrl = `${appUrl}/projects/${projectId}/rfis/${rfiId}`;
     const responderName = session.username;
@@ -155,6 +164,8 @@ export async function POST(
             projectName,
             rfiUrl,
             body.trim(),
+            companyName,
+            rfiUrl,
           )
         )
       );

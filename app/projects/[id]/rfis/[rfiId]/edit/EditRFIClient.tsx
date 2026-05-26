@@ -14,6 +14,7 @@ type DirectoryContact = {
   email: string | null;
 };
 type Specification = { id: string; name: string; code: string | null };
+type Drawing = { id: string; drawing_no: string | null; title: string | null };
 
 type RFI = {
   id: string;
@@ -161,6 +162,7 @@ export default function EditRFIClient({ projectId, rfiId, userId, role, toolLeve
   const [rfi, setRfi] = useState<RFI | null>(null);
   const [directory, setDirectory] = useState<DirectoryContact[]>([]);
   const [specifications, setSpecifications] = useState<Specification[]>([]);
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
 
   const [subject, setSubject] = useState("");
   const [question, setQuestion] = useState("");
@@ -179,11 +181,13 @@ export default function EditRFIClient({ projectId, rfiId, userId, role, toolLeve
       fetch(`/api/projects/${projectId}/rfis/${rfiId}`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/directory`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/specifications`).then((r) => r.json()),
+      fetch(`/api/projects/${projectId}/drawings`).then((r) => (r.ok ? r.json() : { drawings: [] })),
     ])
-      .then(([rfiData, dirData, specData]) => {
+      .then(([rfiData, dirData, specData, drawingsData]) => {
         setRfi(rfiData);
         setDirectory(Array.isArray(dirData) ? dirData : []);
         setSpecifications(Array.isArray(specData) ? specData : []);
+        setDrawings(Array.isArray(drawingsData?.drawings) ? drawingsData.drawings : []);
 
         setSubject(rfiData.subject ?? "");
         setQuestion(rfiData.question ?? "");
@@ -301,7 +305,15 @@ export default function EditRFIClient({ projectId, rfiId, userId, role, toolLeve
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Drawing #</label>
-              <input type="text" value={drawingNumber} onChange={(e) => setDrawingNumber(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm" />
+              <select value={drawingNumber} onChange={(e) => setDrawingNumber(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-white">
+                <option value="">Select drawing...</option>
+                {drawings.filter((d) => d.drawing_no && d.drawing_no.trim()).map((d) => (
+                  <option key={d.id} value={d.drawing_no!}>{d.drawing_no}{d.title ? ` — ${d.title}` : ""}</option>
+                ))}
+                {drawingNumber && !drawings.some((d) => d.drawing_no === drawingNumber) && (
+                  <option value={drawingNumber}>{drawingNumber}</option>
+                )}
+              </select>
             </div>
           </div>
 

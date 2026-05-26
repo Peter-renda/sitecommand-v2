@@ -81,6 +81,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     attachments,
   } = body;
 
+  const finalStatus = status === "open" ? "open" : "draft";
+  const assigneesList = Array.isArray(assignees) ? (assignees as { id?: string }[]) : [];
+  const firstAssigneeId = assigneesList.find((a) => a?.id)?.id ?? null;
+  const ballInCourtId = finalStatus === "open" ? firstAssigneeId : null;
+
   const { data, error } = await supabase
     .from("rfis")
     .insert({
@@ -89,7 +94,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       subject: subject || null,
       question: question || null,
       due_date: due_date || null,
-      status: status === "open" ? "open" : "draft",
+      status: finalStatus,
       rfi_manager_id: rfi_manager_id || null,
       received_from_id: received_from_id || null,
       assignees: assignees ?? [],
@@ -105,6 +110,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       private: isPrivate ?? false,
       attachments: attachments ?? [],
       created_by: session.id,
+      ball_in_court_id: ballInCourtId,
+      ball_in_court_set_at: ballInCourtId ? new Date().toISOString() : null,
     })
     .select()
     .single();

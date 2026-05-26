@@ -18,6 +18,7 @@ type DirectoryContact = {
 };
 type Specification = { id: string; name: string; code: string | null };
 type BudgetItem = { id: string; cost_code: string; description: string };
+type Drawing = { id: string; drawing_no: string | null; title: string | null };
 
 const RFI_STAGE_OPTIONS = ["Bidding", "Pre-Construction", "Course of Construction", "Warranty", "Post-Construction"] as const;
 const IMPACT_OPTIONS = ["Yes", "Yes (Unknown)", "No", "TBD", "N/A"] as const;
@@ -274,6 +275,7 @@ function CreateRFIModal({
   directory,
   specifications,
   budgetItems,
+  drawings,
   onConfirm,
   onCancel,
 }: {
@@ -282,6 +284,7 @@ function CreateRFIModal({
   directory: DirectoryContact[];
   specifications: Specification[];
   budgetItems: BudgetItem[];
+  drawings: Drawing[];
   onConfirm: (data: {
     rfi_number: number;
     subject: string;
@@ -438,7 +441,7 @@ function CreateRFIModal({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">RFI Manager</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">RFI Manager <span className="text-red-500">*</span></label>
               <SingleContactPicker directory={directory} selectedId={rfiManagerId} onChange={setRfiManagerId} filterType="user" placeholder="Select user..." />
             </div>
           </div>
@@ -475,7 +478,12 @@ function CreateRFIModal({
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Drawing Number</label>
-              <input type="text" value={drawingNumber} onChange={(e) => setDrawingNumber(e.target.value)} placeholder="Drawing number" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
+              <select value={drawingNumber} onChange={(e) => setDrawingNumber(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+                <option value="">Select drawing...</option>
+                {drawings.filter((d) => d.drawing_no && d.drawing_no.trim()).map((d) => (
+                  <option key={d.id} value={d.drawing_no!}>{d.drawing_no}{d.title ? ` — ${d.title}` : ""}</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -529,12 +537,23 @@ function CreateRFIModal({
           <div className="flex gap-3 justify-end pt-4 border-t border-gray-100">
             {validationError && <p className="text-sm text-red-600 flex-1 self-center">{validationError}</p>}
             <button type="button" onClick={onCancel} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">Cancel</button>
-            <button type="button" onClick={() => onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "draft", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: "", rfi_stage: rfiStage, private: isPrivate, attachmentFiles })} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">Create as Draft</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!rfiManagerId) { setValidationError("An RFI Manager is required."); return; }
+                setValidationError(null);
+                onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "draft", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: "", rfi_stage: rfiStage, private: isPrivate, attachmentFiles });
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              Create as Draft
+            </button>
             <button
               type="button"
               onClick={() => {
                 if (!subject.trim()) { setValidationError("Subject is required."); return; }
                 if (!question.trim()) { setValidationError("Question is required."); return; }
+                if (!rfiManagerId) { setValidationError("An RFI Manager is required."); return; }
                 if (assignees.length === 0) { setValidationError("At least one assignee is required."); return; }
                 setValidationError(null);
                 onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "open", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: "", rfi_stage: rfiStage, private: isPrivate, attachmentFiles });
@@ -708,6 +727,7 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
   const [directory, setDirectory] = useState<DirectoryContact[]>([]);
   const [specifications, setSpecifications] = useState<Specification[]>([]);
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<RFIFilters>(emptyRFIFilters());
@@ -752,12 +772,14 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
       fetch(`/api/projects/${projectId}/specifications`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/budget`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/members`).then((r) => (r.ok ? r.json() : [])),
-    ]).then(([rfisData, dirData, specData, budgetData, membersData]) => {
+      fetch(`/api/projects/${projectId}/drawings`).then((r) => (r.ok ? r.json() : { drawings: [] })),
+    ]).then(([rfisData, dirData, specData, budgetData, membersData, drawingsData]) => {
       setRfis(Array.isArray(rfisData) ? rfisData : []);
       setDirectory(Array.isArray(dirData) ? dirData : []);
       setSpecifications(Array.isArray(specData) ? specData : []);
       setBudgetItems(Array.isArray(budgetData) ? budgetData : []);
       setMembers(Array.isArray(membersData) ? membersData : []);
+      setDrawings(Array.isArray(drawingsData?.drawings) ? drawingsData.drawings : []);
       setLoading(false);
     });
   }, [projectId, activeTab]);
@@ -1435,6 +1457,7 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
           directory={directory}
           specifications={specifications}
           budgetItems={budgetItems}
+          drawings={drawings}
           onConfirm={handleCreate}
           onCancel={() => setShowCreate(false)}
         />

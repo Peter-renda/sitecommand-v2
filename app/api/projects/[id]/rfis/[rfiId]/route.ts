@@ -176,6 +176,28 @@ export async function PATCH(
     .eq("project_id", projectId)
     .single();
 
+  // When an RFI transitions from draft to open and ball_in_court isn't being
+  // set explicitly in this request, default it to the first assignee so the
+  // "ball" lives with the people who need to respond.
+  if (
+    prevRfi &&
+    update.status === "open" &&
+    prevRfi.status !== "open" &&
+    !("ball_in_court_id" in update)
+  ) {
+    const assigneesForBall = Array.isArray(prevRfi.assignees) ? prevRfi.assignees as { id?: string }[] : [];
+    const firstAssigneeId = assigneesForBall.find((a) => a?.id)?.id ?? null;
+    if (firstAssigneeId) {
+      update.ball_in_court_id = firstAssigneeId;
+    }
+  }
+
+  // Stamp ball_in_court_set_at whenever the ball moves, so the UI can tell
+  // whether the current holder has responded since receiving the ball.
+  if ("ball_in_court_id" in update && prevRfi && prevRfi.ball_in_court_id !== update.ball_in_court_id) {
+    update.ball_in_court_set_at = new Date().toISOString();
+  }
+
   const { data, error } = await supabase
     .from("rfis")
     .update(update)
@@ -198,11 +220,20 @@ export async function PATCH(
       try {
         const projectRes = await supabase
           .from("projects")
-          .select("name")
+          .select("name, company_id")
           .eq("id", projectId)
           .single();
 
         const projectName = projectRes.data?.name ?? "your project";
+        let companyName = "SiteCommand";
+        if (projectRes.data?.company_id) {
+          const { data: company } = await supabase
+            .from("companies")
+            .select("name")
+            .eq("id", projectRes.data.company_id)
+            .maybeSingle();
+          if (company?.name) companyName = company.name;
+        }
         const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
         const rfiUrl = `${appUrl}/projects/${projectId}/rfis/${rfiId}`;
         const distributionList: { id: string; name: string; email: string | null }[] = Array.isArray(data.distribution_list) ? data.distribution_list : [];
@@ -219,6 +250,8 @@ export async function PATCH(
                 data.subject,
                 projectName,
                 rfiUrl,
+                companyName,
+                rfiUrl,
               )
             )
         );
@@ -234,13 +267,22 @@ export async function PATCH(
 
         const contactIds = [data.rfi_manager_id, data.received_from_id].filter(Boolean);
         const [projectRes, contactsRes] = await Promise.all([
-          supabase.from("projects").select("name").eq("id", projectId).single(),
+          supabase.from("projects").select("name, company_id").eq("id", projectId).single(),
           contactIds.length > 0
             ? supabase.from("directory_contacts").select("id, first_name, last_name, email").in("id", contactIds)
             : Promise.resolve({ data: [] }),
         ]);
 
         const projectName = projectRes.data?.name ?? "your project";
+        let companyName = "SiteCommand";
+        if (projectRes.data?.company_id) {
+          const { data: company } = await supabase
+            .from("companies")
+            .select("name")
+            .eq("id", projectRes.data.company_id)
+            .maybeSingle();
+          if (company?.name) companyName = company.name;
+        }
         const contactsById = Object.fromEntries(
           ((contactsRes.data ?? []) as { id: string; first_name: string | null; last_name: string | null; email: string | null }[]).map((c) => [c.id, c])
         );
@@ -274,7 +316,7 @@ export async function PATCH(
 
         await Promise.allSettled(
           recipients.map((r) =>
-            sendRFIClosedEmail(r.email, r.name, session.username, data.rfi_number, data.subject, projectName, rfiUrl)
+            sendRFIClosedEmail(r.email, r.name, session.username, data.rfi_number, data.subject, projectName, rfiUrl, companyName, rfiUrl)
           )
         );
       } catch {
@@ -314,7 +356,7 @@ export async function PATCH(
           .single(),
         supabase
           .from("projects")
-          .select("name")
+          .select("name, company_id")
           .eq("id", projectId)
           .single(),
       ]);
@@ -329,9 +371,18 @@ export async function PATCH(
         const recipientName = directoryContactName || fallbackContact?.name || "";
         const senderName = session.username;
         const projectName = projectRes.data?.name ?? "your project";
+        let companyName = "SiteCommand";
+        if (projectRes.data?.company_id) {
+          const { data: company } = await supabase
+            .from("companies")
+            .select("name")
+            .eq("id", projectRes.data.company_id)
+            .maybeSingle();
+          if (company?.name) companyName = company.name;
+        }
         const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
         const rfiUrl = `${appUrl}/projects/${projectId}/rfis/${rfiId}`;
-        await sendRFIBallInCourtEmail(recipientEmail, recipientName, senderName, data.rfi_number, data.subject, projectName, rfiUrl);
+        await sendRFIBallInCourtEmail(recipientEmail, recipientName, senderName, data.rfi_number, data.subject, projectName, rfiUrl, companyName, rfiUrl);
       }
     } catch {
       // Email failure should not block the response

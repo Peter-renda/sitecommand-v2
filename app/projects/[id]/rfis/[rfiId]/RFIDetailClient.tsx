@@ -33,6 +33,7 @@ type RFI = {
   created_by: string | null;
   created_at: string;
   ball_in_court_id: string | null;
+  ball_in_court_set_at: string | null;
   official_response_id: string | null;
   related_items: { id: string; type: string; label: string; href?: string | null; notes?: string | null }[];
 };
@@ -1159,8 +1160,20 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
               {rfi.status !== "closed" && (() => {
                 const currentBallInCourtId = rfi.ball_in_court_id ?? rfi.rfi_manager_id;
                 const ballIsWithAssignee = currentBallInCourtId !== null && currentBallInCourtId !== rfi.rfi_manager_id;
-                const canReturnCourt = canCurrentUserReturnCourt;
-                if (!canReturnCourt) return null;
+                if (!canCurrentUserReturnCourt) return null;
+
+                // The "Move ball to X's court" button only appears once the
+                // current holder has added a response after the ball was
+                // passed to them. ball_in_court_set_at is stamped server-side
+                // whenever ball_in_court_id changes; legacy RFIs (null) fall
+                // back to checking for any response by the user.
+                const courtSetAt = rfi.ball_in_court_set_at ? new Date(rfi.ball_in_court_set_at).getTime() : null;
+                const userHasRespondedSinceCourt = responses.some((r) => {
+                  if (r.created_by !== userId) return false;
+                  if (courtSetAt === null) return true;
+                  return new Date(r.created_at).getTime() >= courtSetAt;
+                });
+                if (!userHasRespondedSinceCourt) return null;
 
                 const targetName = ballIsWithAssignee
                   ? getContactNameById(directory, rfi.rfi_manager_id)
@@ -1173,7 +1186,7 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
                       disabled={returningCourt}
                       className="px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {returningCourt ? "Updating..." : `Return to ${targetName}'s Court`}
+                      {returningCourt ? "Updating..." : `Move ball to ${targetName}'s court`}
                     </button>
                   </div>
                 );
