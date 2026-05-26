@@ -1088,7 +1088,7 @@ export default function NewCommitmentClient({
       <div className="max-w-5xl mx-auto px-8">
         {/* ── General Information ── */}
         <Section title="General Information">
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field label="Contract #">
               <input
                 type="text"
@@ -1136,7 +1136,7 @@ export default function NewCommitmentClient({
             </label>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field label="Status" required>
               <select
                 value={status}

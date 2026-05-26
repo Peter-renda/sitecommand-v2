@@ -987,7 +987,7 @@ function WeatherSection({
             ))}
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Temperature</label>
             <input value={form.weather_temp} onChange={(e) => patch("weather_temp", e.target.value)} placeholder="e.g. 72°F" className={inputCls} />

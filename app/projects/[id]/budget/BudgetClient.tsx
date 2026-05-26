@@ -688,7 +688,7 @@ function LineItemModal({
             </Field>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Field label="Start Date">
               <input
                 type="date"

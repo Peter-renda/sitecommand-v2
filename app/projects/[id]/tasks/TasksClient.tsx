@@ -394,7 +394,7 @@ function NewTaskModal({
 
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
           {/* Task number + Title */}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Task #</label>
               <input

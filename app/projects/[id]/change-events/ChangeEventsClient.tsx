@@ -1843,7 +1843,7 @@ export default function ChangeEventsClient({
           {/* Revenue section */}
           <div className="mb-3">
             <p className="text-xs font-semibold text-blue-600 mb-1.5">Revenue</p>
-            <div className="grid grid-cols-3 gap-2 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
               <div>
                 <label className="block text-xs text-gray-500 mb-0.5">Unit Qty</label>
                 <input
@@ -1876,7 +1876,7 @@ export default function ChangeEventsClient({
           {/* Cost section */}
           <div className="mb-4">
             <p className="text-xs font-semibold text-gray-600 mb-1.5">Cost</p>
-            <div className="grid grid-cols-3 gap-2 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
               <div>
                 <label className="block text-xs text-gray-500 mb-0.5">Unit Qty</label>
                 <input

@@ -371,7 +371,7 @@ export default function TaskDetailClient({
                 {/* Editable fields */}
                 <div className="bg-white border border-gray-100 rounded-xl p-5">
                   <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Details</h2>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
                       <select

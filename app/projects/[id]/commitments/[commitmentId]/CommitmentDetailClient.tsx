@@ -390,7 +390,7 @@ function SsovPanel({
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
           <p className="text-xs font-medium text-gray-500 mb-1">Committed Amount</p>
           <p className="text-base font-semibold text-gray-900 tabular-nums">{fmt(committedAmount)}</p>
@@ -623,8 +623,8 @@ export default function CommitmentDetailClient({
 
       {/* Page header bar */}
       <div className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
-        <div className="px-8 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="px-4 sm:px-8 py-3 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0 flex-wrap">
             <a
               href={`/projects/${projectId}/commitments`}
               className="text-sm text-gray-400 hover:text-gray-700 transition-colors"
@@ -927,7 +927,7 @@ export default function CommitmentDetailClient({
 
         {/* ── General Information ── */}
         <Section title="General Information">
-          <div className="grid grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
             <DetailField label="Contract #">
               {commitment.number}
             </DetailField>
@@ -938,7 +938,7 @@ export default function CommitmentDetailClient({
               {commitment.title || <span className="text-gray-400">—</span>}
             </DetailField>
           </div>
-          <div className="grid grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
             <DetailField label="Status">
               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusCls}`}>
                 {statusLabel}
@@ -951,7 +951,7 @@ export default function CommitmentDetailClient({
               {commitment.default_retainage}%
             </DetailField>
           </div>
-          <div className="grid grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
             <DetailField label="ERP Status">
               <span className={`text-sm italic ${erpColor}`}>{erpLabel}</span>
             </DetailField>
@@ -970,7 +970,7 @@ export default function CommitmentDetailClient({
             </DetailField>
           </div>
           {commitment.type === "purchase_order" && (
-            <div className="grid grid-cols-3 gap-6 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
               <DetailField label="Bill To">
                 {commitment.bill_to || <span className="text-gray-400">—</span>}
               </DetailField>
@@ -1118,7 +1118,7 @@ export default function CommitmentDetailClient({
         {/* ── Contract Dates ── */}
         <Section title="Contract Dates">
           {commitment.type === "purchase_order" ? (
-            <div className="grid grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
               <DetailField label="Contract Date">
                 {formatDate(commitment.contract_date ?? null)}
               </DetailField>
@@ -1133,7 +1133,7 @@ export default function CommitmentDetailClient({
               </DetailField>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
               <DetailField label="Start Date">
                 {formatDate(commitment.start_date ?? null)}
               </DetailField>
@@ -1152,7 +1152,7 @@ export default function CommitmentDetailClient({
 
         {/* ── Contract Privacy ── */}
         <Section title="Contract Privacy">
-          <div className="grid grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
             <DetailField label="Private">
               {commitment.is_private ? "Yes" : "No"}
             </DetailField>
@@ -1166,7 +1166,7 @@ export default function CommitmentDetailClient({
         <Section title="Additional Information">
           {commitment.type === "subcontract" ? (
             <div>
-              <div className="grid grid-cols-2 gap-6 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
                 <DetailField label="Cover Letter">
                   {commitment.subcontract_cover_letter || <span className="text-gray-400">—</span>}
                 </DetailField>
@@ -1214,7 +1214,7 @@ export default function CommitmentDetailClient({
             </div>
           ) : (
             <div>
-              <div className="grid grid-cols-2 gap-6 mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-4">
                 <DetailField label="Contract Type">
                   {commitment.subcontract_type
                     ? commitment.subcontract_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())

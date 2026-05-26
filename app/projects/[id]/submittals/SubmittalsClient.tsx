@@ -636,7 +636,7 @@ export function CreateSubmittalModal({
           </div>
 
           {/* Number & Revision / Submittal Type */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Number</label>
               <input
@@ -893,7 +893,7 @@ export function CreateSubmittalModal({
           {/* Additional Submittal Fields */}
           <div className="pt-2">
             <p className="text-xs font-semibold text-gray-700 mb-3">Additional Submittal Fields</p>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Approver Name</label>
                 <SingleContactPicker directory={directory} selectedId={approverNameId} onChange={setApproverNameId} filterType="user" placeholder="Select..." />

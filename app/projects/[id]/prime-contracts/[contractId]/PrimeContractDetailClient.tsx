@@ -174,7 +174,7 @@ function ContractSummaryTile({
       {open && (
         <div className="space-y-5">
           {rows.map((row, ri) => (
-            <div key={ri} className="grid grid-cols-4 gap-x-8">
+            <div key={ri} className="grid grid-cols-2 sm:grid-cols-4 gap-x-8">
               {row.map((item) => (
                 <div key={item.label}>
                   <p className="text-xs font-semibold text-gray-800 mb-0.5">{item.label}</p>
@@ -587,7 +587,7 @@ export default function PrimeContractDetailClient({
                     Created by — on {fmtDate(contract.start_date || null)}
                   </p>
                 )}
-                {generalInfoOpen && <div className="grid grid-cols-3 gap-x-8 gap-y-5 mb-6">
+                {generalInfoOpen && <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-8 gap-y-5 mb-6">
                   <Field label="Contract #" value={contract.contract_number} />
                   <Field label="Owner / Client" value={contract.owner_client} />
                   <Field label="Title" value={contract.title} />
@@ -668,7 +668,7 @@ export default function PrimeContractDetailClient({
                   {datesOpen ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
                   <h2 className="text-sm font-semibold text-gray-900">Contract Dates</h2>
                 </button>
-                {datesOpen && <div className="grid grid-cols-3 gap-x-8 gap-y-5">
+                {datesOpen && <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-8 gap-y-5">
                   <Field label="Start Date" value={fmtDate(contract.start_date)} />
                   <Field label="Estimated Completion" value={fmtDate(contract.estimated_completion_date)} />
                   <Field label="Actual Completion" value={fmtDate(contract.actual_completion_date)} />

@@ -1318,7 +1318,7 @@ export default function SubmittalDetailClient({
               </div>
 
               {/* 4-column details grid */}
-              <dl className="grid grid-cols-4 gap-x-8 gap-y-5 text-sm pt-5">
+              <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-5 text-sm pt-5">
                 <div>
                   <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Specification</dt>
                   <dd className="text-gray-700">{getSpecName(specifications, submittal.specification_id)}</dd>

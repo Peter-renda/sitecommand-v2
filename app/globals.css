@@ -171,6 +171,12 @@
 /* ── Base reset ──────────────────────────────────────────────────────────── */
 html {
   scroll-behavior: smooth;
+  /* Prevent the entire page from scrolling horizontally on mobile when a
+     descendant element (wide table, fixed-width sidebar, long string) ends
+     up wider than the viewport. Containers that genuinely need horizontal
+     scroll opt in with their own overflow-x: auto wrapper. */
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -178,6 +184,11 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  /* Long unbroken strings (URLs, RFI IDs, emails) shouldn't push the page wider
+     than the viewport on small screens. */
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 
 h1, h2, h3 { text-wrap: balance; }
@@ -1734,3 +1745,128 @@ p           { text-wrap: pretty; }
 .drow .rev { font-family:'JetBrains Mono', monospace; color:#374151; }
 .drow .when { font-family:'JetBrains Mono', monospace; color:#6B7280; font-variant-numeric:tabular-nums; }
 .drow .disc { font-family:'DM Serif Display', serif; font-style:italic; color:#9A6240; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Mobile responsive overrides — applied below 640px (Tailwind `sm` breakpoint).
+   These target the in-house CSS class system (.rfi-*, .budget-*, .gantt-*,
+   .stats, .kanban, .dir-grid, .detail-wrap, .lightbox, .home-hero, .weather)
+   that doesn't go through Tailwind utility classes and otherwise wouldn't
+   collapse on small screens.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  /* RFI/project pages: trim outer padding so content uses the full width */
+  .rfi-page { padding: 16px 14px; }
+
+  /* Page titles — DM Serif 32px is too large on phones */
+  .h2-warm { font-size: 24px; }
+  .detail-head h1 { font-size: 24px; }
+  .detail-head .idx { font-size: 22px; }
+  .home-hero { padding: 18px 18px; }
+  .home-hero h1 { font-size: 26px; }
+
+  /* sec-row: title + actions stack instead of fighting for horizontal space */
+  .sec-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  /* Stat strips: 4-up → 2-up */
+  .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px; }
+  .stat { padding: 12px 14px; }
+  .stat .val { font-size: 24px; }
+
+  /* Weather strip: 4-up → 2-up */
+  .weather { grid-template-columns: repeat(2, 1fr); }
+  .weather > div:nth-child(2) { border-right: 0; }
+  .weather > div:nth-child(-n+2) { border-bottom: 1px solid rgba(0,0,0,0.04); }
+
+  /* Home-hero pill row: 4-up → 2-up */
+  .home-hero .row { grid-template-columns: repeat(2, 1fr); }
+
+  /* Detail page: drop the right rail under the main content */
+  .detail-wrap {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  /* Generic 3- and 4-col CSS grids → single column */
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+
+  /* Directory cards: 3-up → 1-up */
+  .dir-grid { grid-template-columns: 1fr; }
+
+  /* Kanban board: horizontal scroll so columns don't squeeze to nothing */
+  .kanban {
+    grid-template-columns: repeat(4, 78vw);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    scroll-snap-type: x mandatory;
+  }
+  .kcol { scroll-snap-align: start; }
+
+  /* Lightbox: stack meta pane below the stage */
+  .lightbox {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  /* Gantt: stack the label column above the timeline so neither overflows */
+  .gantt { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .gantt-head, .gantt-row { min-width: 640px; }
+
+  /* Filter bar collapses to wrap rather than overflow */
+  .filters { flex-wrap: wrap; }
+  .search { max-width: none; flex: 1 1 100%; }
+
+  /* CSS-grid table rows (.rfi-row, .budget-row, .drow, .sc-row): the parent
+     gets horizontal scroll so the row keeps its multi-column layout without
+     pushing the page wider. */
+  .rfi-list, .budget, .sc-list, .gantt {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rfi-row, .budget-row, .drow, .sc-row { min-width: 640px; }
+
+  /* Filter pill clusters wrap */
+  .seg { flex-wrap: wrap; }
+
+  /* Inline pill stats in home hero shrink */
+  .home-hero .row .val { font-size: 18px; }
+
+  /* Log entry padding */
+  .log-entry { padding: 16px 16px; }
+  .log-entry .day-head .day { font-size: 22px; }
+}
+
+/* ── Mobile shell tweaks for Tailwind-styled pages ──────────────────────────
+   Many list/detail pages use `<main className="px-6 py-8">` with a
+   `<header className="… px-6 h-14 …">` and an `<h1 className="font-display
+   text-[32px] …">`. On a 375px iPhone, the 48px of horizontal padding and
+   32px serif title eat the available space. Override those exact patterns
+   at the mobile breakpoint so we don't have to touch dozens of client files. */
+@media (max-width: 640px) {
+  main.px-6 { padding-left: 14px !important; padding-right: 14px !important; }
+  main.py-8 { padding-top: 18px !important; padding-bottom: 18px !important; }
+  header.px-6 { padding-left: 14px !important; padding-right: 14px !important; }
+
+  /* The 32px DM Serif page title appears verbatim on most pages */
+  .font-display.text-\[32px\] {
+    font-size: 22px !important;
+    line-height: 1.1 !important;
+  }
+  .font-display.text-\[28px\] {
+    font-size: 20px !important;
+    line-height: 1.1 !important;
+  }
+
+  /* The 18px page-header h1 used on detail pages */
+  .font-display.text-\[18px\] { font-size: 16px !important; }
+
+  /* Detail page sticky header padding */
+  .px-8.py-3 { padding-left: 14px !important; padding-right: 14px !important; }
+}
+

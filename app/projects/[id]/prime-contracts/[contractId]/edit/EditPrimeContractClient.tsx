@@ -311,7 +311,7 @@ export default function EditPrimeContractClient({
           <SectionBlock>
             <SectionTitle>General Information</SectionTitle>
 
-            <div className="grid grid-cols-3 gap-5 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-5">
               <div>
                 <Label>Owner/Client</Label>
                 <Input
@@ -332,7 +332,7 @@ export default function EditPrimeContractClient({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-5 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-5">
               <div>
                 <Label required>Status</Label>
                 <Select value={formData.status} onChange={(e) => set("status", e.target.value)}>
@@ -371,7 +371,7 @@ export default function EditPrimeContractClient({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-5 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-5">
               <div>
                 <Label>Contractor</Label>
                 <Input
@@ -573,7 +573,7 @@ export default function EditPrimeContractClient({
           {/* Contract Dates */}
           <SectionBlock>
             <SectionTitle>Contract Dates</SectionTitle>
-            <div className="grid grid-cols-3 gap-5 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-5">
               <div>
                 <Label>Start Date</Label>
                 <Input type="date" value={formData.start_date} onChange={(e) => set("start_date", e.target.value)} />
@@ -587,7 +587,7 @@ export default function EditPrimeContractClient({
                 <Input type="date" value={formData.actual_completion_date} onChange={(e) => set("actual_completion_date", e.target.value)} />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
               <div>
                 <Label>Signed Contract Received Date</Label>
                 <Input type="date" value={formData.signed_contract_received_date} onChange={(e) => set("signed_contract_received_date", e.target.value)} />

@@ -697,7 +697,7 @@ export default function NewMeetingClient({
                   </div>
 
                   {/* Row 3: Date + Timezone + Start Time + End Time */}
-                  <div className="grid grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">Date</label>
                       <DateInput value={date} onChange={setDate} />

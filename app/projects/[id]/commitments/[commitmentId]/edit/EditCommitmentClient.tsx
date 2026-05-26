@@ -1221,7 +1221,7 @@ export default function EditCommitmentClient({
 
         {/* ── General Information ── */}
         <Section title="General Information">
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field label="Contract #">
               <input
                 type="text"
@@ -1243,7 +1243,7 @@ export default function EditCommitmentClient({
             </Field>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field label="Status" required>
               <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
                 <option value="draft">Draft</option>
