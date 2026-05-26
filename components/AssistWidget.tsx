@@ -92,7 +92,8 @@ export default function AssistWidget({ projectId }: { projectId: string }) {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Open Assist"
-        className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-full bg-gray-900 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-gray-800"
+        title="Open Assist"
+        className="fixed bottom-4 right-4 z-50 flex h-11 w-11 items-center justify-center rounded-full bg-gray-900 text-white shadow-lg hover:bg-gray-800"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
           <path
@@ -101,7 +102,6 @@ export default function AssistWidget({ projectId }: { projectId: string }) {
             clipRule="evenodd"
           />
         </svg>
-        Assist
       </button>
     );
   }
