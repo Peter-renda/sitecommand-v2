@@ -515,7 +515,7 @@ export default function ChangeEventsClient({
       <ProjectNav projectId={projectId} />
 
       {/* ── Page Header ─────────────────────────────────────────────────────── */}
-      <div className="px-6 pt-8 pb-4 bg-[#FAFAF7]">
+      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#FAFAF7]">
         <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Change Events</h1>
         {events.length > 0 && (
           <p className="sec-sub mt-1.5">
@@ -560,14 +560,14 @@ export default function ChangeEventsClient({
         })()}
       </div>
 
-      <div className="flex items-center justify-between px-6 py-2 border-b border-black/[0.06] bg-[#FAFAF7] shrink-0">
+      <div className="flex items-center justify-between gap-2 flex-wrap px-4 sm:px-6 py-2 border-b border-black/[0.06] bg-[#FAFAF7] shrink-0">
         {/* Left: tabs */}
-        <div className="flex items-center">
+        <div className="flex items-center overflow-x-auto max-w-full [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(["detail", "summary", "rfqs", "recycle_bin"] as Tab[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 ${
                 activeTab === tab
                   ? "border-[color:var(--ink)] text-[color:var(--ink)]"
                   : "border-transparent text-gray-500 hover:text-[color:var(--ink)]"
@@ -583,11 +583,11 @@ export default function ChangeEventsClient({
         </div>
 
         {/* Right: Export + Create */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <div ref={exportRef} className="relative">
             <button
               onClick={() => setExportOpen((v) => !v)}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs border hairline rounded text-gray-700 bg-white hover:bg-[color:var(--surface-sunken)] transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-xs border hairline rounded text-gray-700 bg-white hover:bg-[color:var(--surface-sunken)] transition-colors whitespace-nowrap"
             >
               Export <ChevronDown className="w-3 h-3" />
             </button>
@@ -651,7 +651,7 @@ export default function ChangeEventsClient({
       )}
 
       {/* ── Filter bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-black/[0.06] bg-[#FAFAF7] shrink-0">
+      <div className="flex items-center gap-2 flex-wrap px-4 sm:px-4 py-2 border-b border-black/[0.06] bg-[#FAFAF7] shrink-0">
         {/* Bulk Actions dropdown – write-access users only */}
         {canWrite && <div ref={quickActionsRef} className="relative">
           <button
@@ -661,7 +661,7 @@ export default function ChangeEventsClient({
               setHoveredAction(null);
               setHoveredSubItem(null);
             }}
-            className={`flex items-center gap-1 px-3 py-1 text-xs border rounded transition-colors ${
+            className={`flex items-center gap-1 px-3 py-1 text-xs border rounded transition-colors whitespace-nowrap ${
               hasSelection
                 ? "hairline text-gray-700 hover:bg-[color:var(--surface-sunken)] bg-white"
                 : "border-gray-200 text-gray-400 bg-[color:var(--surface-sunken)] cursor-not-allowed"
@@ -1124,7 +1124,7 @@ export default function ChangeEventsClient({
         <div ref={filterRef} className="relative">
           <button
             onClick={() => setFilterOpen((v) => !v)}
-            className="flex items-center gap-1 px-3 py-1 text-xs border hairline rounded text-gray-700 bg-white hover:bg-[color:var(--surface-sunken)] transition-colors"
+            className="flex items-center gap-1 px-3 py-1 text-xs border hairline rounded text-gray-700 bg-white hover:bg-[color:var(--surface-sunken)] transition-colors whitespace-nowrap"
           >
             Add Filter <ChevronDown className="w-3 h-3" />
           </button>
@@ -1192,7 +1192,7 @@ export default function ChangeEventsClient({
       </div>
 
       {/* ── Table ────────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-x-auto">
+      <div className="flex-1 overflow-x-auto min-w-0 max-w-full">
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm italic">Loading change events…</div>
         ) : activeTab === "summary" ? (

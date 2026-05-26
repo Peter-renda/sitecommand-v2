@@ -1868,5 +1868,26 @@ p           { text-wrap: pretty; }
 
   /* Detail page sticky header padding */
   .px-8.py-3 { padding-left: 14px !important; padding-right: 14px !important; }
+
+  /* Pages that use a bare <div className="px-6 pt-8 pb-4 bg-[#FAFAF7]">
+     (Change Events, Change Orders, Specifications, etc.) instead of <main>.
+     Match the same family of selectors to bring their padding down. */
+  div.px-6.pt-8.pb-4,
+  div.px-6.pt-8,
+  div.px-6.py-2.border-b,
+  div.px-6.py-3.shrink-0,
+  div.px-6.py-2\.5 {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  /* Toolbar / filter rows: stop labels from wrapping mid-button. Buttons,
+     anchors styled as buttons, and segmented controls in compact flex bars
+     should keep their label on a single line. */
+  .flex > button,
+  .flex > a[class*="px-"],
+  .flex > div > button {
+    white-space: nowrap;
+  }
 }
 

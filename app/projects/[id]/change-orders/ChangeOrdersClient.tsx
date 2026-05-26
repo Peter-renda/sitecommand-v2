@@ -333,7 +333,7 @@ export default function ChangeOrdersClient({
       <ProjectNav projectId={projectId} />
 
       {/* Page header */}
-      <div className="px-6 pt-8 pb-4 bg-[#FAFAF7]">
+      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#FAFAF7]">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div className="min-w-0">
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Change Orders</h1>
@@ -385,11 +385,11 @@ export default function ChangeOrdersClient({
       </div>
 
       {/* Tabs + section header */}
-      <div className="flex items-center justify-between px-6 py-2 border-b border-black/[0.06] bg-white shrink-0">
-        <div className="flex items-center gap-5">
+      <div className="flex items-center justify-between gap-2 flex-wrap px-4 sm:px-6 py-2 border-b border-black/[0.06] bg-white shrink-0">
+        <div className="flex items-center gap-5 overflow-x-auto max-w-full [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <button
             onClick={() => setActiveTab("prime")}
-            className={`text-sm pb-1.5 border-b-2 transition-colors ${
+            className={`text-sm pb-1.5 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === "prime"
                 ? "border-[color:var(--brand-500)] text-[color:var(--ink)] font-semibold"
                 : "border-transparent text-gray-500 hover:text-[color:var(--ink)] font-medium"
@@ -399,7 +399,7 @@ export default function ChangeOrdersClient({
           </button>
           <button
             onClick={() => setActiveTab("commitment")}
-            className={`text-sm pb-1.5 border-b-2 transition-colors ${
+            className={`text-sm pb-1.5 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === "commitment"
                 ? "border-[color:var(--brand-500)] text-[color:var(--ink)] font-semibold"
                 : "border-transparent text-gray-500 hover:text-[color:var(--ink)] font-medium"
@@ -408,10 +408,10 @@ export default function ChangeOrdersClient({
             Commitment Change Orders
           </button>
         </div>
-        <div ref={exportRef} className="relative">
+        <div ref={exportRef} className="relative shrink-0">
           <button
             onClick={() => setExportPccoOpen((v) => !v)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs border border-black/[0.08] rounded text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs border border-black/[0.08] rounded text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors whitespace-nowrap"
           >
             Export PCCOs <ChevronDown className="w-3 h-3" />
           </button>
@@ -425,7 +425,7 @@ export default function ChangeOrdersClient({
       </div>
 
       {/* Search + filter bar */}
-      <div className="flex items-center justify-between px-6 py-2.5 border-b border-black/[0.06] bg-white shrink-0">
+      <div className="flex items-center justify-between gap-2 flex-wrap px-4 sm:px-6 py-2.5 border-b border-black/[0.06] bg-white shrink-0">
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />

@@ -508,7 +508,7 @@ export default function SpecificationsClient({ projectId, username }: { projectI
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
-      <div className="px-6 pt-8 pb-4 bg-[#FAFAF7]">
+      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#FAFAF7]">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
