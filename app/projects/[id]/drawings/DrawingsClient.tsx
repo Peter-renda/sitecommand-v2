@@ -475,6 +475,94 @@ function DrawingPdfViewerModal({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const previewSurfaceRef = useRef<HTMLDivElement>(null);
+
+  // ── Wheel + pinch gesture zoom ────────────────────────────────────────────
+  // Ctrl/⌘+wheel zooms on desktop (trackpad pinch also arrives as a wheel
+  // event with ctrlKey=true); two-finger pinch zooms on touch devices.
+  // Plain wheel keeps panning, so users can still scroll a zoomed drawing.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    function applyZoomFactor(factor: number, clientX: number, clientY: number) {
+      const surface = previewSurfaceRef.current;
+      const containerEl = containerRef.current;
+      if (!surface || !containerEl) {
+        setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z * factor)));
+        return;
+      }
+      const sRect = surface.getBoundingClientRect();
+      const contentX = clientX - sRect.left;
+      const contentY = clientY - sRect.top;
+      setZoom((prev) => {
+        const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev * factor));
+        if (Math.abs(next - prev) < 1e-9) return prev;
+        const ratio = next / prev;
+        // After the new zoom is laid out, re-measure and shift scroll so the
+        // anchor point stays under the cursor / pinch midpoint.
+        requestAnimationFrame(() => {
+          const surface2 = previewSurfaceRef.current;
+          const container2 = containerRef.current;
+          if (!surface2 || !container2) return;
+          const newSRect = surface2.getBoundingClientRect();
+          const dx = newSRect.left + contentX * ratio - clientX;
+          const dy = newSRect.top + contentY * ratio - clientY;
+          container2.scrollLeft += dx;
+          container2.scrollTop += dy;
+        });
+        return next;
+      });
+    }
+
+    function handleWheel(e: WheelEvent) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.01);
+      applyZoomFactor(factor, e.clientX, e.clientY);
+    }
+
+    let pinchPrevDist: number | null = null;
+    function handleTouchStart(e: TouchEvent) {
+      if (e.touches.length === 2) {
+        const t1 = e.touches[0]!;
+        const t2 = e.touches[1]!;
+        pinchPrevDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      } else {
+        pinchPrevDist = null;
+      }
+    }
+    function handleTouchMove(e: TouchEvent) {
+      if (e.touches.length !== 2 || pinchPrevDist == null) return;
+      e.preventDefault();
+      const t1 = e.touches[0]!;
+      const t2 = e.touches[1]!;
+      const newDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      if (pinchPrevDist > 0 && newDist > 0) {
+        const factor = newDist / pinchPrevDist;
+        const cx = (t1.clientX + t2.clientX) / 2;
+        const cy = (t1.clientY + t2.clientY) / 2;
+        applyZoomFactor(factor, cx, cy);
+      }
+      pinchPrevDist = newDist;
+    }
+    function handleTouchEnd(e: TouchEvent) {
+      if (e.touches.length < 2) pinchPrevDist = null;
+    }
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+    container.addEventListener("touchmove", handleTouchMove, { passive: false });
+    container.addEventListener("touchend", handleTouchEnd, { passive: true });
+    container.addEventListener("touchcancel", handleTouchEnd, { passive: true });
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("touchend", handleTouchEnd);
+      container.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  }, []);
+
   // When annotation canvas is toggled on, restore its dimensions and redraw
   useEffect(() => {
     if (!annotationsVisible) return;
