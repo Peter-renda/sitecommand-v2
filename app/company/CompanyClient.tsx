@@ -96,6 +96,17 @@ export default function CompanyClient({
     }
   }
 
+  async function handleRecover(project: Project) {
+    const res = await fetch(`/api/projects/${project.id}/unarchive`, { method: "POST" });
+    if (res.ok) {
+      const updated = await res.json();
+      setProjectList((prev) =>
+        prev.map((p) => (p.id === project.id ? { ...p, archived_at: updated.archived_at } : p))
+      );
+      setOpenMenuId(null);
+    }
+  }
+
   const activeProjects = projectList.filter((p) => !p.archived_at);
   const archivedProjects = projectList.filter((p) => p.archived_at);
 
@@ -532,21 +543,56 @@ const seatCount = members.length;
                 </div>
                 <div className="space-y-1">
                   {archivedProjects.map((project) => (
-                    <a
+                    <div
                       key={project.id}
-                      href={`/projects/${project.id}`}
                       className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-gray-50 transition-colors"
                     >
-                      <div className="min-w-0">
+                      <a href={`/projects/${project.id}`} className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-500 truncate">{project.name}</p>
                         <p className="text-xs text-gray-400 truncate">
                           Archived{project.archived_at ? ` ${new Date(project.archived_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}
                         </p>
+                      </a>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuId(openMenuId === project.id ? null : project.id);
+                            }}
+                            aria-label="Project actions"
+                            className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                              <circle cx="5" cy="12" r="2" />
+                              <circle cx="12" cy="12" r="2" />
+                              <circle cx="19" cy="12" r="2" />
+                            </svg>
+                          </button>
+                          {openMenuId === project.id && (
+                            <div
+                              ref={menuRef}
+                              className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1"
+                            >
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRecover(project);
+                                }}
+                                className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                              >
+                                Recover Project
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <a href={`/projects/${project.id}`} aria-label="Open project">
+                          <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </a>
                       </div>
-                      <svg className="w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                    </a>
+                    </div>
                   ))}
                 </div>
               </div>
