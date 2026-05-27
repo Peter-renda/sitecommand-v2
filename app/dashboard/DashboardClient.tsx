@@ -3,6 +3,12 @@
 import { useState, useEffect, useRef } from "react";
 import EmptyState from "@/app/components/EmptyState";
 import { SkeletonCard } from "@/app/components/Skeleton";
+import DashboardWalkthrough from "./DashboardWalkthrough";
+import {
+  DEFAULT_DASHBOARD_PREFS,
+  DashboardPreferences,
+  loadDashboardPreferences,
+} from "@/lib/dashboard-preferences";
 
 type Member = { id: string; username: string; email: string };
 
@@ -399,6 +405,32 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const myOpenItemsRef = useRef<HTMLElement>(null);
   const whileAwayRef = useRef<HTMLElement>(null);
 
+  // Dashboard preferences + walkthrough state. Prefs are persisted in localStorage
+  // and re-read whenever the walkthrough writes a new value so the dashboard
+  // reflects edits live.
+  const [dashPrefs, setDashPrefs] = useState<DashboardPreferences>(DEFAULT_DASHBOARD_PREFS);
+  const [walkthroughOpen, setWalkthroughOpen] = useState(false);
+  useEffect(() => {
+    setDashPrefs(loadDashboardPreferences());
+    const onChange = (e: Event) => {
+      const detail = (e as CustomEvent<DashboardPreferences>).detail;
+      if (detail) setDashPrefs(detail);
+    };
+    window.addEventListener("dashboard-prefs-changed", onChange);
+    // Auto-start the walkthrough when the URL has ?walkthrough=1 (e.g. coming
+    // from the Settings "Start walkthrough" button). Strip the param after so
+    // a refresh doesn't relaunch it.
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("walkthrough") === "1") {
+        setWalkthroughOpen(true);
+        url.searchParams.delete("walkthrough");
+        window.history.replaceState({}, "", url.toString());
+      }
+    } catch { /* ignore */ }
+    return () => window.removeEventListener("dashboard-prefs-changed", onChange);
+  }, []);
+
   // Detail modal state — paginates through a snapshot of one of the two lists.
   const [detailItems, setDetailItems] = useState<DashDetailItem[]>([]);
   const [detailIndex, setDetailIndex] = useState<number | null>(null);
@@ -780,7 +812,9 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const activeCount = projects.filter((p) => p.status === "course of construction").length;
   const completedCount = projects.filter((p) => p.status === "post-construction" || p.status === "warranty").length;
 
-  const openItemDetailList: DashDetailItem[] = myOpenItems.map((item) => ({
+  const visibleOpenItems = myOpenItems.filter((item) => dashPrefs.attentionTypes[item.type] !== false);
+
+  const openItemDetailList: DashDetailItem[] = visibleOpenItems.map((item) => ({
     key: `${item.type}-${item.id}`,
     variant: "open_item",
     typeLabel:
@@ -949,7 +983,7 @@ export default function DashboardClient({ username, email, role, companyRole, us
         {/* Focus Card — hero with ambient glow, attention items + portfolio snapshot */}
         {(() => {
           const scopedTasks = myTasks.filter((t) => !currentProjectId || t.project_id === currentProjectId);
-          const attentionCount = myOpenItems.length;
+          const attentionCount = visibleOpenItems.length;
           const greetingFirstName = (username || "there").split(/[\s.@]/)[0];
           const greeting = `Good ${(() => { const h = new Date().getHours(); return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"; })()}, ${greetingFirstName}.`;
           const updatesWhileAwayCount = updatesWhileAway.length;
@@ -958,7 +992,7 @@ export default function DashboardClient({ username, email, role, companyRole, us
               <div className="bezel-inner">
                 <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr]">
                   {/* Left: attention */}
-                  <div className="px-6 sm:px-8 py-7 sm:py-9">
+                  <div className="px-6 sm:px-8 py-7 sm:py-9" id="dash-attention-anchor">
                     <button
                       type="button"
                       onClick={() => myOpenItemsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
@@ -1027,11 +1061,15 @@ export default function DashboardClient({ username, email, role, companyRole, us
                   </div>
 
                   {/* Right: portfolio snapshot */}
-                  <div className="border-t lg:border-t-0 lg:border-l hairline px-6 sm:px-8 py-7 sm:py-9 bg-gradient-to-br from-white to-[color:var(--surface-sunken)]">
-                    <p className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-1">Total value</p>
-                    <p className="font-display text-[36px] leading-none text-[color:var(--ink)] tabular-nums mb-6">
-                      {formatCurrencyDisplay(totalValue)}
-                    </p>
+                  <div id="dash-portfolio-anchor" className="border-t lg:border-t-0 lg:border-l hairline px-6 sm:px-8 py-7 sm:py-9 bg-gradient-to-br from-white to-[color:var(--surface-sunken)]">
+                    {dashPrefs.showPortfolioTotal && (
+                      <>
+                        <p className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-1">Total value</p>
+                        <p className="font-display text-[36px] leading-none text-[color:var(--ink)] tabular-nums mb-6">
+                          {formatCurrencyDisplay(totalValue)}
+                        </p>
+                      </>
+                    )}
 
                     <div className="grid grid-cols-3 gap-4">
                       <div>
@@ -1355,12 +1393,26 @@ export default function DashboardClient({ username, email, role, companyRole, us
           )}
         </section>
 
-        <section ref={whileAwayRef} className="mt-12">
+        <section
+          ref={whileAwayRef}
+          id="dash-while-away-anchor"
+          className="mt-12"
+          style={
+            !dashPrefs.showWhileAway && !walkthroughOpen
+              ? { display: "none" }
+              : !dashPrefs.showWhileAway
+              ? { opacity: 0.35, pointerEvents: "none" }
+              : undefined
+          }
+        >
           <div className="flex items-end justify-between mb-5">
             <div>
               <h2 className="font-display text-[28px] leading-[1.05] text-[color:var(--ink)]">While you were away</h2>
               <p className="sec-sub">
                 <span className="num">{updatesWhileAway.length}</span> update{updatesWhileAway.length !== 1 ? "s" : ""} since your last login
+                {!dashPrefs.showWhileAway && walkthroughOpen ? (
+                  <span className="ml-2 text-xs italic text-gray-400">· hidden by your settings</span>
+                ) : null}
               </p>
             </div>
           </div>
@@ -1839,6 +1891,8 @@ export default function DashboardClient({ username, email, role, companyRole, us
           </div>
         );
       })()}
+
+      <DashboardWalkthrough open={walkthroughOpen} onClose={() => setWalkthroughOpen(false)} />
     </div>
   );
 }

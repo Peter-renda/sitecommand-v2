@@ -18,9 +18,17 @@ export default function DashboardSettingsClient() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Dashboard Settings</h1>
-        <p className="text-sm text-gray-500 mt-1">Customize what appears on your dashboard.</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Dashboard Settings</h1>
+          <p className="text-sm text-gray-500 mt-1">Customize what appears on your dashboard.</p>
+        </div>
+        <a
+          href="/dashboard?walkthrough=1"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-[#D4500A] hover:bg-[#B5450A] text-white text-sm font-semibold rounded-md shadow-sm transition-colors"
+        >
+          <span aria-hidden>▶</span> Start Walkthrough
+        </a>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">
