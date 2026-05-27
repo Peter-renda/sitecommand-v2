@@ -1698,3 +1698,87 @@ function PersonRow({
     </tr>
   );
 }
+
+// ── Person card (grid view) ───────────────────────────────────────────────────
+
+function PersonCard({
+  c,
+  displayName,
+  invitingId,
+  openMenuId,
+  onInvite,
+  onMenuOpen,
+  onMenuClose,
+  onOpen,
+  selected,
+  onToggleSelect,
+}: {
+  c: Contact;
+  displayName: string;
+  invitingId: string | null;
+  openMenuId: string | null;
+  onInvite: (c: Contact) => void;
+  onMenuOpen: (id: string, rect: DOMRect) => void;
+  onMenuClose: () => void;
+  onOpen: (c: Contact) => void;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
+}) {
+  const sending = invitingId === c.id;
+  const initials = getInitials(c.first_name, c.last_name);
+  return (
+    <div className="dir-card">
+      <div className="head">
+        <div
+          className={`av av-${warmTint(displayName)}`}
+          style={{ width: 40, height: 40, borderRadius: 8, display: "grid", placeItems: "center", fontSize: 15, fontWeight: 600, color: "#fff", fontFamily: "var(--font-display, 'DM Serif Display'), serif", fontStyle: "italic" }}
+        >
+          {initials}
+        </div>
+        <div className="min-w-0">
+          <button onClick={() => onOpen(c)} className="nm hover:text-[color:var(--brand-700)] transition-colors text-left truncate">{displayName}</button>
+          {c.job_title && <div className="role truncate">{c.job_title}</div>}
+        </div>
+        <input
+          type="checkbox"
+          className="rounded border-gray-300 cursor-pointer ml-auto shrink-0"
+          checked={selected}
+          onChange={() => onToggleSelect(c.id)}
+          aria-label={`Select ${displayName}`}
+        />
+      </div>
+      {(c.email || c.phone) && (
+        <div className="info">
+          {c.email && <a href={`mailto:${c.email}`} className="hover:text-[color:var(--ink)] transition-colors">{c.email}</a>}
+          {c.email && c.phone && <span className="sep"> · </span>}
+          {c.phone && <span>{c.phone}</span>}
+        </div>
+      )}
+      {c.permission && <div className="info">{c.permission}</div>}
+      <div className="flex items-center gap-2 mt-3">
+        {c.email && (
+          <button
+            onClick={() => onInvite(c)}
+            disabled={sending}
+            className="px-3 py-1 text-xs font-semibold rounded text-white bg-gray-900 hover:bg-gray-700 transition-colors disabled:opacity-60"
+          >
+            {sending ? "Sending…" : "Invite"}
+          </button>
+        )}
+        <button
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (openMenuId === c.id) { onMenuClose(); return; }
+            onMenuOpen(c.id, (e.currentTarget as HTMLButtonElement).getBoundingClientRect());
+          }}
+          className="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors ml-auto"
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
