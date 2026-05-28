@@ -2792,9 +2792,10 @@ export default function ReportingClient({
     }
 
     // Reports created via the drag-and-drop Single Tool builder persist their
-    // tabs/datasets/columns to localStorage. Route those back to the builder
-    // so the saved configuration is rebuilt exactly as the user left it.
-    if (saved.hasSingleToolTabs || saved.reportType === "Single Tool Report") {
+    // tabs/datasets/columns to localStorage and have no templateValue. Route
+    // those back to the builder; template-based "Single Tool Report" saves
+    // (including Assist-generated reports) fall through to RunReportModal.
+    if (saved.hasSingleToolTabs || (saved.reportType === "Single Tool Report" && !saved.templateValue)) {
       router.push(`/projects/${projectId}/reporting/single-tool/${saved.id}`);
       return;
     }
@@ -3570,7 +3571,7 @@ export default function ReportingClient({
               filters: rec.filters as unknown as Record<string, unknown>[],
             };
             saveReport(projectId, stored);
-            handleSaveReport({
+            const savedReport: SavedReport = {
               id: stored.id,
               name: stored.name,
               reportType: stored.reportType,
@@ -3583,10 +3584,12 @@ export default function ReportingClient({
               calculatedColumns,
               visualConfig,
               filters: rec.filters,
-            });
-            setStatusBanner(`Assist created “${stored.name}”. It’s now in My Reports.`);
-            setSelectedSectionId("my-reports");
-            setActiveTab("reports");
+            };
+            handleSaveReport(savedReport);
+            setActiveReport(rec.def);
+            setActiveSavedReport(savedReport);
+            setActiveCalculatedColumns(calculatedColumns);
+            setStatusBanner(`Assist created “${stored.name}”. Review and adjust as needed.`);
           }}
         />
       )}
