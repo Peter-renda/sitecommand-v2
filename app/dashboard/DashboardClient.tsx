@@ -1503,11 +1503,31 @@ export default function DashboardClient({ username, email, role, companyRole, us
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Sector <span className="text-gray-400 font-normal">(optional)</span></label>
-                    <input
-                      type="text" value={sector} onChange={(e) => setSector(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                      placeholder="e.g. Commercial"
-                    />
+                    <select
+                      value={sector} onChange={(e) => setSector(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white"
+                    >
+                      <option value="">Select a sector…</option>
+                      <option value="Residential">Residential</option>
+                      <option value="Commercial">Commercial</option>
+                      <option value="Industrial">Industrial</option>
+                      <option value="Institutional">Institutional</option>
+                      <option value="Heavy Civil / Infrastructure">Heavy Civil / Infrastructure</option>
+                      <option value="Energy & Utilities">Energy &amp; Utilities</option>
+                      <option value="Telecom">Telecom</option>
+                      <option value="Renovation">Renovation</option>
+                      <option value="Mixed-Use">Mixed-Use</option>
+                      <option value="Hospitality">Hospitality</option>
+                      <option value="Healthcare">Healthcare</option>
+                      <option value="Education">Education</option>
+                      <option value="Transportation">Transportation</option>
+                      <option value="Federal / Government">Federal / Government</option>
+                      <option value="Sports & Entertainment">Sports &amp; Entertainment</option>
+                      <option value="Agricultural">Agricultural</option>
+                      <option value="Mining">Mining</option>
+                      <option value="Oil & Gas">Oil &amp; Gas</option>
+                      <option value="Life Sciences / Pharmaceutical">Life Sciences / Pharmaceutical</option>
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Value ($)</label>
