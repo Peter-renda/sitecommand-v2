@@ -24,6 +24,8 @@ type VisualConfig = {
   useDualAxis?: boolean;
   decimalPlaces?: number;
   displayUnits?: "none" | "thousands" | "millions";
+  selectedColumnKeys?: string[];
+  groupByKey?: string;
 };
 
 type VisualCard = {
@@ -1201,7 +1203,10 @@ function RunReportModal({
   const [newRounding, setNewRounding] = useState(true);
   const [loadDataManually, setLoadDataManually] = useState(true);
   const [showConfig, setShowConfig] = useState(!existingReport);
-  const [groupByKey, setGroupByKey] = useState("");
+  const [groupByKey, setGroupByKey] = useState(existingReport?.visualConfig?.groupByKey ?? "");
+  const [selectedColumnKeys, setSelectedColumnKeys] = useState<string[]>(
+    existingReport?.visualConfig?.selectedColumnKeys ?? [],
+  );
   const [visualType, setVisualType] = useState<VisualType>(existingReport?.visualConfig?.visualType ?? "table");
   const [xAxisKey, setXAxisKey] = useState(existingReport?.visualConfig?.xAxisKey ?? "");
   const [yAxisKey, setYAxisKey] = useState(existingReport?.visualConfig?.yAxisKey ?? "");
@@ -1221,16 +1226,21 @@ function RunReportModal({
   const [filters, setFilters] = useState<ReportFilter[]>(existingReport?.filters ?? []);
   const [allFetchedRows, setAllFetchedRows] = useState<Record<string, unknown>[]>([]);
 
-  const displayColumns = useMemo(
-    () => [
-      ...reportDef.columns,
+  const displayColumns = useMemo(() => {
+    const base =
+      selectedColumnKeys.length > 0
+        ? selectedColumnKeys
+            .map((key) => reportDef.columns.find((c) => c.key === key))
+            .filter((c): c is { key: string; label: string } => c !== undefined)
+        : reportDef.columns;
+    return [
+      ...base,
       ...calculatedColumns.map((c) => ({
         key: c.id,
         label: c.name,
       })),
-    ],
-    [reportDef.columns, calculatedColumns]
-  );
+    ];
+  }, [reportDef.columns, calculatedColumns, selectedColumnKeys]);
 
   async function runReport() {
     setLoading(true);
@@ -1322,6 +1332,8 @@ function RunReportModal({
       useDualAxis,
       decimalPlaces,
       displayUnits,
+      selectedColumnKeys: selectedColumnKeys.length > 0 ? selectedColumnKeys : undefined,
+      groupByKey: groupByKey || undefined,
     };
 
     if (existingReport && onUpdate) {
@@ -1598,6 +1610,61 @@ function RunReportModal({
                 })}
               </div>
             )}
+          </div>
+
+          <div className="mb-3 rounded-md border border-gray-200 bg-white p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-gray-700">Visible Columns</p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedColumnKeys([])}
+                  className="text-[11px] text-gray-500 hover:text-gray-900"
+                >
+                  Show all
+                </button>
+                <span className="text-gray-300">·</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedColumnKeys(reportDef.columns.map((c) => c.key))}
+                  className="text-[11px] text-gray-500 hover:text-gray-900"
+                >
+                  Hide all
+                </button>
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-500 mb-2">
+              Pick which source columns appear in the table and exports. Custom columns are always included.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {reportDef.columns.map((col) => {
+                const active =
+                  selectedColumnKeys.length === 0 || selectedColumnKeys.includes(col.key);
+                return (
+                  <button
+                    type="button"
+                    key={col.key}
+                    onClick={() => {
+                      setSelectedColumnKeys((prev) => {
+                        if (prev.length === 0) {
+                          return reportDef.columns.map((c) => c.key).filter((k) => k !== col.key);
+                        }
+                        return prev.includes(col.key)
+                          ? prev.filter((k) => k !== col.key)
+                          : [...prev, col.key];
+                      });
+                    }}
+                    className={`px-2 py-1 rounded-full text-[11px] border transition-colors ${
+                      active
+                        ? "bg-gray-900 text-white border-gray-900"
+                        : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"
+                    }`}
+                  >
+                    {col.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="mb-3 rounded-md border border-gray-200 bg-white p-3">
@@ -2294,6 +2361,7 @@ type AssistRecommendation = {
   columns: string[];
   sortByKey?: string;
   sortDirection?: "asc" | "desc";
+  groupByKey?: string;
   calculatedColumns: AssistCalculatedColumn[];
   name: string;
   description: string;
@@ -2373,6 +2441,7 @@ function AssistReportModal({
         sortByKey: typeof payload.sortByKey === "string" ? payload.sortByKey : undefined,
         sortDirection:
           payload.sortDirection === "desc" ? "desc" : payload.sortDirection === "asc" ? "asc" : undefined,
+        groupByKey: typeof payload.groupByKey === "string" ? payload.groupByKey : undefined,
         calculatedColumns: rawCalcs,
         name: typeof payload.name === "string" ? payload.name : def.label,
         description: typeof payload.description === "string" ? payload.description : def.description,
@@ -3445,6 +3514,8 @@ export default function ReportingClient({
               visualType: "table",
               sortByKey: rec.sortByKey,
               sortDirection: rec.sortDirection ?? "asc",
+              selectedColumnKeys: rec.columns.length > 0 ? rec.columns : undefined,
+              groupByKey: rec.groupByKey,
             };
             const stored: StoredReport = {
               id: crypto.randomUUID(),
