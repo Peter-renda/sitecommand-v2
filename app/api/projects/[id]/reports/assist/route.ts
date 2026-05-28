@@ -37,19 +37,32 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const validValues = REPORT_TYPES.map((r) => r.value);
 
-  const systemInstruction = `You are SiteCommand Assist, an AI assistant that converts a user's plain-language request into a single-tool report definition.
+  const systemInstruction = `You are SiteCommand Assist, an AI assistant that converts a user's plain-language request into a complete, ready-to-run single-tool report definition.
 
 You will be given a catalog of available report types. Each type has a stable "value" identifier, a human label, the construction tool it lives under, a short description, and a list of available columns (each with a "key" and "label").
 
 Your task:
 1. Pick the SINGLE report type whose data best matches the user's request.
-2. Pick the subset of that report type's columns that directly answer the request. Prefer fewer, more relevant columns. Always include any column the user explicitly mentioned (e.g. "created by", "comments", "company", "hours").
-3. Generate a short report name (max 60 chars) describing the report.
-4. Generate a one-sentence description (max 160 chars) explaining what the report shows.
+2. Pick the subset of that report type's columns that directly answer the request. Prefer fewer, more relevant columns. Always include any column the user explicitly mentioned (e.g. "created by", "comments", "company", "hours"). Order the "columns" array in the natural left-to-right reading order for the report (identifier/date first, then descriptive fields, then numeric/measure fields).
+3. Decide how the report should be sorted by default. Set "sortByKey" to the column key that best answers the user's intent (typically a date for time-series, or a measure for ranking). Set "sortDirection" to "asc" or "desc" — pick "desc" for "latest", "top", "highest", "most recent"; pick "asc" for chronological or alphabetical orderings. If no sort is clearly useful, omit both.
+4. If the user's request implies a derived metric that is NOT a raw column (for example "delay duration in days from hours", "cost per hour", "variance between two dates", "percent complete"), propose one or two "calculatedColumns". Each calculated column has:
+   - "name": short label (max 40 chars)
+   - "output": one of "number" | "currency" | "percent" | "date-variance"
+   - "leftSource": a column "key" from the chosen report, OR the literal string "constant"
+   - "operator": one of "+", "-", "*", "/"
+   - "rightSource": a column "key", OR "constant"
+   - "leftConstant" / "rightConstant": numeric values, ONLY when the matching source is "constant"
+   - "decimals": integer 0-4 (use 0 for "date-variance")
+   - "rounding": true to round, false to truncate
+   If no calculation is needed, return an empty array.
+5. Generate a short report name (max 60 chars) describing the report.
+6. Generate a one-sentence description (max 160 chars) explaining what the report shows.
 
 Constraints:
 - "reportType" MUST be exactly one of the provided "value" strings.
 - "columns" MUST be a non-empty list of column "key" strings that exist in the chosen report's columns list.
+- "sortByKey", when present, MUST be one of the chosen report's column keys (NOT a calculated column).
+- "calculatedColumns" sources MUST be either column "key" strings from the chosen report or the literal "constant".
 - Do not invent columns or report types.`;
 
   const userPrompt = `Available report types (JSON):
@@ -75,6 +88,26 @@ Return JSON describing the best single-tool report and its columns.`;
           properties: {
             reportType: { type: Type.STRING },
             columns: { type: Type.ARRAY, items: { type: Type.STRING } },
+            sortByKey: { type: Type.STRING },
+            sortDirection: { type: Type.STRING },
+            calculatedColumns: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  output: { type: Type.STRING },
+                  leftSource: { type: Type.STRING },
+                  operator: { type: Type.STRING },
+                  rightSource: { type: Type.STRING },
+                  leftConstant: { type: Type.NUMBER },
+                  rightConstant: { type: Type.NUMBER },
+                  decimals: { type: Type.INTEGER },
+                  rounding: { type: Type.BOOLEAN },
+                },
+                required: ["name", "output", "leftSource", "operator", "rightSource"],
+              },
+            },
             name: { type: Type.STRING },
             description: { type: Type.STRING },
             reasoning: { type: Type.STRING },
@@ -85,9 +118,23 @@ Return JSON describing the best single-tool report and its columns.`;
     });
 
     const raw = (result.text ?? "").trim();
+    type AssistCalcCol = {
+      name?: unknown;
+      output?: unknown;
+      leftSource?: unknown;
+      operator?: unknown;
+      rightSource?: unknown;
+      leftConstant?: unknown;
+      rightConstant?: unknown;
+      decimals?: unknown;
+      rounding?: unknown;
+    };
     let parsed: {
       reportType?: string;
       columns?: string[];
+      sortByKey?: string;
+      sortDirection?: string;
+      calculatedColumns?: AssistCalcCol[];
       name?: string;
       description?: string;
       reasoning?: string;
@@ -123,9 +170,53 @@ Return JSON describing the best single-tool report and its columns.`;
         ? parsed.description.trim().slice(0, 200)
         : def.description;
 
+    const sortByKey =
+      typeof parsed.sortByKey === "string" && validKeys.has(parsed.sortByKey) ? parsed.sortByKey : undefined;
+    const sortDirection: "asc" | "desc" | undefined =
+      parsed.sortDirection === "desc" ? "desc" : parsed.sortDirection === "asc" ? "asc" : undefined;
+
+    const calcOutputs = new Set(["number", "currency", "percent", "date-variance"]);
+    const calcOps = new Set(["+", "-", "*", "/"]);
+    const rawCalcs = Array.isArray(parsed.calculatedColumns) ? parsed.calculatedColumns : [];
+    const calculatedColumns = rawCalcs
+      .map((c) => {
+        const name = typeof c.name === "string" ? c.name.trim().slice(0, 80) : "";
+        const output = typeof c.output === "string" && calcOutputs.has(c.output) ? c.output : "number";
+        const operator = typeof c.operator === "string" && calcOps.has(c.operator) ? c.operator : "+";
+        const leftSource =
+          typeof c.leftSource === "string" && (c.leftSource === "constant" || validKeys.has(c.leftSource))
+            ? c.leftSource
+            : "constant";
+        const rightSource =
+          typeof c.rightSource === "string" && (c.rightSource === "constant" || validKeys.has(c.rightSource))
+            ? c.rightSource
+            : "constant";
+        if (!name) return null;
+        return {
+          name,
+          output,
+          leftSource,
+          operator,
+          rightSource,
+          leftConstant: typeof c.leftConstant === "number" ? c.leftConstant : undefined,
+          rightConstant: typeof c.rightConstant === "number" ? c.rightConstant : undefined,
+          decimals:
+            output === "date-variance"
+              ? 0
+              : typeof c.decimals === "number" && Number.isFinite(c.decimals)
+                ? Math.max(0, Math.min(4, Math.round(c.decimals)))
+                : 2,
+          rounding: typeof c.rounding === "boolean" ? c.rounding : true,
+        };
+      })
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+
     return NextResponse.json({
       reportType,
       columns: finalColumns,
+      sortByKey,
+      sortDirection,
+      calculatedColumns,
       name,
       description,
       reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",

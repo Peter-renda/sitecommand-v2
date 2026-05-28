@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
 import { deleteSavedReport, loadSavedReports, saveReport, type StoredReport } from "./saved-reports-store";
@@ -33,6 +33,30 @@ type VisualCard = {
   config: VisualConfig;
 };
 
+type FilterMode =
+  | "matches"
+  | "not_matches"
+  | "contains"
+  | "not_contains"
+  | "starts_with"
+  | "ends_with";
+
+type ReportFilter = {
+  id: string;
+  columnKey: string;
+  mode: FilterMode;
+  values: string[];
+};
+
+const FILTER_MODES: { value: FilterMode; label: string }[] = [
+  { value: "matches", label: "Matches" },
+  { value: "not_matches", label: "Does not match" },
+  { value: "contains", label: "Contains text" },
+  { value: "not_contains", label: "Does not contain text" },
+  { value: "starts_with", label: "Starts with" },
+  { value: "ends_with", label: "Ends with" },
+];
+
 type SavedReport = {
   id: string;
   name: string;
@@ -47,6 +71,7 @@ type SavedReport = {
   calculatedColumns?: CalculatedColumn[];
   visualConfig?: VisualConfig;
   visualCards?: VisualCard[];
+  filters?: ReportFilter[];
   lastRunRecordCount?: number;
   distributionCount?: number;
   lastDistributedAt?: string;
@@ -305,6 +330,50 @@ function getAggregateFunctionsForColumn(key: string): AggregateFunction[] {
   const normalized = key.toLowerCase();
   const isNumeric = NUMERIC_COLUMN_HINTS.some((hint) => normalized.includes(hint));
   return isNumeric ? ["count", "sum", "min", "max", "avg"] : ["count"];
+}
+
+function applyReportFilters(
+  rows: Record<string, unknown>[],
+  filters: ReportFilter[],
+): Record<string, unknown>[] {
+  const active = filters.filter((f) => f.columnKey && f.values.length > 0);
+  if (active.length === 0) return rows;
+  return rows.filter((row) =>
+    active.every((f) => {
+      const cell = row[f.columnKey];
+      const raw = cell === null || cell === undefined ? "" : String(cell);
+      const lower = raw.toLowerCase();
+      switch (f.mode) {
+        case "matches":
+          return f.values.some((fv) => raw === fv);
+        case "not_matches":
+          return f.values.every((fv) => raw !== fv);
+        case "contains":
+          return f.values.some((fv) => lower.includes(fv.toLowerCase()));
+        case "not_contains":
+          return f.values.every((fv) => !lower.includes(fv.toLowerCase()));
+        case "starts_with":
+          return f.values.some((fv) => lower.startsWith(fv.toLowerCase()));
+        case "ends_with":
+          return f.values.some((fv) => lower.endsWith(fv.toLowerCase()));
+        default:
+          return true;
+      }
+    }),
+  );
+}
+
+function distinctColumnValues(rows: Record<string, unknown>[], columnKey: string): string[] {
+  const set = new Set<string>();
+  for (const r of rows) {
+    const v = r[columnKey];
+    set.add(v === null || v === undefined ? "" : String(v));
+  }
+  return Array.from(set).sort((a, b) => {
+    if (a === "" && b !== "") return -1;
+    if (b === "" && a !== "") return 1;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
 }
 
 function toCSV(columns: { key: string; label: string }[], rows: Record<string, unknown>[]): string {
@@ -772,6 +841,326 @@ function ReportingSettingsModal({
   );
 }
 
+// ─── Filters ─────────────────────────────────────────────────────────────────
+
+function AddFilterDropdown({
+  categoryLabel,
+  columns,
+  onSelect,
+}: {
+  categoryLabel: string;
+  columns: { key: string; label: string }[];
+  onSelect: (columnKey: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<"categories" | "fields">("categories");
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setStep("categories");
+        setSearch("");
+      }
+    }
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const filteredCategories = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [{ label: categoryLabel }];
+    return categoryLabel.toLowerCase().includes(q) ? [{ label: categoryLabel }] : [];
+  }, [search, categoryLabel]);
+
+  const filteredFields = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return columns;
+    return columns.filter((c) => c.label.toLowerCase().includes(q));
+  }, [search, columns]);
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setStep("categories");
+          setSearch("");
+        }}
+        className="w-full flex items-center justify-between px-3 py-2 border border-gray-200 rounded-md text-sm text-gray-500 bg-white hover:border-gray-300"
+      >
+        Add Filters...
+        <span className="text-gray-400">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-30 max-h-80 overflow-hidden flex flex-col">
+          <div className="p-2 border-b border-gray-100">
+            <div className="relative">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={step === "categories" ? "Search Filters" : "Search Fields"}
+                className="w-full pl-2 pr-7 py-1.5 border-2 border-blue-500 rounded text-sm focus:outline-none"
+                autoFocus
+              />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+            </div>
+          </div>
+          <div className="overflow-y-auto">
+            {step === "categories" && (
+              <>
+                {filteredCategories.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-gray-400">No matches.</p>
+                ) : (
+                  filteredCategories.map((cat) => (
+                    <button
+                      key={cat.label}
+                      type="button"
+                      onClick={() => {
+                        setStep("fields");
+                        setSearch("");
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-gray-800 hover:bg-gray-50"
+                    >
+                      <span>{cat.label}</span>
+                      <span className="text-gray-400">›</span>
+                    </button>
+                  ))
+                )}
+              </>
+            )}
+            {step === "fields" && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep("categories");
+                    setSearch("");
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:bg-gray-50 border-b border-gray-100"
+                >
+                  ‹ Back to filters
+                </button>
+                <p className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wide text-gray-400">{categoryLabel}</p>
+                {filteredFields.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-gray-400">No matching fields.</p>
+                ) : (
+                  filteredFields.map((col) => (
+                    <button
+                      key={col.key}
+                      type="button"
+                      onClick={() => {
+                        onSelect(col.key);
+                        setOpen(false);
+                        setStep("categories");
+                        setSearch("");
+                      }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-800 hover:bg-gray-50"
+                    >
+                      {col.label}
+                    </button>
+                  ))
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterValuePicker({
+  mode,
+  values,
+  suggestions,
+  onChange,
+}: {
+  mode: FilterMode;
+  values: string[];
+  suggestions: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isFreeText = mode === "contains" || mode === "not_contains" || mode === "starts_with" || mode === "ends_with";
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch("");
+      }
+    }
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const filteredSuggestions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const base = suggestions.filter((s) => !values.includes(s));
+    if (!q) return base;
+    return base.filter((s) => (s === "" ? "(none)" : s.toLowerCase()).includes(q));
+  }, [search, suggestions, values]);
+
+  function toggleValue(v: string) {
+    if (values.includes(v)) onChange(values.filter((x) => x !== v));
+    else onChange([...values, v]);
+  }
+
+  function commitFreeText(text: string) {
+    const t = text.trim();
+    if (!t) return;
+    if (values.includes(t)) return;
+    onChange([...values, t]);
+    setSearch("");
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div
+        onClick={() => setOpen(true)}
+        className="w-full min-h-[36px] flex flex-wrap items-center gap-1 px-2 py-1.5 border border-gray-200 rounded-md text-sm bg-white cursor-text"
+      >
+        {values.map((v) => (
+          <span
+            key={v}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-600 text-white text-xs"
+          >
+            {v === "" ? "(None)" : v}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(values.filter((x) => x !== v));
+              }}
+              className="hover:text-blue-100"
+              aria-label="Remove value"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {(open || values.length === 0) && (
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (isFreeText && e.key === "Enter") {
+                e.preventDefault();
+                commitFreeText(search);
+              }
+              if (e.key === "Backspace" && !search && values.length > 0) {
+                onChange(values.slice(0, -1));
+              }
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder={values.length === 0 ? (isFreeText ? "Type a value..." : "Select values...") : ""}
+            className="flex-1 min-w-[80px] outline-none text-sm bg-transparent"
+          />
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (values.length > 0) onChange([]);
+            else setOpen((o) => !o);
+          }}
+          className="ml-auto text-gray-400 hover:text-gray-700"
+          aria-label={values.length > 0 ? "Clear values" : "Toggle dropdown"}
+        >
+          {values.length > 0 ? "×" : "▾"}
+        </button>
+      </div>
+      {open && (
+        <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-30 max-h-64 overflow-y-auto">
+          {isFreeText && search.trim() && !values.includes(search.trim()) && (
+            <button
+              type="button"
+              onClick={() => commitFreeText(search)}
+              className="w-full text-left px-3 py-2 text-sm text-blue-700 hover:bg-blue-50 border-b border-gray-100"
+            >
+              Use “{search.trim()}”
+            </button>
+          )}
+          {filteredSuggestions.length === 0 ? (
+            <p className="px-3 py-3 text-xs text-gray-400">
+              {suggestions.length === 0
+                ? "Run the report to see available values."
+                : "No matching values."}
+            </p>
+          ) : (
+            filteredSuggestions.map((s) => (
+              <button
+                key={s || "__empty__"}
+                type="button"
+                onClick={() => toggleValue(s)}
+                className="w-full text-left px-3 py-2 text-sm text-gray-800 hover:bg-gray-50"
+              >
+                {s === "" ? "(None)" : s}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterRow({
+  filter,
+  categoryLabel,
+  fieldLabel,
+  suggestions,
+  onUpdate,
+  onRemove,
+}: {
+  filter: ReportFilter;
+  categoryLabel: string;
+  fieldLabel: string;
+  suggestions: string[];
+  onUpdate: (patch: Partial<ReportFilter>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="border-t border-gray-100 pt-3 mt-3">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs text-gray-500">{categoryLabel}</p>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="text-gray-400 hover:text-red-600"
+          aria-label="Remove filter"
+        >
+          ×
+        </button>
+      </div>
+      <p className="text-sm font-semibold text-gray-900 mb-2">{fieldLabel}</p>
+      <select
+        value={filter.mode}
+        onChange={(e) => onUpdate({ mode: e.target.value as FilterMode })}
+        className="w-full mb-2 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm bg-white"
+      >
+        {FILTER_MODES.map((m) => (
+          <option key={m.value} value={m.value}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+      <FilterValuePicker
+        mode={filter.mode}
+        values={filter.values}
+        suggestions={suggestions}
+        onChange={(values) => onUpdate({ values })}
+      />
+    </div>
+  );
+}
+
 // ─── Run Report Modal ─────────────────────────────────────────────────────────
 
 function RunReportModal({
@@ -829,6 +1218,8 @@ function RunReportModal({
   const [actorEmailFilter, setActorEmailFilter] = useState("");
   const [eventTypeFilter, setEventTypeFilter] = useState("");
   const [aggregateByColumn, setAggregateByColumn] = useState<Record<string, AggregateFunction>>({});
+  const [filters, setFilters] = useState<ReportFilter[]>(existingReport?.filters ?? []);
+  const [allFetchedRows, setAllFetchedRows] = useState<Record<string, unknown>[]>([]);
 
   const displayColumns = useMemo(
     () => [
@@ -863,7 +1254,9 @@ function RunReportModal({
       setRows([]);
       return;
     }
-    let sourceRows = Array.isArray(data) ? data : [];
+    const fetched = Array.isArray(data) ? data : [];
+    setAllFetchedRows(fetched);
+    let sourceRows = applyReportFilters(fetched, filters);
     if (groupByKey) {
       sourceRows = [...sourceRows].sort((a, b) => String(a[groupByKey] ?? "").localeCompare(String(b[groupByKey] ?? "")));
     }
@@ -936,6 +1329,7 @@ function RunReportModal({
         name: reportName,
         calculatedColumns,
         visualConfig,
+        filters,
         visualCards: existingReport.visualCards?.length
           ? existingReport.visualCards.map((card, idx) => (idx === 0 ? { ...card, title: reportName, config: visualConfig } : card))
           : [{ id: crypto.randomUUID(), title: reportName, description: reportDef.description, config: visualConfig }],
@@ -959,6 +1353,7 @@ function RunReportModal({
       sharedWith: [],
       calculatedColumns,
       visualConfig,
+      filters,
       visualCards: [{ id: crypto.randomUUID(), title: reportName, description: reportDef.description, config: visualConfig }],
       lastRunRecordCount: rows.length,
     };
@@ -1162,6 +1557,47 @@ function RunReportModal({
                 <option value="millions">Display Units: Millions</option>
               </select>
             </div>
+          </div>
+
+          <div className="mb-3 rounded-md border border-gray-200 bg-white p-3">
+            <p className="text-sm font-semibold text-gray-900 mb-1">Filters</p>
+            <p className="text-[11px] text-gray-500 mb-3">
+              Configure columns and filters for your report and click &ldquo;Run Report&rdquo; to review.
+            </p>
+            <AddFilterDropdown
+              categoryLabel={reportDef.label}
+              columns={reportDef.columns}
+              onSelect={(columnKey) => {
+                if (filters.some((f) => f.columnKey === columnKey)) return;
+                setFilters((prev) => [
+                  ...prev,
+                  { id: crypto.randomUUID(), columnKey, mode: "matches", values: [] },
+                ]);
+              }}
+            />
+            {filters.length > 0 && (
+              <div>
+                {filters.map((f) => {
+                  const col = reportDef.columns.find((c) => c.key === f.columnKey);
+                  if (!col) return null;
+                  return (
+                    <FilterRow
+                      key={f.id}
+                      filter={f}
+                      categoryLabel={reportDef.label}
+                      fieldLabel={col.label}
+                      suggestions={distinctColumnValues(allFetchedRows, f.columnKey)}
+                      onUpdate={(patch) =>
+                        setFilters((prev) =>
+                          prev.map((x) => (x.id === f.id ? { ...x, ...patch } : x)),
+                        )
+                      }
+                      onRemove={() => setFilters((prev) => prev.filter((x) => x.id !== f.id))}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="mb-3 rounded-md border border-gray-200 bg-white p-3">
@@ -1841,9 +2277,24 @@ function PromoteReportModal({
   );
 }
 
+type AssistCalculatedColumn = {
+  name: string;
+  output: CalculatedOutput;
+  leftSource: string;
+  operator: "+" | "-" | "*" | "/";
+  rightSource: string;
+  leftConstant?: number;
+  rightConstant?: number;
+  decimals: number;
+  rounding: boolean;
+};
+
 type AssistRecommendation = {
   reportType: string;
   columns: string[];
+  sortByKey?: string;
+  sortDirection?: "asc" | "desc";
+  calculatedColumns: AssistCalculatedColumn[];
   name: string;
   description: string;
   reasoning?: string;
@@ -1889,9 +2340,42 @@ function AssistReportModal({
         setError("Assist returned an unrecognized report type.");
         return;
       }
+      const calcOutputs: CalculatedOutput[] = ["number", "currency", "percent", "date-variance"];
+      const rawCalcs: AssistCalculatedColumn[] = Array.isArray(payload.calculatedColumns)
+        ? (payload.calculatedColumns as Array<Record<string, unknown>>).flatMap((c) => {
+            const name = typeof c.name === "string" ? c.name : "";
+            const output = calcOutputs.includes(c.output as CalculatedOutput)
+              ? (c.output as CalculatedOutput)
+              : "number";
+            const operator = ["+", "-", "*", "/"].includes(c.operator as string)
+              ? (c.operator as "+" | "-" | "*" | "/")
+              : "+";
+            const leftSource = typeof c.leftSource === "string" ? c.leftSource : "constant";
+            const rightSource = typeof c.rightSource === "string" ? c.rightSource : "constant";
+            if (!name) return [];
+            return [
+              {
+                name,
+                output,
+                leftSource,
+                operator,
+                rightSource,
+                leftConstant: typeof c.leftConstant === "number" ? c.leftConstant : undefined,
+                rightConstant: typeof c.rightConstant === "number" ? c.rightConstant : undefined,
+                decimals: typeof c.decimals === "number" ? c.decimals : 2,
+                rounding: typeof c.rounding === "boolean" ? c.rounding : true,
+              },
+            ];
+          })
+        : [];
+
       setRecommendation({
         reportType: payload.reportType,
         columns: Array.isArray(payload.columns) ? payload.columns : [],
+        sortByKey: typeof payload.sortByKey === "string" ? payload.sortByKey : undefined,
+        sortDirection:
+          payload.sortDirection === "desc" ? "desc" : payload.sortDirection === "asc" ? "asc" : undefined,
+        calculatedColumns: rawCalcs,
         name: typeof payload.name === "string" ? payload.name : def.label,
         description: typeof payload.description === "string" ? payload.description : def.description,
         reasoning: typeof payload.reasoning === "string" ? payload.reasoning : "",
@@ -1928,7 +2412,7 @@ function AssistReportModal({
             disabled={loading}
             className="px-4 py-2 bg-gray-900 text-white rounded-md text-sm disabled:opacity-50"
           >
-            {loading ? "Generating…" : "Generate Recommendation"}
+            {loading ? "Generating…" : "Generate Report"}
           </button>
           <button onClick={onClose} className="px-4 py-2 border border-gray-200 text-gray-600 rounded-md text-sm">
             Close
@@ -1955,6 +2439,31 @@ function AssistReportModal({
                       className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700"
                     >
                       {c.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {recommendation.sortByKey && (
+              <div className="mt-3">
+                <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Sort</p>
+                <p className="text-[11px] text-gray-700">
+                  {recommendation.def.columns.find((c) => c.key === recommendation.sortByKey)?.label ??
+                    recommendation.sortByKey}
+                  {" "}({recommendation.sortDirection === "desc" ? "descending" : "ascending"})
+                </p>
+              </div>
+            )}
+            {recommendation.calculatedColumns.length > 0 && (
+              <div className="mt-3">
+                <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Custom columns</p>
+                <div className="flex flex-wrap gap-1">
+                  {recommendation.calculatedColumns.map((c, idx) => (
+                    <span
+                      key={`${c.name}-${idx}`}
+                      className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-[11px]"
+                    >
+                      {c.name}
                     </span>
                   ))}
                 </div>
@@ -2291,6 +2800,9 @@ export default function ReportingClient({
       updatedAt: report.updatedAt,
       sharedWith: report.sharedWith,
       lastRunRecordCount: report.lastRunRecordCount,
+      visualConfig: report.visualConfig as unknown as Record<string, unknown> | undefined,
+      calculatedColumns: report.calculatedColumns as unknown as Record<string, unknown>[] | undefined,
+      filters: report.filters as unknown as Record<string, unknown>[] | undefined,
     });
   }
 
@@ -2325,6 +2837,9 @@ export default function ReportingClient({
           sharedWith: p.sharedWith ?? [],
           lastRunRecordCount: p.lastRunRecordCount,
           hasSingleToolTabs: (p.singleToolTabs?.length ?? 0) > 0,
+          visualConfig: p.visualConfig as unknown as VisualConfig | undefined,
+          calculatedColumns: p.calculatedColumns as unknown as CalculatedColumn[] | undefined,
+          filters: p.filters as unknown as ReportFilter[] | undefined,
         }));
       return [...additions, ...prev];
     });
@@ -2977,6 +3492,24 @@ export default function ReportingClient({
             setShowAssistModal(false);
             const now = new Date().toISOString();
             const isDailyLog = rec.def.group === "Daily Log";
+            const calculatedColumns: CalculatedColumn[] = rec.calculatedColumns.map((c) => ({
+              id: `calc_${crypto.randomUUID()}`,
+              name: c.name,
+              type: c.output === "date-variance" ? "date-variance" : "basic",
+              output: c.output,
+              leftSource: c.leftSource,
+              operator: c.operator,
+              rightSource: c.rightSource,
+              leftConstant: c.leftConstant,
+              rightConstant: c.rightConstant,
+              decimals: c.decimals,
+              rounding: c.rounding,
+            }));
+            const visualConfig: VisualConfig = {
+              visualType: "table",
+              sortByKey: rec.sortByKey,
+              sortDirection: rec.sortDirection ?? "asc",
+            };
             const stored: StoredReport = {
               id: crypto.randomUUID(),
               name: rec.name,
@@ -2998,6 +3531,8 @@ export default function ReportingClient({
                   fieldLabel: col?.label ?? key,
                 };
               }),
+              visualConfig: visualConfig as unknown as Record<string, unknown>,
+              calculatedColumns: calculatedColumns as unknown as Record<string, unknown>[],
             };
             saveReport(projectId, stored);
             handleSaveReport({
@@ -3010,6 +3545,8 @@ export default function ReportingClient({
               createdAt: stored.createdAt,
               updatedAt: stored.updatedAt,
               sharedWith: stored.sharedWith,
+              calculatedColumns,
+              visualConfig,
             });
             setStatusBanner(`Assist created “${stored.name}”. It’s now in My Reports.`);
             setSelectedSectionId("my-reports");
