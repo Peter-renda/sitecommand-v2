@@ -29,6 +29,7 @@ export type StoredReport = {
   }[];
   visualConfig?: Record<string, unknown>;
   calculatedColumns?: Record<string, unknown>[];
+  filters?: Record<string, unknown>[];
   lastRunRecordCount?: number;
 };
 
