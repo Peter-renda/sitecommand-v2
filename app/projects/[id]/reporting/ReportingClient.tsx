@@ -2363,6 +2363,7 @@ type AssistRecommendation = {
   sortDirection?: "asc" | "desc";
   groupByKey?: string;
   calculatedColumns: AssistCalculatedColumn[];
+  filters: ReportFilter[];
   name: string;
   description: string;
   reasoning?: string;
@@ -2435,6 +2436,31 @@ function AssistReportModal({
           })
         : [];
 
+      const validKeys = new Set(def.columns.map((c) => c.key));
+      const validFilterModes: FilterMode[] = [
+        "matches",
+        "not_matches",
+        "contains",
+        "not_contains",
+        "starts_with",
+        "ends_with",
+      ];
+      const rawFilters: ReportFilter[] = Array.isArray(payload.filters)
+        ? (payload.filters as Array<Record<string, unknown>>).flatMap((f) => {
+            const columnKey = typeof f.columnKey === "string" && validKeys.has(f.columnKey) ? f.columnKey : "";
+            const mode = validFilterModes.includes(f.mode as FilterMode)
+              ? (f.mode as FilterMode)
+              : "matches";
+            const values = Array.isArray(f.values)
+              ? (f.values as unknown[])
+                  .map((v) => (typeof v === "string" ? v : v == null ? "" : String(v)))
+                  .filter((v) => v.length > 0)
+              : [];
+            if (!columnKey || values.length === 0) return [];
+            return [{ id: crypto.randomUUID(), columnKey, mode, values }];
+          })
+        : [];
+
       onCreate({
         reportType: payload.reportType,
         columns: Array.isArray(payload.columns) ? payload.columns : [],
@@ -2443,6 +2469,7 @@ function AssistReportModal({
           payload.sortDirection === "desc" ? "desc" : payload.sortDirection === "asc" ? "asc" : undefined,
         groupByKey: typeof payload.groupByKey === "string" ? payload.groupByKey : undefined,
         calculatedColumns: rawCalcs,
+        filters: rawFilters,
         name: typeof payload.name === "string" ? payload.name : def.label,
         description: typeof payload.description === "string" ? payload.description : def.description,
         reasoning: typeof payload.reasoning === "string" ? payload.reasoning : "",
@@ -2765,9 +2792,10 @@ export default function ReportingClient({
     }
 
     // Reports created via the drag-and-drop Single Tool builder persist their
-    // tabs/datasets/columns to localStorage. Route those back to the builder
-    // so the saved configuration is rebuilt exactly as the user left it.
-    if (saved.hasSingleToolTabs || saved.reportType === "Single Tool Report") {
+    // tabs/datasets/columns to localStorage and have no templateValue. Route
+    // those back to the builder; template-based "Single Tool Report" saves
+    // (including Assist-generated reports) fall through to RunReportModal.
+    if (saved.hasSingleToolTabs || (saved.reportType === "Single Tool Report" && !saved.templateValue)) {
       router.push(`/projects/${projectId}/reporting/single-tool/${saved.id}`);
       return;
     }
@@ -3540,9 +3568,10 @@ export default function ReportingClient({
               }),
               visualConfig: visualConfig as unknown as Record<string, unknown>,
               calculatedColumns: calculatedColumns as unknown as Record<string, unknown>[],
+              filters: rec.filters as unknown as Record<string, unknown>[],
             };
             saveReport(projectId, stored);
-            handleSaveReport({
+            const savedReport: SavedReport = {
               id: stored.id,
               name: stored.name,
               reportType: stored.reportType,
@@ -3554,10 +3583,13 @@ export default function ReportingClient({
               sharedWith: stored.sharedWith,
               calculatedColumns,
               visualConfig,
-            });
-            setStatusBanner(`Assist created “${stored.name}”. It’s now in My Reports.`);
-            setSelectedSectionId("my-reports");
-            setActiveTab("reports");
+              filters: rec.filters,
+            };
+            handleSaveReport(savedReport);
+            setActiveReport(rec.def);
+            setActiveSavedReport(savedReport);
+            setActiveCalculatedColumns(calculatedColumns);
+            setStatusBanner(`Assist created “${stored.name}”. Review and adjust as needed.`);
           }}
         />
       )}

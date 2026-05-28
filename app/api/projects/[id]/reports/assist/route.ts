@@ -56,8 +56,19 @@ Your task:
    - "decimals": integer 0-4 (use 0 for "date-variance")
    - "rounding": true to round, false to truncate
    If no calculation is needed, return an empty array.
-6. Generate a short report name (max 60 chars) describing the report.
-7. Generate a one-sentence description (max 160 chars) explaining what the report shows.
+6. Decide whether the report should be filtered. If the user's request narrows the data (for example "only approved", "open items", "from Acme Co", "exclude voided", "this year", "RFIs whose status is open", "delays caused by weather"), propose one or more "filters". Each filter has:
+   - "columnKey": a column "key" from the chosen report's columns list
+   - "mode": one of "matches" | "not_matches" | "contains" | "not_contains" | "starts_with" | "ends_with"
+   - "values": a non-empty list of strings to filter against
+   Guidance:
+   - Use "matches" / "not_matches" for known enums (status, type, role, approved/rejected, yes/no).
+   - Use "contains" / "not_contains" for free-text fields (title, description, comments, notes).
+   - Use "starts_with" / "ends_with" when the user explicitly says "starts with"/"ends with".
+   - Prefer the simplest mode that captures the user's intent.
+   - The "columnKey" MUST be in "columns" so the user can see what they are filtering on; if it isn't already, add it.
+   If no filtering is implied, return an empty array.
+7. Generate a short report name (max 60 chars) describing the report.
+8. Generate a one-sentence description (max 160 chars) explaining what the report shows.
 
 Constraints:
 - "reportType" MUST be exactly one of the provided "value" strings.
@@ -65,6 +76,7 @@ Constraints:
 - "sortByKey", when present, MUST be one of the chosen report's column keys (NOT a calculated column).
 - "groupByKey", when present, MUST be one of the chosen report's column keys AND MUST also be included in "columns".
 - "calculatedColumns" sources MUST be either column "key" strings from the chosen report or the literal "constant".
+- "filters[].columnKey" MUST be one of the chosen report's column keys; "filters[].mode" MUST be one of the listed modes; "filters[].values" MUST be a non-empty list of strings.
 - Do not invent columns or report types.`;
 
   const userPrompt = `Available report types (JSON):
@@ -111,6 +123,18 @@ Return JSON describing the best single-tool report and its columns.`;
                 required: ["name", "output", "leftSource", "operator", "rightSource"],
               },
             },
+            filters: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  columnKey: { type: Type.STRING },
+                  mode: { type: Type.STRING },
+                  values: { type: Type.ARRAY, items: { type: Type.STRING } },
+                },
+                required: ["columnKey", "mode", "values"],
+              },
+            },
             name: { type: Type.STRING },
             description: { type: Type.STRING },
             reasoning: { type: Type.STRING },
@@ -132,6 +156,7 @@ Return JSON describing the best single-tool report and its columns.`;
       decimals?: unknown;
       rounding?: unknown;
     };
+    type AssistFilter = { columnKey?: unknown; mode?: unknown; values?: unknown };
     let parsed: {
       reportType?: string;
       columns?: string[];
@@ -139,6 +164,7 @@ Return JSON describing the best single-tool report and its columns.`;
       sortDirection?: string;
       groupByKey?: string;
       calculatedColumns?: AssistCalcCol[];
+      filters?: AssistFilter[];
       name?: string;
       description?: string;
       reasoning?: string;
@@ -222,13 +248,44 @@ Return JSON describing the best single-tool report and its columns.`;
       })
       .filter((c): c is NonNullable<typeof c> => c !== null);
 
+    const filterModes = new Set([
+      "matches",
+      "not_matches",
+      "contains",
+      "not_contains",
+      "starts_with",
+      "ends_with",
+    ]);
+    const rawFilters = Array.isArray(parsed.filters) ? parsed.filters : [];
+    const filters = rawFilters
+      .map((f) => {
+        const columnKey = typeof f.columnKey === "string" && validKeys.has(f.columnKey) ? f.columnKey : "";
+        const mode = typeof f.mode === "string" && filterModes.has(f.mode) ? f.mode : "matches";
+        const values = Array.isArray(f.values)
+          ? f.values
+              .map((v) => (typeof v === "string" ? v : v == null ? "" : String(v)))
+              .filter((v) => v.length > 0)
+          : [];
+        if (!columnKey || values.length === 0) return null;
+        return { columnKey, mode, values };
+      })
+      .filter((f): f is NonNullable<typeof f> => f !== null);
+
+    // Filter columns are required to be in finalColumns — add any that the AI
+    // omitted so the user can see what the report is filtering on.
+    const augmentedColumns = [...finalColumns];
+    for (const f of filters) {
+      if (!augmentedColumns.includes(f.columnKey)) augmentedColumns.push(f.columnKey);
+    }
+
     return NextResponse.json({
       reportType,
-      columns: finalColumns,
+      columns: augmentedColumns,
       sortByKey,
       sortDirection,
       groupByKey,
       calculatedColumns,
+      filters,
       name,
       description,
       reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
