@@ -13,6 +13,7 @@ type DrawingUpload = {
   storage_path: string;
   uploaded_by_name: string;
   uploaded_at: string;
+  set_id?: string | null;
 };
 
 type DrawingPage = {
@@ -88,6 +89,9 @@ function disciplineLabelFromCode(code: string | null | undefined): string | null
 function inferDiscipline(drawingNo: string | null, category?: string | null): string {
   const fromCategory = disciplineLabelFromCode(category);
   if (fromCategory) return fromCategory;
+  // A non-empty category that isn't a known built-in code is a custom
+  // discipline label, stored verbatim — show it as-is.
+  if (category && category.trim()) return category.trim();
   if (!drawingNo) return "General";
   const m = drawingNo.match(/^([A-Za-z]+)[-\d]/);
   if (!m) return "General";
@@ -1403,6 +1407,7 @@ type DrawingSet = {
   drawing_no_rev_mode: string | null;
   get_number_from_filename: boolean | null;
   drawing_language: string | null;
+  created_at?: string | null;
 };
 
 type DrawingNoRevMode = "none" | "first_decimal" | "first_underscore" | "last_underscore";
@@ -1879,6 +1884,137 @@ const CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "FP", label: "FP — Fire Protection" },
 ];
 
+// A selectable discipline: `value` is what gets stored in
+// project_drawings.category (a short code for built-ins, the label itself for
+// custom disciplines); `label` is the human-readable name shown to the user.
+type DisciplineOption = { value: string; label: string };
+
+// Built-in disciplines, derived from the fixed category codes above.
+const BUILTIN_DISCIPLINE_OPTIONS: DisciplineOption[] = CATEGORY_OPTIONS
+  .filter((o) => o.value)
+  .map((o) => ({ value: o.value, label: DISCIPLINE_LABELS[o.value] ?? o.label }));
+
+// A type-ahead combobox for the Discipline field. The user can type to filter
+// existing disciplines and pick one, or type a brand-new name and create it.
+function DisciplineCombobox({
+  value,
+  options,
+  onChange,
+  onCreate,
+  placeholder,
+  className,
+}: {
+  value: string;
+  options: DisciplineOption[];
+  onChange: (value: string) => void;
+  onCreate: (label: string) => Promise<string | null>;
+  placeholder?: string;
+  className?: string;
+}) {
+  const resolvedLabel = useMemo(() => {
+    const opt = options.find((o) => o.value === value);
+    return opt ? opt.label : value;
+  }, [options, value]);
+
+  const [text, setText] = useState(resolvedLabel);
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Keep the field in sync when the committed value (e.g. switching rows) changes.
+  useEffect(() => { setText(resolvedLabel); }, [resolvedLabel]);
+
+  // Close (and revert any uncommitted text) when clicking outside.
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setText(resolvedLabel);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [resolvedLabel]);
+
+  const q = text.trim().toLowerCase();
+  const filtered = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+  const exactMatch = options.find((o) => o.label.toLowerCase() === q);
+  const showCreate = q.length > 0 && !exactMatch;
+
+  function commit(opt: DisciplineOption) {
+    onChange(opt.value);
+    setText(opt.label);
+    setOpen(false);
+  }
+
+  async function handleCreate() {
+    const label = text.trim();
+    if (!label || creating) return;
+    setCreating(true);
+    const newValue = await onCreate(label);
+    setCreating(false);
+    if (newValue !== null) {
+      onChange(newValue);
+      setText(label);
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => { setText(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (exactMatch) commit(exactMatch);
+            else if (showCreate) handleCreate();
+          } else if (e.key === "Escape") {
+            setOpen(false);
+            setText(resolvedLabel);
+          }
+        }}
+        placeholder={placeholder}
+        className={className}
+        autoComplete="off"
+      />
+      {open && (filtered.length > 0 || showCreate) && (
+        <ul className="absolute z-20 mt-1 w-full max-h-56 overflow-auto bg-white border border-gray-200 rounded-md shadow-lg text-sm">
+          {filtered.map((o) => (
+            <li key={o.value}>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); commit(o); }}
+                className={`w-full text-left px-3 py-1.5 hover:bg-gray-50 ${
+                  o.value === value ? "font-semibold text-gray-900" : "text-gray-700"
+                }`}
+              >
+                {o.label}
+              </button>
+            </li>
+          ))}
+          {showCreate && (
+            <li className={filtered.length > 0 ? "border-t border-gray-100" : ""}>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); handleCreate(); }}
+                disabled={creating}
+                className="w-full text-left px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
+                style={{ color: "var(--brand-600)" }}
+              >
+                {creating ? "Creating…" : `Create "${text.trim()}"`}
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ReviewPreviewCanvas({
   storagePath,
   pageNumber,
@@ -1951,6 +2087,8 @@ function ReviewExtractedModal({
   projectId,
   uploadId,
   drawings,
+  disciplineOptions,
+  onCreateDiscipline,
   onClose,
   onApplied,
   onDeleted,
@@ -1958,6 +2096,8 @@ function ReviewExtractedModal({
   projectId: string;
   uploadId: string;
   drawings: DrawingPage[];
+  disciplineOptions: DisciplineOption[];
+  onCreateDiscipline: (label: string) => Promise<string | null>;
   onClose: () => void;
   onApplied: (updates: DrawingPage[]) => void;
   onDeleted: (drawingId: string) => void;
@@ -2294,18 +2434,14 @@ function ReviewExtractedModal({
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 Discipline<span className="text-rose-600">*</span>
               </label>
-              <select
+              <DisciplineCombobox
                 value={selected.category}
-                onChange={(e) => updateSelected({ category: e.target.value })}
+                options={disciplineOptions}
+                onChange={(v) => updateSelected({ category: v })}
+                onCreate={onCreateDiscipline}
+                placeholder="Select or type a discipline…"
                 className="w-full text-sm border border-gray-200 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)] bg-white"
-              >
-                <option value="">Select a discipline…</option>
-                {CATEGORY_OPTIONS.filter((o) => o.value).map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {DISCIPLINE_LABELS[opt.value] ?? opt.label}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Drawing Title</label>
@@ -2431,6 +2567,10 @@ export default function DrawingsClient({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [disciplineFilter, setDisciplineFilter] = useState("");
   const [setFilter, setSetFilter] = useState("");
+  const [customDisciplines, setCustomDisciplines] = useState<{ label: string }[]>([]);
+  const [sets, setSets] = useState<DrawingSet[]>([]);
+  const [viewingSetId, setViewingSetId] = useState<string | null>(null);
+  const [setsSearch, setSetsSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>("");
@@ -2473,16 +2613,107 @@ export default function DrawingsClient({
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/projects/${projectId}/drawings`);
+    const [res, setsRes] = await Promise.all([
+      fetch(`/api/projects/${projectId}/drawings`),
+      fetch(`/api/projects/${projectId}/drawings/sets`),
+    ]);
     if (res.ok) {
       const data = await res.json();
       setDrawings(data.drawings ?? []);
       setUploads(data.uploads ?? []);
     }
+    if (setsRes.ok) {
+      const setsData = await setsRes.json();
+      setSets(setsData.sets ?? []);
+    }
     setLoading(false);
   }, [projectId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // ── Disciplines ────────────────────────────────────────────────────────────
+  const fetchDisciplines = useCallback(async () => {
+    const res = await fetch(`/api/projects/${projectId}/drawings/disciplines`);
+    if (res.ok) {
+      const data = await res.json();
+      setCustomDisciplines((data.disciplines ?? []).map((d: { label: string }) => ({ label: d.label })));
+    }
+  }, [projectId]);
+
+  useEffect(() => { fetchDisciplines(); }, [fetchDisciplines]);
+
+  // Built-in disciplines plus any custom ones the user created (deduped by label).
+  const disciplineOptions = useMemo<DisciplineOption[]>(() => {
+    const seen = new Set(BUILTIN_DISCIPLINE_OPTIONS.map((o) => o.label.toLowerCase()));
+    const custom = customDisciplines
+      .filter((d) => d.label && !seen.has(d.label.toLowerCase()))
+      .map((d) => ({ value: d.label, label: d.label }));
+    return [...BUILTIN_DISCIPLINE_OPTIONS, ...custom];
+  }, [customDisciplines]);
+
+  // Create a new custom discipline. Returns the value to store in `category`
+  // (the label for customs) or the matched built-in code, or null on failure.
+  const createDiscipline = useCallback(async (label: string): Promise<string | null> => {
+    const trimmed = label.trim();
+    if (!trimmed) return null;
+    // If the typed text matches a built-in label, reuse its code instead.
+    const builtin = BUILTIN_DISCIPLINE_OPTIONS.find((o) => o.label.toLowerCase() === trimmed.toLowerCase());
+    if (builtin) return builtin.value;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/drawings/disciplines`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: trimmed }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const newLabel: string = data.discipline?.label ?? trimmed;
+      setCustomDisciplines((prev) =>
+        prev.some((d) => d.label.toLowerCase() === newLabel.toLowerCase())
+          ? prev
+          : [...prev, { label: newLabel }],
+      );
+      return newLabel;
+    } catch {
+      return null;
+    }
+  }, [projectId]);
+
+  // ── Drawing Sets ───────────────────────────────────────────────────────────
+  // upload_id → set_id, so each drawing page can be traced back to its set.
+  const uploadSetMap = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const u of uploads) m.set(u.id, u.set_id ?? null);
+    return m;
+  }, [uploads]);
+
+  const viewingSet = useMemo(
+    () => (viewingSetId ? sets.find((s) => s.id === viewingSetId) ?? null : null),
+    [sets, viewingSetId],
+  );
+
+  // Each set with its page counts. A page counts as "Published" once it has a
+  // drawing number (i.e. it's been identified / reviewed); the rest are
+  // "Unpublished" drafts still awaiting a sheet number.
+  const setsWithCounts = useMemo(() => {
+    return sets
+      .map((s) => {
+        const pages = drawings.filter((d) => uploadSetMap.get(d.upload_id) === s.id);
+        const published = pages.filter((d) => (d.drawing_no ?? "").trim()).length;
+        return {
+          set: s,
+          date: s.default_drawing_date || (s.created_at ? s.created_at.slice(0, 10) : ""),
+          total: pages.length,
+          published,
+          unpublished: pages.length - published,
+        };
+      })
+      .filter((row) => {
+        const q = setsSearch.trim().toLowerCase();
+        return !q || row.set.name.toLowerCase().includes(q);
+      })
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }, [sets, drawings, uploadSetMap, setsSearch]);
 
   // Sync edit panel when selection changes
   useEffect(() => {
@@ -2652,6 +2883,12 @@ export default function DrawingsClient({
         getNumberFromFilename: data.getNumberFromFilename,
         drawingLanguage: data.drawingLanguage,
       });
+    }
+    // Refresh the sets list so a newly created set shows up in the Drawing Sets tab.
+    const setsRes = await fetch(`/api/projects/${projectId}/drawings/sets`);
+    if (setsRes.ok) {
+      const setsData = await setsRes.json();
+      setSets(setsData.sets ?? []);
     }
   }
 
@@ -2840,6 +3077,7 @@ export default function DrawingsClient({
     }
     if (disciplineFilter && inferDiscipline(d.drawing_no, d.category) !== disciplineFilter) return false;
     if (setFilter && d.upload_id !== setFilter) return false;
+    if (viewingSetId && uploadSetMap.get(d.upload_id) !== viewingSetId) return false;
     return true;
   });
 
@@ -2855,7 +3093,7 @@ export default function DrawingsClient({
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([discipline, drawings]) => ({ discipline, drawings }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawings, searchQuery, disciplineFilter, setFilter]);
+  }, [drawings, searchQuery, disciplineFilter, setFilter, viewingSetId, uploadSetMap]);
 
   // ── Thumbnail helper ─────────────────────────────────────────────────────────
 
@@ -2949,6 +3187,8 @@ export default function DrawingsClient({
           projectId={projectId}
           uploadId={reviewModal.uploadId}
           drawings={reviewModal.drawings}
+          disciplineOptions={disciplineOptions}
+          onCreateDiscipline={createDiscipline}
           onClose={() => setReviewModal(null)}
           onApplied={(updates) => {
             setDrawings((prev) => {
@@ -3130,29 +3370,62 @@ export default function DrawingsClient({
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="bg-white border-b border-black/[0.06] px-6 shrink-0">
-        <nav className="flex">
-          {(["current", "sets", "recycle"] as const).map((tab) => {
-            const labels = { current: "Current Drawings", sets: "Drawing Sets", recycle: "Recycle Bin" };
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                  activeTab === tab
-                    ? "border-[color:var(--brand-500)] text-[color:var(--ink)]"
-                    : "border-transparent text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {labels[tab]}
-              </button>
-            );
-          })}
-        </nav>
-      </div>
+      {/* Tabs / breadcrumb */}
+      {viewingSet ? (
+        <div className="bg-white border-b border-black/[0.06] px-6 py-3 shrink-0 flex items-center gap-2 text-sm">
+          <button
+            onClick={() => { setViewingSetId(null); setActiveTab("sets"); }}
+            className="text-gray-500 hover:text-gray-800 transition-colors"
+          >
+            Drawing Sets
+          </button>
+          <span className="text-gray-400">›</span>
+          <span className="font-semibold text-gray-900 truncate">
+            {viewingSet.name}
+            {viewingSet.default_drawing_date ? ` (${formatDate(viewingSet.default_drawing_date)})` : ""}
+          </span>
+        </div>
+      ) : (
+        <div className="bg-white border-b border-black/[0.06] px-6 shrink-0">
+          <nav className="flex">
+            {(["current", "sets", "recycle"] as const).map((tab) => {
+              const labels = { current: "Current Drawings", sets: "Drawing Sets", recycle: "Recycle Bin" };
+              return (
+                <button
+                  key={tab}
+                  onClick={() => { setActiveTab(tab); setViewingSetId(null); }}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    activeTab === tab
+                      ? "border-[color:var(--brand-500)] text-[color:var(--ink)]"
+                      : "border-transparent text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {labels[tab]}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      )}
 
       {/* Filter bar */}
+      {activeTab === "sets" && !viewingSet ? (
+        <div className="bg-white border-b border-black/[0.06] px-6 py-3 shrink-0">
+          <div className="filters">
+            <div className="search">
+              <svg className="w-4 h-4 shrink-0" style={{ color: "var(--brand-500)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search drawing sets"
+                value={setsSearch}
+                onChange={(e) => setSetsSearch(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="bg-white border-b border-black/[0.06] px-6 py-3 shrink-0">
         <div className="filters">
           <div className="search">
@@ -3200,7 +3473,7 @@ export default function DrawingsClient({
             className="px-3 py-1.5 text-sm border border-black/10 rounded-md bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
           >
             <option value="">Discipline</option>
-            {[...new Set(drawings.map((d) => inferDiscipline(d.drawing_no)))].sort().map((disc) => (
+            {[...new Set(drawings.map((d) => inferDiscipline(d.drawing_no, d.category)))].sort().map((disc) => (
               <option key={disc} value={disc}>{disc}</option>
             ))}
           </select>
@@ -3233,8 +3506,60 @@ export default function DrawingsClient({
           </div>
         </div>
       </div>
+      )}
 
-      {/* Main content area */}
+      {/* Drawing Sets list */}
+      {activeTab === "sets" && !viewingSet ? (
+        <div className="flex-1 px-6 py-6">
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 border-b border-black/[0.06]">
+                <tr>
+                  <th className="w-10 px-4 py-3"></th>
+                  <th className="w-20 px-2 py-3"></th>
+                  <th className="px-3 py-3 text-left">Name</th>
+                  <th className="px-3 py-3 text-left">Date</th>
+                  <th className="px-3 py-3 text-left">Published</th>
+                  <th className="px-3 py-3 text-left">Unpublished</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-black/[0.04]">
+                {setsWithCounts.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-gray-500">
+                      {loading
+                        ? "Loading drawing sets…"
+                        : sets.length === 0
+                        ? "No drawing sets yet. Upload drawings to create your first set."
+                        : "No drawing sets match your search."}
+                    </td>
+                  </tr>
+                ) : (
+                  setsWithCounts.map(({ set, date, published, unpublished }) => (
+                    <tr key={set.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3 align-middle">
+                        <input type="checkbox" className="rounded border-gray-300" />
+                      </td>
+                      <td className="px-2 py-3 align-middle">
+                        <button
+                          onClick={() => { setActiveTab("sets"); setViewingSetId(set.id); }}
+                          className="px-3 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+                        >
+                          View
+                        </button>
+                      </td>
+                      <td className="px-3 py-3 align-middle font-medium text-gray-900">{set.name}</td>
+                      <td className="px-3 py-3 align-middle text-gray-600">{date ? formatDate(date) : "—"}</td>
+                      <td className="px-3 py-3 align-middle text-gray-600">{published}</td>
+                      <td className="px-3 py-3 align-middle text-gray-600">{unpublished}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
       <div
         className="flex flex-1"
         onDrop={handleDrop}
@@ -3437,16 +3762,15 @@ export default function DrawingsClient({
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Category</label>
-                  <select
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Discipline</label>
+                  <DisciplineCombobox
                     value={editCategory}
-                    onChange={(e) => setEditCategory(e.target.value)}
+                    options={disciplineOptions}
+                    onChange={setEditCategory}
+                    onCreate={createDiscipline}
+                    placeholder="Select or type a discipline…"
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
-                    {CATEGORY_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Revision</label>
@@ -3493,6 +3817,7 @@ export default function DrawingsClient({
           </div>
         )}
       </div>
+      )}
 
       {/* Drag overlay */}
       {isDragging && (
