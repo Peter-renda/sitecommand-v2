@@ -2311,7 +2311,6 @@ function AssistReportModal({
   onCreate: (rec: AssistRecommendation) => void;
 }) {
   const [prompt, setPrompt] = useState("");
-  const [recommendation, setRecommendation] = useState<AssistRecommendation | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -2322,7 +2321,6 @@ function AssistReportModal({
       return;
     }
     setError(null);
-    setRecommendation(null);
     setLoading(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/reports/assist`, {
@@ -2369,7 +2367,7 @@ function AssistReportModal({
           })
         : [];
 
-      setRecommendation({
+      onCreate({
         reportType: payload.reportType,
         columns: Array.isArray(payload.columns) ? payload.columns : [],
         sortByKey: typeof payload.sortByKey === "string" ? payload.sortByKey : undefined,
@@ -2387,9 +2385,6 @@ function AssistReportModal({
       setLoading(false);
     }
   }
-
-  const includedColumns =
-    recommendation?.def.columns.filter((c) => recommendation.columns.includes(c.key)) ?? [];
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
@@ -2420,65 +2415,6 @@ function AssistReportModal({
         </div>
         {error && (
           <div className="mt-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
-        )}
-        {recommendation && (
-          <div className="mt-4 rounded border border-gray-200 p-3">
-            <p className="text-xs uppercase tracking-wide text-gray-400">Recommended report</p>
-            <p className="text-sm font-medium text-gray-900 mt-1">{recommendation.name}</p>
-            <p className="text-xs text-gray-500 mt-1">{recommendation.description}</p>
-            <p className="text-[11px] text-gray-400 mt-2">
-              Source: {recommendation.def.group} › {recommendation.def.label}
-            </p>
-            {includedColumns.length > 0 && (
-              <div className="mt-3">
-                <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Columns</p>
-                <div className="flex flex-wrap gap-1">
-                  {includedColumns.map((c) => (
-                    <span
-                      key={c.key}
-                      className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700"
-                    >
-                      {c.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {recommendation.sortByKey && (
-              <div className="mt-3">
-                <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Sort</p>
-                <p className="text-[11px] text-gray-700">
-                  {recommendation.def.columns.find((c) => c.key === recommendation.sortByKey)?.label ??
-                    recommendation.sortByKey}
-                  {" "}({recommendation.sortDirection === "desc" ? "descending" : "ascending"})
-                </p>
-              </div>
-            )}
-            {recommendation.calculatedColumns.length > 0 && (
-              <div className="mt-3">
-                <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Custom columns</p>
-                <div className="flex flex-wrap gap-1">
-                  {recommendation.calculatedColumns.map((c, idx) => (
-                    <span
-                      key={`${c.name}-${idx}`}
-                      className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-[11px]"
-                    >
-                      {c.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {recommendation.reasoning && (
-              <p className="mt-3 text-[11px] text-gray-500 italic">{recommendation.reasoning}</p>
-            )}
-            <button
-              onClick={() => onCreate(recommendation)}
-              className="mt-3 px-3 py-1.5 bg-gray-900 text-white rounded text-xs"
-            >
-              Create Report
-            </button>
-          </div>
         )}
       </div>
     </div>
