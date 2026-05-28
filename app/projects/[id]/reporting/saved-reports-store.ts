@@ -26,6 +26,7 @@ export type StoredReport = {
     name: string;
     dataSetId: string | null;
     selectedColumns: string[];
+    filters?: Record<string, unknown>[];
   }[];
   visualConfig?: Record<string, unknown>;
   calculatedColumns?: Record<string, unknown>[];

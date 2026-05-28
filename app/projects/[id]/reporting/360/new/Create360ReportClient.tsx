@@ -5,6 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
 import { loadSavedReports, saveReport, type StoredReport } from "../../saved-reports-store";
+import {
+  FiltersPanel,
+  FILTER_MODE_LABELS,
+  applyFiltersForSource,
+  distinctColumnValues,
+  type FilterCategory,
+  type ReportFilter,
+} from "../../report-filters";
 
 // ─── Column catalog ──────────────────────────────────────────────────────────
 // Categories shown in the Configure Columns popout. The "source" maps to the
@@ -1129,6 +1137,9 @@ export default function Create360ReportClient({
   const [loadingSources, setLoadingSources] = useState<Set<string>>(new Set());
   const [errorMessage, setErrorMessage] = useState("");
 
+  // Filters (scoped per source/field)
+  const [filters, setFilters] = useState<ReportFilter[]>([]);
+
   const categories = CATEGORIES_BY_TAB[activeTab] ?? FINANCIALS_CATEGORIES;
 
   const filteredCategories = useMemo(() => {
@@ -1183,6 +1194,40 @@ export default function Create360ReportClient({
     return Array.from(set);
   }, [selectedColumns]);
 
+  // Categories available to filter on = the categories the report pulls columns
+  // from. Each exposes all of its fields as sub-categories.
+  const filterCategories = useMemo<FilterCategory[]>(() => {
+    return activeSources
+      .map((source) => {
+        const cat = categories.find((c) => c.source === source);
+        if (!cat) return null;
+        return {
+          label: cat.label,
+          source: cat.source,
+          fields: cat.fields.map((f) => ({ key: f.key, label: f.label })),
+        };
+      })
+      .filter((c): c is FilterCategory => c !== null);
+  }, [activeSources, categories]);
+
+  function suggestionsFor(filter: ReportFilter): string[] {
+    const rows = rowsBySource[filter.source] ?? [];
+    return distinctColumnValues(
+      rows.map((r) => {
+        const v = r[filter.columnKey];
+        return v === null || v === undefined ? "" : String(v);
+      }),
+    );
+  }
+
+  // Drop filters whose source is no longer part of the report.
+  useEffect(() => {
+    setFilters((prev) => {
+      const next = prev.filter((f) => activeSources.includes(f.source));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [activeSources]);
+
   async function fetchSource(source: string) {
     setLoadingSources((prev) => new Set(prev).add(source));
     try {
@@ -1225,6 +1270,9 @@ export default function Create360ReportClient({
       );
       setExpandedCategories(new Set(existing.selectedColumns.map((c) => c.categoryLabel)));
     }
+    if (Array.isArray(existing.filters)) {
+      setFilters(existing.filters as unknown as ReportFilter[]);
+    }
     setExistingReportMeta({
       createdAt: existing.createdAt,
       createdBy: existing.createdBy,
@@ -1250,10 +1298,11 @@ export default function Create360ReportClient({
   const groupedDisplay = useMemo(() => {
     return activeSources.map((source) => {
       const cols = selectedColumns.filter((c) => c.source === source);
-      const rows = rowsBySource[source] ?? [];
-      return { source, cols, rows };
+      const allRows = rowsBySource[source] ?? [];
+      const rows = applyFiltersForSource(allRows, filters, source);
+      return { source, cols, rows, totalRows: allRows.length };
     });
-  }, [activeSources, selectedColumns, rowsBySource]);
+  }, [activeSources, selectedColumns, rowsBySource, filters]);
 
   const canSave = reportName.trim().length > 0 && selectedColumns.length > 0;
   const isLoadingAny = loadingSources.size > 0;
@@ -1315,6 +1364,7 @@ export default function Create360ReportClient({
                     fieldLabel: c.fieldLabel,
                     format: c.format,
                   })),
+                  filters: filters as unknown as Record<string, unknown>[],
                   lastRunRecordCount: totalRecords,
                 };
                 saveReport(projectId, stored);
@@ -1359,11 +1409,42 @@ export default function Create360ReportClient({
         <div className="flex gap-0 mt-3">
           <div className="flex-1 bg-white border border-gray-200 rounded-l-md min-h-[600px] flex flex-col">
             {/* Filters bar */}
-            <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center gap-2 text-sm text-gray-600">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-              </svg>
-              <span>Filters</span>
+            <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center gap-2 text-sm text-gray-600 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setOpenPanel("filters")}
+                className="flex items-center gap-2 hover:text-gray-900"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                </svg>
+                <span>Filters</span>
+              </button>
+              {filters.length === 0 ? (
+                <span className="text-gray-400 text-xs">None</span>
+              ) : (
+                filters.map((f) => (
+                  <span
+                    key={f.id}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-xs"
+                  >
+                    <span className="font-medium">{f.fieldLabel}</span>
+                    {f.values.length > 0 && (
+                      <span className="text-blue-500">
+                        {FILTER_MODE_LABELS[f.mode]} {f.values.map((v) => (v === "" ? "(None)" : v)).join(", ")}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setFilters((prev) => prev.filter((x) => x.id !== f.id))}
+                      className="hover:text-blue-900"
+                      aria-label={`Remove ${f.fieldLabel} filter`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))
+              )}
             </div>
 
             {/* Body */}
@@ -1378,16 +1459,23 @@ export default function Create360ReportClient({
                 <EmptyState />
               ) : (
                 <div className="p-4 space-y-6">
-                  {groupedDisplay.map(({ source, cols, rows }) => {
+                  {groupedDisplay.map(({ source, cols, rows, totalRows }) => {
                     const sourceLabel = categories.find((c) => c.source === source)?.label ?? source;
                     const isLoading = loadingSources.has(source);
                     const loaded = rowsBySource[source] !== undefined;
+                    const isFiltered = rows.length !== totalRows;
                     return (
                       <div key={source} className="border border-gray-200 rounded-md overflow-hidden">
                         <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-700 flex items-center justify-between">
                           <span>{sourceLabel}</span>
                           <span className="text-gray-400 font-normal">
-                            {isLoading ? "Loading…" : loaded ? `${rows.length} record${rows.length === 1 ? "" : "s"}` : "Not loaded"}
+                            {isLoading
+                              ? "Loading…"
+                              : loaded
+                                ? isFiltered
+                                  ? `${rows.length} of ${totalRows} record${totalRows === 1 ? "" : "s"}`
+                                  : `${rows.length} record${rows.length === 1 ? "" : "s"}`
+                                : "Not loaded"}
                           </span>
                         </div>
                         <div className="overflow-x-auto">
@@ -1452,7 +1540,25 @@ export default function Create360ReportClient({
               canLoad={activeSources.length > 0 && !isLoadingAny}
             />
           )}
-          {openPanel === "filters" && <SimplePanel title="Filters" body="Filters appear here once configured." />}
+          {openPanel === "filters" && (
+            <div className="w-72 bg-white border-t border-b border-gray-200 flex flex-col">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <h3 className="text-sm font-semibold text-gray-900">Filters</h3>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Filter the report by any field on the categories you&rsquo;ve added columns from.
+                </p>
+              </div>
+              <div className="p-4 overflow-y-auto">
+                <FiltersPanel
+                  categories={filterCategories}
+                  filters={filters}
+                  suggestionsFor={suggestionsFor}
+                  onChange={setFilters}
+                  emptyHint="Add columns to the report first, then filter on them here."
+                />
+              </div>
+            </div>
+          )}
           {openPanel === "calculations" && (
             <SimplePanel title="Calculated Columns" body="Build calculations from existing columns." />
           )}
