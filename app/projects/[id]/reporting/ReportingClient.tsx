@@ -28,6 +28,12 @@ type VisualConfig = {
   groupByKey?: string;
 };
 
+type TemplateLaunchConfig = {
+  visualConfig: VisualConfig;
+  autoRun?: boolean;
+  showConfiguration?: boolean;
+};
+
 type VisualCard = {
   id: string;
   title: string;
@@ -127,6 +133,82 @@ type AggregateFunction = "none" | "count" | "sum" | "min" | "max" | "avg";
 
 
 const GROUPS = Array.from(new Set(REPORT_TYPES.map((r) => r.group)));
+
+
+function getTemplateLaunchConfig(reportDef: ReportDef): TemplateLaunchConfig {
+  const allColumnKeys = reportDef.columns.map((column) => column.key);
+
+  const groupByKeyByTemplate: Record<string, string> = {
+    "daily-delays": "delay_type",
+    "daily-manpower": "company",
+    "daily-weather": "sky",
+    "daily-safety": "issued_to",
+    "daily-accidents": "company_involved",
+    "daily-inspections": "inspection_type",
+    "daily-deliveries": "delivery_from",
+    "daily-visitors": "visitor",
+    "daily-notes": "is_issue",
+    "commitments-summary": "contract_company",
+    "change-events": "status",
+    "commitment-change-orders": "status",
+    "budget-summary": "cost_code",
+    rfis: "status",
+    submittals: "status",
+    tasks: "status",
+    "punch-list": "status",
+  };
+
+  const sortByKeyByTemplate: Record<string, string> = {
+    "daily-delays": "log_date",
+    "daily-manpower": "log_date",
+    "daily-weather": "log_date",
+    "daily-safety": "log_date",
+    "daily-accidents": "log_date",
+    "daily-inspections": "log_date",
+    "daily-deliveries": "log_date",
+    "daily-visitors": "log_date",
+    "daily-notes": "log_date",
+    "commitments-summary": "contract_company",
+    "change-events": "created_at",
+    "commitment-change-orders": "number",
+    "budget-summary": "cost_code",
+    rfis: "due_date",
+    submittals: "submit_by",
+    tasks: "created_at",
+    "punch-list": "due_date",
+  };
+
+  const measureKeyByTemplate: Record<string, string> = {
+    "daily-delays": "duration_hours",
+    "daily-manpower": "workers",
+    "commitments-summary": "original_contract_amount",
+    "commitment-change-orders": "amount",
+    "budget-summary": "variance",
+  };
+
+  const groupByKey = groupByKeyByTemplate[reportDef.value];
+  const sortByKey = sortByKeyByTemplate[reportDef.value];
+
+  return {
+    autoRun: true,
+    showConfiguration: true,
+    visualConfig: {
+      visualType: "table",
+      selectedColumnKeys: allColumnKeys,
+      groupByKey: groupByKey && allColumnKeys.includes(groupByKey) ? groupByKey : undefined,
+      sortByKey: sortByKey && allColumnKeys.includes(sortByKey) ? sortByKey : undefined,
+      sortDirection: reportDef.hasDateRange ? "desc" : "asc",
+      yAxisKey: measureKeyByTemplate[reportDef.value],
+      showLegend: true,
+      showValueLabels: false,
+      showPoints: false,
+      maxBars: 10,
+      useDualAxis: false,
+      decimalPlaces: 2,
+      displayUnits: "none",
+    },
+  };
+}
 
 // ─── Report sections (left-side tree on the Reports tab) ──────────────────────
 
@@ -1165,6 +1247,90 @@ function FilterRow({
 
 // ─── Run Report Modal ─────────────────────────────────────────────────────────
 
+function ColumnConfigurationPanel({
+  columns,
+  selectedColumnKeys,
+  calculatedColumns,
+  onChange,
+}: {
+  columns: { key: string; label: string }[];
+  selectedColumnKeys: string[];
+  calculatedColumns: CalculatedColumn[];
+  onChange: (keys: string[]) => void;
+}) {
+  const allColumnKeys = columns.map((column) => column.key);
+  const selectedSet = new Set(selectedColumnKeys.length > 0 ? selectedColumnKeys : allColumnKeys);
+  const selectedCount = selectedSet.size;
+
+  function toggleColumn(columnKey: string) {
+    const next = new Set(selectedSet);
+    if (next.has(columnKey)) {
+      if (next.size === 1) return;
+      next.delete(columnKey);
+    } else {
+      next.add(columnKey);
+    }
+    onChange(allColumnKeys.filter((key) => next.has(key)));
+  }
+
+  return (
+    <aside className="w-72 shrink-0 border-l border-gray-100 bg-white overflow-y-auto">
+      <div className="sticky top-0 bg-white px-4 py-4 border-b border-gray-100 z-10">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Configure Columns</h3>
+            <p className="text-[11px] text-gray-500 mt-1">
+              {selectedCount} of {columns.length} source columns in use.
+            </p>
+          </div>
+          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+            {selectedCount} checked
+          </span>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onChange(allColumnKeys)}
+            className="text-[11px] font-medium text-gray-600 hover:text-gray-900"
+          >
+            Check all
+          </button>
+          <span className="text-[11px] text-gray-400">At least one column is required.</span>
+        </div>
+      </div>
+      <div className="px-3 py-3 space-y-1.5">
+        {columns.map((column) => (
+          <label
+            key={column.key}
+            className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-xs transition-colors ${
+              selectedSet.has(column.key) ? "bg-blue-50 text-gray-900" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={selectedSet.has(column.key)}
+              onChange={() => toggleColumn(column.key)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="min-w-0 flex-1 truncate">{column.label}</span>
+          </label>
+        ))}
+        {calculatedColumns.length > 0 && (
+          <div className="pt-3">
+            <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Custom Columns</p>
+            {calculatedColumns.map((column) => (
+              <div key={column.id} className="flex items-center gap-2 rounded-md bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+                <input type="checkbox" checked readOnly className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                <span className="min-w-0 flex-1 truncate">{column.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
 function RunReportModal({
   reportDef,
   projectId,
@@ -1174,6 +1340,7 @@ function RunReportModal({
   onSave,
   onUpdate,
   fullscreen,
+  templateLaunchConfig,
 }: {
   reportDef: ReportDef;
   projectId: string;
@@ -1183,6 +1350,7 @@ function RunReportModal({
   onSave: (report: SavedReport) => void;
   onUpdate?: (reportId: string, patch: Partial<SavedReport>) => void;
   fullscreen?: boolean;
+  templateLaunchConfig?: TemplateLaunchConfig;
 }) {
   const today = new Date();
   const [reportName, setReportName] = useState(existingReport?.name ?? reportDef.label);
@@ -1204,24 +1372,25 @@ function RunReportModal({
   const [newDecimals, setNewDecimals] = useState(2);
   const [newRounding, setNewRounding] = useState(true);
   const [loadDataManually, setLoadDataManually] = useState(true);
-  const [showConfig, setShowConfig] = useState(!existingReport);
-  const [groupByKey, setGroupByKey] = useState(existingReport?.visualConfig?.groupByKey ?? "");
+  const initialVisualConfig = existingReport?.visualConfig ?? templateLaunchConfig?.visualConfig;
+  const [showConfig, setShowConfig] = useState(templateLaunchConfig?.showConfiguration ?? !existingReport);
+  const [groupByKey, setGroupByKey] = useState(initialVisualConfig?.groupByKey ?? "");
   const [selectedColumnKeys, setSelectedColumnKeys] = useState<string[]>(
-    existingReport?.visualConfig?.selectedColumnKeys ?? [],
+    initialVisualConfig?.selectedColumnKeys ?? [],
   );
-  const [visualType, setVisualType] = useState<VisualType>(existingReport?.visualConfig?.visualType ?? "table");
-  const [xAxisKey, setXAxisKey] = useState(existingReport?.visualConfig?.xAxisKey ?? "");
-  const [yAxisKey, setYAxisKey] = useState(existingReport?.visualConfig?.yAxisKey ?? "");
-  const [secondaryMeasureKey, setSecondaryMeasureKey] = useState(existingReport?.visualConfig?.secondaryMeasureKey ?? "");
-  const [sortByKey, setSortByKey] = useState(existingReport?.visualConfig?.sortByKey ?? "");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(existingReport?.visualConfig?.sortDirection ?? "asc");
-  const [showLegend, setShowLegend] = useState(existingReport?.visualConfig?.showLegend ?? true);
-  const [showValueLabels, setShowValueLabels] = useState(existingReport?.visualConfig?.showValueLabels ?? false);
-  const [showPoints, setShowPoints] = useState(existingReport?.visualConfig?.showPoints ?? false);
-  const [maxBars, setMaxBars] = useState(existingReport?.visualConfig?.maxBars ?? 10);
-  const [useDualAxis, setUseDualAxis] = useState(existingReport?.visualConfig?.useDualAxis ?? false);
-  const [decimalPlaces, setDecimalPlaces] = useState(existingReport?.visualConfig?.decimalPlaces ?? 2);
-  const [displayUnits, setDisplayUnits] = useState<"none" | "thousands" | "millions">(existingReport?.visualConfig?.displayUnits ?? "none");
+  const [visualType, setVisualType] = useState<VisualType>(initialVisualConfig?.visualType ?? "table");
+  const [xAxisKey, setXAxisKey] = useState(initialVisualConfig?.xAxisKey ?? "");
+  const [yAxisKey, setYAxisKey] = useState(initialVisualConfig?.yAxisKey ?? "");
+  const [secondaryMeasureKey, setSecondaryMeasureKey] = useState(initialVisualConfig?.secondaryMeasureKey ?? "");
+  const [sortByKey, setSortByKey] = useState(initialVisualConfig?.sortByKey ?? "");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(initialVisualConfig?.sortDirection ?? "asc");
+  const [showLegend, setShowLegend] = useState(initialVisualConfig?.showLegend ?? true);
+  const [showValueLabels, setShowValueLabels] = useState(initialVisualConfig?.showValueLabels ?? false);
+  const [showPoints, setShowPoints] = useState(initialVisualConfig?.showPoints ?? false);
+  const [maxBars, setMaxBars] = useState(initialVisualConfig?.maxBars ?? 10);
+  const [useDualAxis, setUseDualAxis] = useState(initialVisualConfig?.useDualAxis ?? false);
+  const [decimalPlaces, setDecimalPlaces] = useState(initialVisualConfig?.decimalPlaces ?? 2);
+  const [displayUnits, setDisplayUnits] = useState<"none" | "thousands" | "millions">(initialVisualConfig?.displayUnits ?? "none");
   const [actorEmailFilter, setActorEmailFilter] = useState("");
   const [eventTypeFilter, setEventTypeFilter] = useState("");
   const [aggregateByColumn, setAggregateByColumn] = useState<Record<string, AggregateFunction>>({});
@@ -1408,10 +1577,10 @@ function RunReportModal({
   // Auto-run on open when viewing an already-saved report so the user lands
   // on the rendered results instead of an empty builder.
   useEffect(() => {
-    if (!existingReport) return;
+    if (!existingReport && !templateLaunchConfig?.autoRun) return;
     void runReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existingReport?.id]);
+  }, [existingReport?.id, templateLaunchConfig?.autoRun]);
 
   return (
     <div className={fullscreen ? "fixed inset-0 bg-white z-50 flex flex-col overflow-hidden" : "fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4 py-8"}>
@@ -1614,59 +1783,8 @@ function RunReportModal({
             )}
           </div>
 
-          <div className="mb-3 rounded-md border border-gray-200 bg-white p-3">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-medium text-gray-700">Visible Columns</p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedColumnKeys([])}
-                  className="text-[11px] text-gray-500 hover:text-gray-900"
-                >
-                  Show all
-                </button>
-                <span className="text-gray-300">·</span>
-                <button
-                  type="button"
-                  onClick={() => setSelectedColumnKeys(reportDef.columns.map((c) => c.key))}
-                  className="text-[11px] text-gray-500 hover:text-gray-900"
-                >
-                  Hide all
-                </button>
-              </div>
-            </div>
-            <p className="text-[11px] text-gray-500 mb-2">
-              Pick which source columns appear in the table and exports. Custom columns are always included.
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {reportDef.columns.map((col) => {
-                const active =
-                  selectedColumnKeys.length === 0 || selectedColumnKeys.includes(col.key);
-                return (
-                  <button
-                    type="button"
-                    key={col.key}
-                    onClick={() => {
-                      setSelectedColumnKeys((prev) => {
-                        if (prev.length === 0) {
-                          return reportDef.columns.map((c) => c.key).filter((k) => k !== col.key);
-                        }
-                        return prev.includes(col.key)
-                          ? prev.filter((k) => k !== col.key)
-                          : [...prev, col.key];
-                      });
-                    }}
-                    className={`px-2 py-1 rounded-full text-[11px] border transition-colors ${
-                      active
-                        ? "bg-gray-900 text-white border-gray-900"
-                        : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"
-                    }`}
-                  >
-                    {col.label}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-900">
+            Visible columns are checked in the Configure Columns panel on the right. Uncheck any column to remove it from the report table and exports.
           </div>
 
           <div className="mb-3 rounded-md border border-gray-200 bg-white p-3">
@@ -1912,8 +2030,9 @@ function RunReportModal({
         </div>
         )}
 
-        <div className="overflow-auto flex-1">
-          {error && <p className="text-sm text-red-600 px-6 py-4">{error}</p>}
+        <div className="flex flex-1 min-h-0">
+          <div className="overflow-auto flex-1">
+            {error && <p className="text-sm text-red-600 px-6 py-4">{error}</p>}
           {ran && !error && rows.length === 0 && (
             <div className="py-16 text-center">
               <p className="text-sm text-gray-400">No records found for the selected criteria.</p>
@@ -1971,12 +2090,21 @@ function RunReportModal({
               </table>
             </>
           )}
-          {!ran && (
-            <div className="py-16 text-center">
-              <p className="text-sm text-gray-400">
-                Configure the filters above and click <span className="font-medium text-gray-600">Run Report</span> to view results.
-              </p>
-            </div>
+            {!ran && (
+              <div className="py-16 text-center">
+                <p className="text-sm text-gray-400">
+                  Configure the filters above and click <span className="font-medium text-gray-600">Run Report</span> to view results.
+                </p>
+              </div>
+            )}
+          </div>
+          {showConfig && (
+            <ColumnConfigurationPanel
+              columns={reportDef.columns}
+              selectedColumnKeys={selectedColumnKeys}
+              calculatedColumns={calculatedColumns}
+              onChange={setSelectedColumnKeys}
+            />
           )}
         </div>
       </div>
@@ -2774,6 +2902,7 @@ export default function ReportingClient({
   const [activeCalculatedColumns, setActiveCalculatedColumns] = useState<CalculatedColumn[]>([]);
   const [activeSavedReport, setActiveSavedReport] = useState<SavedReport | null>(null);
   const [activeReportFullscreen, setActiveReportFullscreen] = useState(false);
+  const [activeTemplateLaunchConfig, setActiveTemplateLaunchConfig] = useState<TemplateLaunchConfig | undefined>();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createType, setCreateType] = useState("");
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -2786,6 +2915,8 @@ export default function ReportingClient({
     setActiveReport(def);
     setActiveSavedReport(null);
     setActiveCalculatedColumns([]);
+    setActiveReportFullscreen(true);
+    setActiveTemplateLaunchConfig(getTemplateLaunchConfig(def));
   }
 
   function openFromSaved(saved: SavedReport) {
@@ -2817,6 +2948,7 @@ export default function ReportingClient({
       setActiveReport(def);
       setActiveSavedReport(saved);
       setActiveCalculatedColumns(saved.calculatedColumns ?? []);
+      setActiveTemplateLaunchConfig(undefined);
       return;
     }
 
@@ -3417,11 +3549,13 @@ export default function ReportingClient({
           existingReport={activeSavedReport}
           initialCalculatedColumns={activeCalculatedColumns}
           fullscreen={activeReportFullscreen}
+          templateLaunchConfig={activeTemplateLaunchConfig}
           onClose={() => {
             setActiveReport(null);
             setActiveSavedReport(null);
             setActiveCalculatedColumns([]);
             setActiveReportFullscreen(false);
+            setActiveTemplateLaunchConfig(undefined);
           }}
           onSave={handleSaveReport}
           onUpdate={updateSavedReport}
@@ -3484,6 +3618,7 @@ export default function ReportingClient({
                     setActiveReport(def);
                     setActiveSavedReport(null);
                     setActiveCalculatedColumns([]);
+                    setActiveTemplateLaunchConfig(undefined);
                   }
                 }}
                 className="flex-1 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors disabled:opacity-40"
@@ -3593,6 +3728,7 @@ export default function ReportingClient({
             handleSaveReport(savedReport);
             setActiveReport(rec.def);
             setActiveSavedReport(savedReport);
+            setActiveTemplateLaunchConfig(undefined);
             setActiveCalculatedColumns(calculatedColumns);
             setActiveReportFullscreen(true);
             setStatusBanner(`Assist created “${stored.name}”. Review and adjust as needed.`);
