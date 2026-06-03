@@ -1309,7 +1309,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
       else existing.open += 1;
       acc.set(key, existing);
       return acc;
-    }, new Map<string, { key: string; name: string; total: number; open: number; closed: number }>())
+    }, new Map<string, { key: string; name: string; total: number; open: number; closed: number }>()).values()
   ).sort((a, b) => safeLocaleCompare(a.name, b.name));
 
   async function handleCreate(data: Record<string, unknown>, sendEmails: boolean) {

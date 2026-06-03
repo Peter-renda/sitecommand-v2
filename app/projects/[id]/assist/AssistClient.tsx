@@ -209,7 +209,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       setWfName("");
       setWfPrompt("");
       setWfFrequency("weekly");
-      setWfRecipients([]);
+      setWfRecipients("");
       setWfRunDayOfWeek("monday");
       setWfRunHourEt(6);
     } catch (err) {
