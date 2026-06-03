@@ -23,6 +23,7 @@ type LineItem = {
   cost_unit_cost: number | null;
   cost_rom: number | null;
   cost_commitment?: number | null;
+  cost_budget_mod?: number | null;
 };
 
 type ChangeEvent = {

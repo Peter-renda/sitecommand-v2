@@ -289,7 +289,7 @@ export async function sendRFIBallInCourtEmail(
     viewOnlineUrl,
     recipientRoleNote: "You are receiving this because the ball is in your court for this RFI on SiteCommand.",
     label: "rfi-ball-in-court",
-    emailSubject: `The ball is in your court for RFI #${rfiNumber}: ${subject} — ${projectName}`,
+    emailSubject: `The ball is in your court for RFI #${rfiNumber}: ${rfiSubject} — ${projectName}`,
   });
 }
 
@@ -473,7 +473,7 @@ export async function sendRFIResponseEmail(
     viewOnlineUrl,
     recipientRoleNote: "You are receiving this because you are the RFI manager, assignee, or on the distribution list for this RFI on SiteCommand.",
     label: "rfi-response",
-    emailSubject: `New response on RFI #${rfiNumber}: ${subject} — ${projectName}`,
+    emailSubject: `New response on RFI #${rfiNumber}: ${rfiSubject} — ${projectName}`,
   });
 }
 

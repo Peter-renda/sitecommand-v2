@@ -289,6 +289,7 @@ function SsovPanel({
   onNotify,
   onSubmit,
   onRevise,
+  onApprove,
   editHref,
 }: {
   status: string;

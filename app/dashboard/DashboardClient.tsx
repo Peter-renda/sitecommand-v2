@@ -12,6 +12,16 @@ import {
 
 type Member = { id: string; username: string; email: string };
 
+type ScheduleTask = {
+  uid: number;
+  name: string;
+  isSummary: boolean;
+  isMilestone: boolean;
+  start: string;
+  finish: string;
+  percentComplete: number;
+};
+
 type ActivityItem = {
   id: string;
   type: "rfi" | "submittal" | "document" | "daily_log" | "task" | "drawing" | "quick_note" | "photo" | "transmittal";
