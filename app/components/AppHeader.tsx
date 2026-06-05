@@ -12,7 +12,7 @@ async function logout() {
 
 export default function AppHeader({ username, showLogout = true }: AppHeaderProps) {
   return (
-    <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+    <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
       <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">
         SiteCommand
       </a>

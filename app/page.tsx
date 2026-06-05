@@ -7,7 +7,7 @@ const features = [
     name: "RFI Management",
     desc: "Track requests for information from submittal to resolution. No lost emails, no missed deadlines.",
     large: true,
-    accentColor: "#D4500A",
+    accentColor: "#2563EB",
   },
   {
     name: "Submittals",
@@ -134,7 +134,7 @@ export default function Home() {
                 {/* Social proof */}
                 <div className="animate-fade-up delay-400 mt-12 flex items-center gap-4 pt-10 border-t border-gray-100">
                   <div className="flex -space-x-1.5">
-                    {(["#C2410C", "#B45309", "#047857", "#1D4ED8"] as const).map(
+                    {(["#1D4ED8", "#1D4ED8", "#047857", "#1D4ED8"] as const).map(
                       (color, i) => (
                         <div
                           key={i}
@@ -181,7 +181,7 @@ export default function Home() {
                       <div className="flex items-center gap-2.5">
                         <div
                           className="w-2 h-2 rounded-full"
-                          style={{ background: "#D4500A" }}
+                          style={{ background: "#2563EB" }}
                         />
                         <span className="text-xs font-semibold text-gray-700 tracking-wide">
                           RFI Tracker
@@ -191,8 +191,8 @@ export default function Home() {
                         <span
                           className="px-2 py-0.5 text-[10px] font-medium rounded-full"
                           style={{
-                            color: "#C2410C",
-                            background: "#FFF7ED",
+                            color: "#1D4ED8",
+                            background: "#EFF6FF",
                             border: "1px solid #FED7AA",
                           }}
                         >
@@ -219,8 +219,8 @@ export default function Home() {
                           title: "Structural beam specifications",
                           status: "Open",
                           statusStyle: {
-                            color: "#C2410C",
-                            background: "#FFF7ED",
+                            color: "#1D4ED8",
+                            background: "#EFF6FF",
                             border: "1px solid #FED7AA",
                           },
                         },
@@ -295,7 +295,7 @@ export default function Home() {
                             className="h-full rounded-full"
                             style={{
                               width: "80%",
-                              background: "#D4500A",
+                              background: "#2563EB",
                             }}
                           />
                         </div>
@@ -315,11 +315,11 @@ export default function Home() {
                     >
                       <div
                         className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                        style={{ background: "rgba(212,80,10,0.08)" }}
+                        style={{ background: "rgba(37,99,235,0.08)" }}
                       >
                         <svg
                           className="w-3.5 h-3.5"
-                          style={{ color: "#D4500A" }}
+                          style={{ color: "#2563EB" }}
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"

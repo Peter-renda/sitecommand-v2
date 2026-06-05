@@ -84,7 +84,7 @@ function LoginForm() {
                     borderColor: "rgba(0,0,0,0.1)",
                     boxShadow: "0 1px 2px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.9)",
                   }}
-                  onFocus={e => e.currentTarget.style.borderColor = "#D4500A"}
+                  onFocus={e => e.currentTarget.style.borderColor = "#2563EB"}
                   onBlur={e => e.currentTarget.style.borderColor = "rgba(0,0,0,0.1)"}
                   placeholder="you@example.com"
                 />
@@ -102,7 +102,7 @@ function LoginForm() {
                     borderColor: "rgba(0,0,0,0.1)",
                     boxShadow: "0 1px 2px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.9)",
                   }}
-                  onFocus={e => e.currentTarget.style.borderColor = "#D4500A"}
+                  onFocus={e => e.currentTarget.style.borderColor = "#2563EB"}
                   onBlur={e => e.currentTarget.style.borderColor = "rgba(0,0,0,0.1)"}
                   placeholder="••••••••"
                 />

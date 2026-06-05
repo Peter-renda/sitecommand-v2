@@ -357,7 +357,7 @@ export default function AdminClient({
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 

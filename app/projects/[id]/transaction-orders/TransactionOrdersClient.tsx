@@ -416,8 +416,8 @@ export default function TransactionOrdersClient({
   const openAssignmentCount = assignments.filter((a) => a.status === "open").length;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
-      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F9FAFB]">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a
           href="/dashboard"
           className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors"

@@ -217,7 +217,7 @@ export default function SendRFQsClient({
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <ProjectNav projectId={projectId} />
       <div className="max-w-[1600px] mx-auto px-6 py-6">
         <p className="text-xs text-gray-500 mb-1">Change Events &gt; Send RFQs</p>

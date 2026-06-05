@@ -510,8 +510,8 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FAFAF7]">
-        <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+      <div className="min-h-screen bg-[#F9FAFB]">
+        <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
           <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)]">SiteCommand</a>
           <span className="text-sm text-gray-400">{username}</span>
         </header>
@@ -522,8 +522,8 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
 
   if (notFound || !rfi) {
     return (
-      <div className="min-h-screen bg-[#FAFAF7]">
-        <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+      <div className="min-h-screen bg-[#F9FAFB]">
+        <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
           <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)]">SiteCommand</a>
         </header>
         <main className="px-6 py-8"><p className="text-sm text-gray-500">RFI not found.</p></main>
@@ -536,9 +536,9 @@ export default function RFIDetailClient({ projectId, rfiId, username, userId, us
   const historyCount = history.length;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Site header */}
-      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">SiteCommand</a>
         <div className="flex items-center gap-5">
           <span className="text-sm text-gray-400">{username}</span>

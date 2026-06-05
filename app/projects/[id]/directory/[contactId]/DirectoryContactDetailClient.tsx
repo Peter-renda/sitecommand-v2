@@ -101,8 +101,8 @@ export default function DirectoryContactDetailClient({ projectId, username, init
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
-    <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between"><a href="/dashboard" className="hover:opacity-80 transition-opacity"><Brand /></a><div className="flex items-center gap-5"><span className="text-sm text-gray-400">{username}</span><button onClick={() => router.push(`/projects/${projectId}/directory`)} className="text-sm text-gray-400 hover:text-gray-900">Back to Directory</button></div></header>
+    <div className="min-h-screen bg-[#F9FAFB]">
+    <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between"><a href="/dashboard" className="hover:opacity-80 transition-opacity"><Brand /></a><div className="flex items-center gap-5"><span className="text-sm text-gray-400">{username}</span><button onClick={() => router.push(`/projects/${projectId}/directory`)} className="text-sm text-gray-400 hover:text-gray-900">Back to Directory</button></div></header>
     <ProjectNav projectId={projectId} />
     <main className="max-w-screen-xl mx-auto px-6 py-6 space-y-5">
         <div className="rounded-xl border border-[var(--border-base)] bg-white p-4">

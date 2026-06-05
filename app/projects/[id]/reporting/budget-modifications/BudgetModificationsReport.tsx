@@ -128,7 +128,7 @@ export default function BudgetModificationsReport({ projectId, username }: { pro
     "w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-orange-400";
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 

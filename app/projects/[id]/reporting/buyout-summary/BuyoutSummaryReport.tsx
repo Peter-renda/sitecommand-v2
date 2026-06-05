@@ -152,7 +152,7 @@ export default function BuyoutSummaryReport({ projectId, username }: { projectId
   );
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 

@@ -575,7 +575,7 @@ export default function SingleToolReportBuilderClient({
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <ProjectNav projectId={projectId} />
 
       <div className="border-b border-gray-200 bg-white px-6 py-3">

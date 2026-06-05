@@ -48,7 +48,7 @@ export default function AboutPage() {
         />
         <div className="max-w-3xl pt-20 pb-20">
           <span className="inline-flex items-center gap-2 mb-8 animate-fade-up">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
             <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">About SiteCommand</span>
           </span>
           <h1
@@ -71,7 +71,7 @@ export default function AboutPage() {
         <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center">
           <div>
             <span className="inline-flex items-center gap-2 mb-4">
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
               <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Our mission</span>
             </span>
             <h2
@@ -134,7 +134,7 @@ export default function AboutPage() {
       <section className="py-20 px-6 sm:px-10" style={{ borderTop: "1px solid rgba(0,0,0,0.06)", background: "#FAFAF9" }}>
         <div className="max-w-7xl mx-auto">
           <span className="inline-flex items-center gap-2 mb-4">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
             <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">What we believe</span>
           </span>
           <h2
@@ -163,7 +163,7 @@ export default function AboutPage() {
                 }} className="flex flex-col gap-4 h-full">
                   <div
                     className="w-10 h-10 rounded-lg flex items-center justify-center"
-                    style={{ background: "rgba(212,80,10,0.08)", color: "#D4500A" }}
+                    style={{ background: "rgba(37,99,235,0.08)", color: "#2563EB" }}
                   >
                     {v.icon}
                   </div>
@@ -180,7 +180,7 @@ export default function AboutPage() {
       <section className="py-20 px-6 sm:px-10" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
         <div className="max-w-3xl mx-auto">
           <span className="inline-flex items-center gap-2 mb-4">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
             <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Our story</span>
           </span>
           <h2
@@ -230,7 +230,7 @@ export default function AboutPage() {
               }} />
               <div className="relative">
                 <span className="inline-flex items-center gap-2 mb-6">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
                   <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Get started today</span>
                 </span>
                 <h2 className="text-4xl sm:text-5xl font-display text-gray-950 leading-tight">Ready to simplify your next project?</h2>

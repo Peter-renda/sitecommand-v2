@@ -113,7 +113,7 @@ export default function PrequalificationPage() {
       <section className="pt-24 pb-28 px-6">
         <div className="max-w-4xl mx-auto">
           <div className="inline-flex items-center gap-2 mb-8 animate-fade-up">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
             <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Preconstruction</span>
           </div>
 
@@ -190,7 +190,7 @@ export default function PrequalificationPage() {
               >
                 <div
                   className="w-10 h-10 rounded-xl flex items-center justify-center mb-5"
-                  style={{ background: "rgba(212,80,10,0.08)", color: "#D4500A" }}
+                  style={{ background: "rgba(37,99,235,0.08)", color: "#2563EB" }}
                 >
                   {f.icon}
                 </div>
@@ -221,7 +221,7 @@ export default function PrequalificationPage() {
             {steps.map((step) => (
               <div key={step.number}>
                 <div className="inline-flex items-center gap-2 mb-4">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
                   <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">{step.number}</span>
                 </div>
                 <h3 className="text-lg font-semibold mb-2" style={{ color: "#111110" }}>{step.title}</h3>

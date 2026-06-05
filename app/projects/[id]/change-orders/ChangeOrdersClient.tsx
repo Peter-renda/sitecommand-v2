@@ -328,12 +328,12 @@ export default function ChangeOrdersClient({
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* Page header */}
-      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#FAFAF7]">
+      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#F9FAFB]">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div className="min-w-0">
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Change Orders</h1>

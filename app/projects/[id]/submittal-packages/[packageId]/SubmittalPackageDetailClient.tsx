@@ -160,8 +160,8 @@ export default function SubmittalPackageDetailClient({ projectId, packageId, use
   if (loading || !pkg) return <div className="p-6 text-sm text-gray-500">Loading package…</div>;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
-      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F9FAFB]">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)]">SiteCommand</a>
         <span className="text-sm text-gray-400">{username}</span>
       </header>

@@ -639,7 +639,7 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FAFAF7]">
+      <div className="min-h-screen bg-[#F9FAFB]">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex items-center justify-center h-64">
@@ -650,12 +650,12 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* Page header */}
-      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-[#FAFAF7] gap-4 flex-wrap">
+      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-[#F9FAFB] gap-4 flex-wrap">
         <div>
           <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Scope of work</h1>
           <p className="sec-sub mt-1.5">
@@ -679,7 +679,7 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
       </div>
 
       {/* Stat strip */}
-      <div className="px-6 pb-4 bg-[#FAFAF7]">
+      <div className="px-6 pb-4 bg-[#F9FAFB]">
         <div className="stats">
           <div className={`stat${activeDivisionCount > 0 ? " alert" : ""}`}>
             <div className="lbl">Active Divisions</div>
@@ -723,7 +723,7 @@ export default function ScopeOfWorkClient({ projectId, username }: { projectId: 
                     type="checkbox"
                     checked={isActive}
                     onChange={() => toggleDivision(div.code)}
-                    className="w-3.5 h-3.5 rounded border-gray-300 accent-[#D4500A] shrink-0 cursor-pointer"
+                    className="w-3.5 h-3.5 rounded border-gray-300 accent-[#2563EB] shrink-0 cursor-pointer"
                   />
                   <button
                     onClick={() => scrollToDiv(div.code)}

@@ -246,7 +246,7 @@ export default function DashboardWalkthrough({
           pointer-events: none;
           box-shadow:
             0 0 0 4px rgba(212, 80, 10, 0.18),
-            0 0 0 2px #D4500A,
+            0 0 0 2px #2563EB,
             0 0 0 9999px rgba(17, 17, 16, 0.32);
           transition: top .35s cubic-bezier(.22,1,.36,1), left .35s cubic-bezier(.22,1,.36,1),
                       width .35s cubic-bezier(.22,1,.36,1), height .35s cubic-bezier(.22,1,.36,1);
@@ -278,7 +278,7 @@ export default function DashboardWalkthrough({
           transform: rotate(45deg);
         }
         .wt-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 8px; }
-        .wt-step { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 11px; color: #D4500A; font-weight: 500; letter-spacing: 0.08em; }
+        .wt-step { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 11px; color: #2563EB; font-weight: 500; letter-spacing: 0.08em; }
         .wt-close { background: none; border: none; cursor: pointer; font-size: 20px; color: #9CA3AF; line-height: 1; padding: 0 4px; }
         .wt-close:hover { color: #111110; }
         .wt-title { font-size: 17px; font-weight: 700; margin: 0; padding: 0 18px; color: #111110; }
@@ -286,11 +286,11 @@ export default function DashboardWalkthrough({
         .wt-live-tag {
           display: inline-flex; align-items: center; gap: 4px;
           font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 9px;
-          color: #C2410C; background: #FFEDD5; padding: 2px 6px; border-radius: 4px;
+          color: #1D4ED8; background: #FFEDD5; padding: 2px 6px; border-radius: 4px;
           letter-spacing: 0.06em; margin-left: 8px; vertical-align: 1px;
         }
         .wt-live-tag::before {
-          content: ""; width: 5px; height: 5px; background: #C2410C; border-radius: 50%;
+          content: ""; width: 5px; height: 5px; background: #1D4ED8; border-radius: 50%;
           box-shadow: 0 0 0 2px rgba(194,65,12,0.2);
         }
         .wt-controls {
@@ -319,11 +319,11 @@ export default function DashboardWalkthrough({
           width: 16px; height: 16px; border-radius: 50%; background: #fff;
           box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: left .15s;
         }
-        .wt-toggle.is-on { background: #D4500A; }
+        .wt-toggle.is-on { background: #2563EB; }
         .wt-toggle.is-on::after { left: 16px; }
         .wt-progress-wrap { padding: 12px 18px 0; display: flex; align-items: center; gap: 10px; }
         .wt-progress { flex: 1; height: 4px; background: #F3F4F6; border-radius: 9999px; overflow: hidden; }
-        .wt-progress span { display: block; height: 100%; background: #D4500A; transition: width .35s cubic-bezier(.22,1,.36,1); }
+        .wt-progress span { display: block; height: 100%; background: #2563EB; transition: width .35s cubic-bezier(.22,1,.36,1); }
         .wt-progress-text { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 10px; color: #9CA3AF; font-weight: 500; }
         .wt-actions { padding: 12px 18px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .wt-btn {

@@ -453,7 +453,7 @@ export default function MeetingDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
+      <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center">
         <div className="text-sm text-gray-400">Loading meeting...</div>
       </div>
     );
@@ -461,7 +461,7 @@ export default function MeetingDetailClient({
 
   if (!meeting) {
     return (
-      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
+      <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center">
         <div className="text-sm text-gray-500">Meeting not found.</div>
       </div>
     );
@@ -478,9 +478,9 @@ export default function MeetingDetailClient({
     : agenda;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Top nav bar */}
-      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>

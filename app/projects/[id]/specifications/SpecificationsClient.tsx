@@ -504,11 +504,11 @@ export default function SpecificationsClient({ projectId, username }: { projectI
   );
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] text-gray-900">
+    <div className="min-h-screen bg-[#F9FAFB] text-gray-900">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
-      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#FAFAF7]">
+      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#F9FAFB]">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">

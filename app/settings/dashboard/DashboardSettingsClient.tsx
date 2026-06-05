@@ -25,7 +25,7 @@ export default function DashboardSettingsClient() {
         </div>
         <a
           href="/dashboard?walkthrough=1"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-[#D4500A] hover:bg-[#B5450A] text-white text-sm font-semibold rounded-md shadow-sm transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-[#2563EB] hover:bg-[#B5450A] text-white text-sm font-semibold rounded-md shadow-sm transition-colors"
         >
           <span aria-hidden>▶</span> Start Walkthrough
         </a>

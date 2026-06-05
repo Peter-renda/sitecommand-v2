@@ -177,8 +177,8 @@ export default function PermitApplicationsClient({
   const filledCount = fields ? fields.filter((f) => f.value.trim()).length : 0;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
-      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
         <div className="font-semibold text-sm">SiteCommand</div>
         <button onClick={handleLogout} className="text-xs text-black/60 hover:text-black">
           Logout

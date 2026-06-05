@@ -35,7 +35,7 @@ export default function TMTicketsClient({ projectId, username }: { projectId: st
   const ticketCount = tickets.length;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 

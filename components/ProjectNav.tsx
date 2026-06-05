@@ -275,7 +275,7 @@ export default function ProjectNav({
 
   return (
     <>
-      <nav className="sticky top-0 z-40 bg-[#FAFAF7]/85 backdrop-blur-md border-b border-black/[0.06] w-full flex items-center overflow-visible relative">
+      <nav className="sticky top-0 z-40 bg-[#F9FAFB]/85 backdrop-blur-md border-b border-black/[0.06] w-full flex items-center overflow-visible relative">
         {/* Non-scrollable left: back links + tools dropdown */}
         <div className="flex items-center gap-4 pl-6 shrink-0">
           {/* Home */}

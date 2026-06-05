@@ -454,11 +454,11 @@ export default function BidManagementClient({
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
-      <div className="px-6 pt-8 pb-5 bg-[#FAFAF7]">
+      <div className="px-6 pt-8 pb-5 bg-[#F9FAFB]">
         <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Bid management</h1>
         {!loadingPackages && (
           <p className="sub mt-1.5">

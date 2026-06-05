@@ -2057,9 +2057,9 @@ export default function DocumentsClient({
   const fileCount = items.filter((i) => i.type === "file").length;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="hover:opacity-80 transition-opacity">
           <Brand />
         </a>

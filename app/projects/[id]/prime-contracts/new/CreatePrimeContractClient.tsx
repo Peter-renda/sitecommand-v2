@@ -369,7 +369,7 @@ export default function CreatePrimeContractClient({ projectId, username }: { pro
   };
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 

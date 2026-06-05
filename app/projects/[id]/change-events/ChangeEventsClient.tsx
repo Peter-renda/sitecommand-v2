@@ -510,12 +510,12 @@ export default function ChangeEventsClient({
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* ── Page Header ─────────────────────────────────────────────────────── */}
-      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#FAFAF7]">
+      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#F9FAFB]">
         <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Change Events</h1>
         {events.length > 0 && (
           <p className="sec-sub mt-1.5">
@@ -560,7 +560,7 @@ export default function ChangeEventsClient({
         })()}
       </div>
 
-      <div className="flex items-center justify-between gap-2 flex-wrap px-4 sm:px-6 py-2 border-b border-black/[0.06] bg-[#FAFAF7] shrink-0">
+      <div className="flex items-center justify-between gap-2 flex-wrap px-4 sm:px-6 py-2 border-b border-black/[0.06] bg-[#F9FAFB] shrink-0">
         {/* Left: tabs */}
         <div className="flex items-center overflow-x-auto max-w-full [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(["detail", "summary", "rfqs", "recycle_bin"] as Tab[]).map((tab) => (
@@ -651,7 +651,7 @@ export default function ChangeEventsClient({
       )}
 
       {/* ── Filter bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 flex-wrap px-4 sm:px-4 py-2 border-b border-black/[0.06] bg-[#FAFAF7] shrink-0">
+      <div className="flex items-center gap-2 flex-wrap px-4 sm:px-4 py-2 border-b border-black/[0.06] bg-[#F9FAFB] shrink-0">
         {/* Bulk Actions dropdown – write-access users only */}
         {canWrite && <div ref={quickActionsRef} className="relative">
           <button

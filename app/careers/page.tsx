@@ -39,7 +39,7 @@ export default function CareersPage() {
         {/* Hero */}
         <div className="mb-12">
           <span className="inline-flex items-center gap-2 mb-6 animate-fade-up">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
             <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Join the team</span>
           </span>
           <h1

@@ -66,8 +66,8 @@ const PUNCH_LIST_FILTER_OPTIONS = [
 const STATUSES = ["open", "in_progress", "closed"];
 const STATUS_LABELS: Record<string, string> = { open: "Open", in_progress: "In Progress", closed: "Closed" };
 const KANBAN_COLUMNS: { status: string; name: string; accent: string }[] = [
-  { status: "open", name: "Open", accent: "#D4500A" },
-  { status: "in_progress", name: "In progress", accent: "#B45309" },
+  { status: "open", name: "Open", accent: "#2563EB" },
+  { status: "in_progress", name: "In progress", accent: "#1D4ED8" },
   { status: "closed", name: "Closed", accent: "#047857" },
 ];
 const PRIORITY_COLORS: Record<string, string> = {
@@ -576,8 +576,8 @@ export default function PunchListClient({ projectId, role, username, userId }: {
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
-      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F9FAFB]">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">SiteCommand</a>
         <div className="flex items-center gap-5">
           <span className="text-sm text-gray-400">{username}</span>

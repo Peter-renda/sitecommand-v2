@@ -272,7 +272,7 @@ function GanttView({ tasks }: { tasks: Task[] }) {
       >
         <div
           style={{ height: `${HEADER_H}px` }}
-          className="border-b border-gray-200 bg-[#FAFAF7] shrink-0 px-3 flex items-end pb-1.5"
+          className="border-b border-gray-200 bg-[#F9FAFB] shrink-0 px-3 flex items-end pb-1.5"
         >
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">
             Activity
@@ -283,7 +283,7 @@ function GanttView({ tasks }: { tasks: Task[] }) {
             <div
               key={task.uid}
               style={{ height: `${ROW_HEIGHT}px` }}
-              className={`flex items-center border-b border-gray-100 px-3 ${task.isSummary ? "bg-[#FAFAF7]" : ""}`}
+              className={`flex items-center border-b border-gray-100 px-3 ${task.isSummary ? "bg-[#F9FAFB]" : ""}`}
             >
               <span
                 style={{ paddingLeft: `${task.outlineLevel * 12}px` }}
@@ -414,7 +414,7 @@ function GanttView({ tasks }: { tasks: Task[] }) {
                       top: 0,
                       bottom: 0,
                       width: 1,
-                      background: "#D4500A",
+                      background: "#2563EB",
                       zIndex: 5,
                     }}
                   />
@@ -447,13 +447,13 @@ function GanttView({ tasks }: { tasks: Task[] }) {
                       (task.percentComplete > 0 ||
                         (new Date(task.start).getTime() <= nowMs && finishMs >= nowMs));
                     const barColors = task.isSummary
-                      ? { bg: "#E7E2D8", border: "#D6CFBF", fill: "#9A6240", text: "#6B5B45" }
+                      ? { bg: "#E7E2D8", border: "#D6CFBF", fill: "#64748B", text: "#6B5B45" }
                       : isComplete
                       ? { bg: "rgba(4,120,87,0.12)", border: "rgba(4,120,87,0.25)", fill: "rgba(4,120,87,0.4)", text: "#047857" }
                       : isCritical
                       ? { bg: "rgba(220,38,38,0.1)", border: "rgba(220,38,38,0.25)", fill: "rgba(220,38,38,0.35)", text: "#B91C1C" }
                       : isNow
-                      ? { bg: "rgba(212,80,10,0.12)", border: "rgba(212,80,10,0.3)", fill: "rgba(212,80,10,0.35)", text: "#C2410C" }
+                      ? { bg: "rgba(212,80,10,0.12)", border: "rgba(212,80,10,0.3)", fill: "rgba(212,80,10,0.35)", text: "#1D4ED8" }
                       : { bg: "#F3F4F6", border: "#E5E7EB", fill: "#D1D5DB", text: "#6B7280" };
                     return (
                       <div
@@ -826,9 +826,9 @@ export default function ScheduleClient({
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       {/* Header */}
-      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>

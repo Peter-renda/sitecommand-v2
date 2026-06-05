@@ -324,7 +324,7 @@ export default function PrimeContractDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading…</div>
@@ -334,7 +334,7 @@ export default function PrimeContractDetailClient({
 
   if (error || !contract) {
     return (
-      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-red-500 text-sm">{error ?? "Contract not found."}</div>
@@ -446,7 +446,7 @@ export default function PrimeContractDetailClient({
   ];
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 

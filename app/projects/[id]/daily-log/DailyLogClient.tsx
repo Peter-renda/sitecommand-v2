@@ -2039,9 +2039,9 @@ export default function DailyLogClient({
   });
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7]">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-[#FAFAF7] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -2211,7 +2211,7 @@ export default function DailyLogClient({
             </div>
             <div>
               <div className="lbl">Conditions</div>
-              <div className="val" style={{ fontStyle: "italic", color: "#9A6240", fontSize: 16 }}>
+              <div className="val" style={{ fontStyle: "italic", color: "#64748B", fontSize: 16 }}>
                 {form.weather_conditions || "Not logged"}
               </div>
             </div>

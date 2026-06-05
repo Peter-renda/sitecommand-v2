@@ -503,12 +503,12 @@ export default function PrimeContractsClient({
 
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* Header */}
-      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-[#FAFAF7] gap-4 flex-wrap">
+      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-[#F9FAFB] gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Prime Contracts</h1>
@@ -596,7 +596,7 @@ export default function PrimeContractsClient({
         const stripPctPaid = stripRevised > 0 ? ((stripPayments / stripRevised) * 100).toFixed(1) : "0.0";
         const stripOutstanding = stripRevised - stripPayments;
         return (
-          <div className="px-6 pb-4 bg-[#FAFAF7]">
+          <div className="px-6 pb-4 bg-[#F9FAFB]">
             <div className="stats">
               <div className="stat">
                 <div className="lbl">Revised Contract Value</div>
@@ -665,7 +665,7 @@ export default function PrimeContractsClient({
             onClick={() => setShowFilters(false)}
           />
           <div className="absolute left-0 top-0 h-full w-full max-w-sm bg-white border-r hairline shadow-xl">
-            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b hairline bg-[#FAFAF7]">
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b hairline bg-[#F9FAFB]">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">Prime contracts</p>
                 <h2 className="font-display text-[22px] leading-tight text-[color:var(--ink)]">Filters</h2>
