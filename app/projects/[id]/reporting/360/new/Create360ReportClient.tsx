@@ -169,16 +169,6 @@ const FINANCIALS_CATEGORIES: CategoryDef[] = [
     ],
   },
   {
-    label: "Company (Vendor)",
-    source: "companies",
-    fields: [
-      { key: "name", label: "Name" },
-      { key: "trade", label: "Trade" },
-      { key: "city", label: "City" },
-      { key: "state", label: "State" },
-    ],
-  },
-  {
     label: "ERP Job Costs Summary",
     source: "erp-job-costs",
     fields: [
@@ -745,33 +735,6 @@ const PROJECT_EXECUTION_CATEGORIES: CategoryDef[] = [
     ],
   },
   {
-    label: "Project",
-    source: "project",
-    fields: [
-      { key: "name", label: "Name" },
-      { key: "project_number", label: "Project #" },
-      { key: "stage", label: "Stage" },
-      { key: "status", label: "Status" },
-      { key: "address", label: "Address" },
-      { key: "city", label: "City" },
-      { key: "state", label: "State" },
-      { key: "value", label: "Project Value", format: "currency" },
-      { key: "start_date", label: "Start Date", format: "date" },
-      { key: "completion_date", label: "Completion Date", format: "date" },
-      { key: "projected_finish_date", label: "Projected Finish", format: "date" },
-    ],
-  },
-  {
-    label: "Project Roles",
-    source: "project-roles",
-    fields: [
-      { key: "role", label: "Role" },
-      { key: "user_name", label: "User" },
-      { key: "company", label: "Company" },
-      { key: "email", label: "Email" },
-    ],
-  },
-  {
     label: "Punch Item",
     source: "punch-items",
     fields: [
@@ -1103,7 +1066,191 @@ const PROJECT_EXECUTION_CATEGORIES: CategoryDef[] = [
   },
 ];
 
+const DIRECTORY_AND_PORTFOLIO_CATEGORIES: CategoryDef[] = [
+  {
+    label: "Company (Vendor)",
+    source: "companies",
+    fields: [
+      { key: "business_8a", label: "8a Business Enterprise" },
+      { key: "abbreviated_name", label: "Abbreviated Name" },
+      { key: "accepted_terms_and_conditions", label: "Accepted Terms And Conditions" },
+      { key: "address", label: "Address" },
+      { key: "affirmative_action", label: "Affirmative Action" },
+      { key: "african_american_business", label: "African American Business" },
+      { key: "asian_american_business", label: "Asian American Business" },
+      { key: "authorized_bidder", label: "Authorized Bidder" },
+      { key: "business_fax", label: "Business Fax" },
+      { key: "business_phone", label: "Business Phone" },
+      { key: "certified_business_enterprise", label: "Certified Business Enterprise" },
+      { key: "city", label: "City" },
+      { key: "company_rating_avg", label: "Company Rating (Avg)", format: "number" },
+      { key: "cost_codes", label: "Cost Codes" },
+      { key: "count", label: "Count", format: "number" },
+      { key: "country", label: "Country" },
+      { key: "country_code", label: "Country Code" },
+      { key: "date_created", label: "Date Created", format: "date" },
+      { key: "date_updated", label: "Date Updated", format: "date" },
+      { key: "disadvantaged_business", label: "Disadvantaged Business" },
+      { key: "email_address", label: "Email Address" },
+      { key: "entity_identifier", label: "Entity Identifier" },
+      { key: "entity_type", label: "Entity Type" },
+      { key: "erp_latest_status", label: "ERP Latest Status" },
+      { key: "erp_updated_at", label: "ERP Updated At", format: "date" },
+      { key: "hispanic_business", label: "Hispanic Business" },
+      { key: "historically_underutilized_business", label: "Historically Underutlized Business" },
+      { key: "id", label: "ID" },
+      { key: "invoice_contact_email_address", label: "Invoice Contact Email Address" },
+      { key: "invoice_contact_full_name", label: "Invoice Contact Full Name" },
+      { key: "is_active", label: "Is Active" },
+      { key: "labor_union", label: "Labor Union" },
+      { key: "license_number", label: "License Number" },
+      { key: "minority_business_enterprise", label: "Minority Business Enterpirse" },
+      { key: "name", label: "Name" },
+      { key: "native_american_business", label: "Native American Business" },
+      { key: "prequalified", label: "Prequalified" },
+      { key: "prevailing_wage", label: "Prevailing Wage" },
+      { key: "primary_contact_email_address", label: "Primary Contact Email Address" },
+      { key: "primary_contact_fax_number", label: "Primary Contact Fax Number" },
+      { key: "primary_contact_first_name", label: "Primary Contact First Name" },
+      { key: "primary_contact_job_title", label: "Primary Contact Job Title" },
+      { key: "primary_contact_last_name", label: "Primary Contact Last Name" },
+      { key: "primary_contact_mobile_phone", label: "Primary Contact Mobile Phone" },
+      { key: "primary_contact_name", label: "Primary Contact Name" },
+      { key: "primary_contact_vendor_name", label: "Primary Contact Vendor Name" },
+      { key: "service_disabled_veteran_owned_small_business", label: "Service Disabled Veteran Owned Small Business" },
+      { key: "small_business", label: "Small Business" },
+      { key: "state", label: "State" },
+      { key: "tags_keywords", label: "Tags/Keywords" },
+      { key: "trades", label: "Trades" },
+      { key: "union_member", label: "Union Member" },
+      { key: "website", label: "Website" },
+      { key: "womens_business", label: "Womens Business" },
+      { key: "zip", label: "Zip" },
+    ],
+  },
+  {
+    label: "Project",
+    source: "project",
+    fields: [
+      { key: "signer_2_info", label: "2nd Signer Information" },
+      { key: "signer_4_info", label: "4th Signer Information" },
+      { key: "accounting_project_number", label: "Accounting Project Number" },
+      { key: "actual_completion_date", label: "Actual Completion Date", format: "date" },
+      { key: "actual_start_date", label: "Actual Start Date", format: "date" },
+      { key: "address", label: "Address" },
+      { key: "architect_engineer", label: "Architect/Engineer" },
+      { key: "assistant_estimator", label: "Assistant Estimator" },
+      { key: "assistant_project_manager", label: "Assistant Project Manager" },
+      { key: "assistant_superintendent", label: "Assistant Superintendent" },
+      { key: "bid_type", label: "Bid Type" },
+      { key: "budget_lock_status", label: "Budget Lock Status" },
+      { key: "budget_number", label: "Budget Number" },
+      { key: "cda", label: "CDA" },
+      { key: "city", label: "City" },
+      { key: "code", label: "Code" },
+      { key: "completion_date", label: "Completion Date", format: "date" },
+      { key: "count", label: "Count", format: "number" },
+      { key: "country", label: "Country" },
+      { key: "country_code", label: "Country Code" },
+      { key: "county", label: "County" },
+      { key: "created_by", label: "Created By" },
+      { key: "currency_code", label: "Currency Code" },
+      { key: "date_created", label: "Date Created", format: "date" },
+      { key: "default_tax_code", label: "Default Tax Code" },
+      { key: "delivery_method", label: "Delivery Method" },
+      { key: "departments", label: "Departments" },
+      { key: "description", label: "Description" },
+      { key: "designated_market_area", label: "Designated Market Area" },
+      { key: "erp_latest_status", label: "ERP Latest Status" },
+      { key: "erp_updated_at", label: "ERP Updated At", format: "date" },
+      { key: "erp_user_name", label: "ERP User Name" },
+      { key: "estimated_budget", label: "Estimated Budget", format: "currency" },
+      { key: "executive", label: "Executive" },
+      { key: "exhibit_l_clarifications_exclusions", label: "Exhibit L - Hamel's Clarifications and Exclusions" },
+      { key: "external_origin_data", label: "External Origin Data" },
+      { key: "external_origin_id", label: "External Origin ID" },
+      { key: "fax", label: "Fax" },
+      { key: "flag", label: "Flag" },
+      { key: "habc", label: "HABC" },
+      { key: "hud", label: "HUD" },
+      { key: "id", label: "ID" },
+      { key: "is_active", label: "Is Active" },
+      { key: "is_test_project", label: "Is Test Project" },
+      { key: "language", label: "Language" },
+      { key: "latitude", label: "Latitude" },
+      { key: "lender", label: "Lender" },
+      { key: "longitude", label: "Longitude" },
+      { key: "name", label: "Name" },
+      { key: "notes", label: "Notes" },
+      { key: "number", label: "Number" },
+      { key: "office_name", label: "Office Name" },
+      { key: "owner", label: "Owner" },
+      { key: "owner_contact", label: "Owner Contact" },
+      { key: "owner_type", label: "Owner Type" },
+      { key: "parent_job_name", label: "Parent Job Name" },
+      { key: "phone", label: "Phone" },
+      { key: "drawing_list", label: "Please paste this project's drawing list here" },
+      { key: "priority", label: "Priority" },
+      { key: "program", label: "Program" },
+      { key: "project_engineer", label: "Project Engineer" },
+      { key: "project_manager", label: "Project Manager" },
+      { key: "project_to_company_exchange_rate", label: "Project To Company Exchange Rate", format: "number" },
+      { key: "projected_finish_date", label: "Projected Finish Date", format: "date" },
+      { key: "region", label: "Region" },
+      { key: "schedule_last_updated", label: "Schedule Last Updated", format: "date" },
+      { key: "schedule_percent_complete", label: "Schedule Percent Complete", format: "number" },
+      { key: "sector", label: "Sector" },
+      { key: "senior_estimator", label: "Senior Estimator" },
+      { key: "show_2nd_signature", label: "Show 2nd Signature" },
+      { key: "show_4th_signature", label: "Show 4th Signature" },
+      { key: "square_footage", label: "Square Footage", format: "number" },
+      { key: "stage_name", label: "Stage Name" },
+      { key: "stage_tier", label: "Stage Tier" },
+      { key: "start_date", label: "Start Date", format: "date" },
+      { key: "state", label: "State" },
+      { key: "store_number", label: "Store Number" },
+      { key: "superintendent", label: "Superintendent" },
+      { key: "synced_with_accounting", label: "Synced With Accounting" },
+      { key: "additional_insureds", label: "The following entities are to be shown as additional insureds" },
+      { key: "timezone", label: "Timezone" },
+      { key: "total_value", label: "Total Value", format: "currency" },
+      { key: "type", label: "Type" },
+      { key: "wage_decision", label: "Wage Decision" },
+      { key: "wage_decision_date", label: "Wage Decision Date", format: "date" },
+      { key: "warranty_end_date", label: "Warranty End Date", format: "date" },
+      { key: "warranty_start_date", label: "Warranty Start Date", format: "date" },
+      { key: "work_scope", label: "Work Scope" },
+      { key: "zip", label: "Zip" },
+    ],
+  },
+  {
+    label: "Project Distribution Group",
+    source: "project-distribution-groups",
+    fields: [
+      { key: "count", label: "Count", format: "number" },
+      { key: "description", label: "Description" },
+      { key: "id", label: "ID" },
+      { key: "name", label: "Name" },
+    ],
+  },
+  {
+    label: "Project Roles",
+    source: "project-roles",
+    fields: [
+      { key: "contact_name", label: "Contact Name" },
+      { key: "contact_type", label: "Contact Type" },
+      { key: "count", label: "Count", format: "number" },
+      { key: "date_updated", label: "Date Updated", format: "date" },
+      { key: "employee_id", label: "Employee ID" },
+      { key: "group", label: "Group" },
+      { key: "id", label: "ID" },
+      { key: "role_name", label: "Role Name" },
+    ],
+  },
+];
+
 const CATEGORIES_BY_TAB: Record<string, CategoryDef[]> = {
+  "Directory & Portfolio": DIRECTORY_AND_PORTFOLIO_CATEGORIES,
   Financials: FINANCIALS_CATEGORIES,
   "Project Execution": PROJECT_EXECUTION_CATEGORIES,
 };
@@ -2009,41 +2156,135 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
     return Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
   }
 
-  // ── Project Execution ────────────────────────────────────────────────────
+  // ── Directory & Portfolio ────────────────────────────────────────────────
+  if (source === "companies") {
+    const res = await fetch(`/api/projects/${projectId}/directory`);
+    if (!res.ok) return [];
+    const contacts: Row[] = await res.json();
+    return (contacts ?? [])
+      .filter((c) => c.type === "company")
+      .map((c) => ({
+        id: c.id,
+        name: c.company ?? `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim(),
+        abbreviated_name: c.abbreviated_name,
+        address: c.address,
+        business_phone: c.business_phone,
+        business_fax: c.business_fax,
+        website: c.website,
+        city: c.city,
+        state: c.state,
+        country: c.country,
+        zip: c.zip,
+        entity_type: c.entity_type,
+        license_number: c.license_number,
+        labor_union: c.labor_union,
+        tags_keywords: c.tags_keywords,
+        trades: c.trades,
+        cost_codes: c.cost_codes,
+        primary_contact_name: c.primary_contact,
+        primary_contact_first_name: c.first_name,
+        primary_contact_last_name: c.last_name,
+        primary_contact_email_address: c.email,
+        primary_contact_mobile_phone: c.phone,
+        primary_contact_job_title: c.job_title,
+        email_address: c.email,
+        authorized_bidder: c.authorized_bidder,
+        union_member: c.union_member,
+        small_business: c.small_business,
+        prevailing_wage: c.prevailing_wage,
+        affirmative_action: c.affirmative_action,
+        african_american_business: c.african_american_business,
+        asian_american_business: c.asian_american_business,
+        hispanic_business: c.hispanic_business,
+        native_american_business: c.native_american_business,
+        womens_business: c.women_business,
+        disadvantaged_business: c.disadvantaged_business,
+        historically_underutilized_business: c.hub_zone,
+        minority_business_enterprise: c.minority_business_enterprise,
+        service_disabled_veteran_owned_small_business: c.sdvosb,
+        business_8a: c.business_8a,
+        certified_business_enterprise: c.certified_business_enterprise,
+        prequalified: c.prequalified,
+        company_rating_avg: c.bidder_rating,
+        is_active: true,
+        date_created: c.created_at,
+      }));
+  }
+
   if (source === "project") {
     const res = await fetch(`/api/projects/${projectId}`);
     if (!res.ok) return [];
     const p = (await res.json()) as Row;
     if (!p || typeof p !== "object") return [];
     return [{
+      id: p.id,
       name: p.name,
-      project_number: p.project_number,
-      stage: p.stage,
-      status: p.status,
+      number: p.project_number,
+      code: p.project_number,
+      description: p.description,
       address: p.address,
       city: p.city,
       state: p.state,
-      value: p.value,
+      county: p.county,
+      zip: p.zip_code,
+      stage_name: p.stage,
+      type: p.sector,
+      sector: p.sector,
+      actual_start_date: p.actual_start_date,
       start_date: p.start_date ?? p.actual_start_date,
+      actual_completion_date: p.completion_date,
       completion_date: p.completion_date,
       projected_finish_date: p.projected_finish_date,
+      warranty_start_date: p.warranty_start_date,
+      warranty_end_date: p.warranty_end_date,
+      total_value: p.value,
+      estimated_budget: p.value,
+      erp_latest_status: p.erp_status,
+      accounting_project_number: p.sage_job_key,
+      date_created: p.created_at,
+      is_active: p.archived_at ? false : true,
     }];
   }
 
-  if (source === "project-roles") {
-    const res = await fetch(`/api/projects/${projectId}`);
+  if (source === "project-distribution-groups") {
+    const res = await fetch(`/api/projects/${projectId}/directory`);
     if (!res.ok) return [];
-    const p = (await res.json()) as Row;
+    const contacts: Row[] = await res.json();
+    return (contacts ?? [])
+      .filter((c) => c.type === "distribution_group")
+      .map((c) => ({
+        id: c.id,
+        name: c.group_name,
+        description: c.notes,
+      }));
+  }
+
+  if (source === "project-roles") {
+    const [projectRes, dirRes] = await Promise.all([
+      fetch(`/api/projects/${projectId}`),
+      fetch(`/api/projects/${projectId}/directory`),
+    ]);
+    if (!projectRes.ok) return [];
+    const p = (await projectRes.json()) as Row;
+    const contacts: Row[] = dirRes.ok ? await dirRes.json() : [];
+    const contactsById = new Map<string, Row>();
+    for (const c of contacts) contactsById.set(String(c.id), c);
     const roles = (p?.project_roles ?? {}) as Record<string, unknown>;
     const rows: Row[] = [];
     for (const [role, members] of Object.entries(roles)) {
       const list = Array.isArray(members) ? (members as Row[]) : [];
       for (const m of list) {
+        const contact = m.id ? contactsById.get(String(m.id)) : undefined;
+        const contactFullName = contact?.first_name || contact?.last_name
+          ? `${contact?.first_name ?? ""} ${contact?.last_name ?? ""}`.trim()
+          : null;
         rows.push({
-          role,
-          user_name: m.name ?? m.username ?? m.id,
-          company: m.company,
-          email: m.email,
+          id: m.id,
+          role_name: role,
+          contact_name: m.name ?? contactFullName ?? m.username ?? m.id,
+          contact_type: contact?.type ?? "user",
+          group: contact?.group_name ?? m.company,
+          date_updated: contact?.created_at,
         });
       }
     }
