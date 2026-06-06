@@ -7,6 +7,7 @@ import ProjectDetail from "./views/ProjectDetail";
 import DailyLog from "./views/DailyLog";
 import Directory from "./views/Directory";
 import Tasks from "./views/Tasks";
+import Emails from "./views/Emails";
 import RFIs from "./views/RFIs";
 import Submittals from "./views/Submittals";
 import PunchList from "./views/PunchList";
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="/projects/:id/daily-log" element={<DailyLog />} />
         <Route path="/projects/:id/directory" element={<Directory />} />
         <Route path="/projects/:id/tasks" element={<Tasks />} />
+        <Route path="/projects/:id/emails" element={<Emails />} />
         <Route path="/projects/:id/rfis" element={<RFIs />} />
         <Route path="/projects/:id/submittals" element={<Submittals />} />
         <Route path="/projects/:id/punch-list" element={<PunchList />} />

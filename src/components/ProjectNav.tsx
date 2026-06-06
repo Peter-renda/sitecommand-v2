@@ -9,6 +9,7 @@ const TOOL_SECTIONS = [
       { name: "Documents", slug: "documents" },
       { name: "Directory", slug: "directory" },
       { name: "Tasks", slug: "tasks" },
+      { name: "Emails", slug: "emails" },
       { name: "Admin", slug: "admin" },
     ],
   },
