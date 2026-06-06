@@ -1,0 +1,2 @@
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS work_scope TEXT;

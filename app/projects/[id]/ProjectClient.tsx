@@ -11,6 +11,7 @@ type DirectoryContact = {
   first_name: string | null;
   last_name: string | null;
   email: string | null;
+  phone: string | null;
   company: string | null;
   job_title: string | null;
 };
@@ -792,6 +793,12 @@ export default function ProjectClient({
               const fmtDate = (d: string) =>
                 new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
+              const cityStateZip = [
+                [project.city, project.state].filter(Boolean).join(", "),
+                project.zip_code,
+              ].filter(Boolean).join(" ");
+              const fullAddress = [project.address, cityStateZip].filter(Boolean).join(", ");
+
               return (
                 <div className="home-hero">
                   <div className="eyebrow">
@@ -803,10 +810,8 @@ export default function ProjectClient({
                   </div>
                   <h1>{project.name}</h1>
                   <div className="sub-line">
-                    {(project.city || project.state) && (
-                      <em>{[project.city, project.state].filter(Boolean).join(", ")}</em>
-                    )}
-                    {(project.city || project.state) && primeContractValue > 0 && (
+                    {fullAddress && <em>{fullAddress}</em>}
+                    {fullAddress && primeContractValue > 0 && (
                       <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
                     )}
                     {primeContractValue > 0 && (
@@ -814,7 +819,7 @@ export default function ProjectClient({
                         ${primeContractValue.toLocaleString()} contract
                       </span>
                     )}
-                    {(primeContractValue > 0 || project.city || project.state) && (
+                    {(primeContractValue > 0 || fullAddress) && (
                       <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
                     )}
                     <span style={{ fontFamily: "JetBrains Mono, monospace", textTransform: "capitalize" }}>
@@ -824,16 +829,12 @@ export default function ProjectClient({
                       <>
                         <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
                         <span style={{ fontFamily: "JetBrains Mono, monospace" }}>
-                          SC: {fmtDate((project.actual_start_date || project.start_date)!)}
+                          Start: {fmtDate((project.actual_start_date || project.start_date)!)}
                         </span>
                       </>
                     )}
                   </div>
-                  <div className="row">
-                    <div>
-                      <div className="lbl">Team</div>
-                      <div className="val">{teamRoles.length}</div>
-                    </div>
+                  <div className="row cols-3">
                     <div>
                       <div className="lbl">My open tasks</div>
                       <div className="val">{openTaskAlerts.length}</div>
@@ -1203,6 +1204,11 @@ export default function ProjectClient({
                           <div>
                             <div className="nm">{contactName(contact)}</div>
                             <div className="role">{roleName}</div>
+                            {contact.phone ? (
+                              <a href={`tel:${contact.phone}`} className="ph">{contact.phone}</a>
+                            ) : (
+                              <div className="ph ph-empty">No phone on file</div>
+                            )}
                           </div>
                         </div>
                       ))}

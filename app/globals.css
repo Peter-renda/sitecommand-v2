@@ -1092,6 +1092,13 @@ p           { text-wrap: pretty; }
 }
 .person .nm { font-weight: 600; color: #111827; }
 .person .role { color: #9CA3AF; font-size: 11px; }
+.person .ph {
+  display: block; font-size: 11px; margin-top: 1px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #4B5563; text-decoration: none;
+}
+.person .ph:hover { color: #111827; text-decoration: underline; }
+.person .ph-empty { color: #C4C4C4; font-style: italic; }
 
 /* Cost / schedule impact bar */
 .impact {
@@ -1678,6 +1685,7 @@ p           { text-wrap: pretty; }
   font-size: 22px; color: #F9FAFB; margin-top: 4px;
   font-variant-numeric: tabular-nums;
 }
+.home-hero .row.cols-3 { grid-template-columns: repeat(3, 1fr); }
 
 /* Meeting agenda items */
 .agenda-item {
@@ -1786,7 +1794,8 @@ p           { text-wrap: pretty; }
   .weather > div:nth-child(-n+2) { border-bottom: 1px solid rgba(0,0,0,0.04); }
 
   /* Home-hero pill row: 4-up → 2-up */
-  .home-hero .row { grid-template-columns: repeat(2, 1fr); }
+  .home-hero .row,
+  .home-hero .row.cols-3 { grid-template-columns: repeat(2, 1fr); }
 
   /* Detail page: drop the right rail under the main content */
   .detail-wrap {

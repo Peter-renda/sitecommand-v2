@@ -12,6 +12,7 @@ type ProjectAdmin = {
   project_number: string | null;
   status: string | null;
   sector: string | null;
+  work_scope: string | null;
   address: string | null;
   city: string | null;
   state: string | null;
@@ -23,6 +24,12 @@ type ProjectAdmin = {
   projected_finish_date: string | null;
   warranty_start_date: string | null;
   warranty_end_date: string | null;
+  erp_sync: boolean | null;
+  erp_job_cost_sync: boolean | null;
+  prevent_overbilling: boolean | null;
+  non_commitment_costs: boolean | null;
+  test_project: boolean | null;
+  sage_300_id: string | null;
 };
 
 type ProjectMember = {
@@ -40,6 +47,31 @@ type CompanyUser = {
 };
 
 const STAGES = ["Bidding", "Course of Construction", "Post-Construction", "Pre-Construction", "Warranty"];
+
+// Keep in sync with the "Sector" dropdown on the new-project form (DashboardClient.tsx).
+const SECTORS = [
+  "Residential",
+  "Commercial",
+  "Industrial",
+  "Institutional",
+  "Heavy Civil / Infrastructure",
+  "Energy & Utilities",
+  "Telecom",
+  "Renovation",
+  "Mixed-Use",
+  "Hospitality",
+  "Healthcare",
+  "Education",
+  "Transportation",
+  "Federal / Government",
+  "Sports & Entertainment",
+  "Agricultural",
+  "Mining",
+  "Oil & Gas",
+  "Life Sciences / Pharmaceutical",
+];
+
+const WORK_SCOPES = ["Commercial", "Residential", "Industrial"];
 
 const ADMIN_SECTIONS = [
   { id: "general-information", label: "General Information" },
@@ -178,6 +210,7 @@ export default function AdminClient({
   const [projectNumber, setProjectNumber] = useState("");
   const [description, setDescription] = useState("");
   const [sector, setSector] = useState("");
+  const [workScope, setWorkScope] = useState("");
 
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
@@ -191,6 +224,13 @@ export default function AdminClient({
   const [projectedFinishDate, setProjectedFinishDate] = useState("");
   const [warrantyStartDate, setWarrantyStartDate] = useState("");
   const [warrantyEndDate, setWarrantyEndDate] = useState("");
+
+  const [erpSync, setErpSync] = useState(false);
+  const [erpJobCostSync, setErpJobCostSync] = useState(false);
+  const [preventOverbilling, setPreventOverbilling] = useState(false);
+  const [nonCommitmentCosts, setNonCommitmentCosts] = useState(false);
+  const [testProject, setTestProject] = useState(false);
+  const [sage300Id, setSage300Id] = useState("");
 
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
@@ -226,6 +266,7 @@ export default function AdminClient({
         setProjectNumber(d.project_number ?? "");
         setDescription(d.description ?? "");
         setSector(d.sector ?? "");
+        setWorkScope(d.work_scope ?? "");
         setAddress(d.address ?? "");
         setCity(d.city ?? "");
         setStateVal(d.state ?? "");
@@ -237,6 +278,12 @@ export default function AdminClient({
         setProjectedFinishDate(d.projected_finish_date ?? "");
         setWarrantyStartDate(d.warranty_start_date ?? "");
         setWarrantyEndDate(d.warranty_end_date ?? "");
+        setErpSync(d.erp_sync ?? false);
+        setErpJobCostSync(d.erp_job_cost_sync ?? false);
+        setPreventOverbilling(d.prevent_overbilling ?? false);
+        setNonCommitmentCosts(d.non_commitment_costs ?? false);
+        setTestProject(d.test_project ?? false);
+        setSage300Id(d.sage_300_id ?? "");
         setLoading(false);
       });
   }, [projectId]);
@@ -329,6 +376,7 @@ export default function AdminClient({
         project_number: projectNumber,
         status: stage,
         sector,
+        work_scope: workScope,
         address,
         city,
         state: stateVal,
@@ -340,6 +388,12 @@ export default function AdminClient({
         projected_finish_date: projectedFinishDate || null,
         warranty_start_date: warrantyStartDate || null,
         warranty_end_date: warrantyEndDate || null,
+        erp_sync: erpSync,
+        erp_job_cost_sync: erpJobCostSync,
+        prevent_overbilling: preventOverbilling,
+        non_commitment_costs: nonCommitmentCosts,
+        test_project: testProject,
+        sage_300_id: sage300Id,
       }),
     });
     if (res.ok) {
@@ -447,16 +501,24 @@ export default function AdminClient({
                       />
                     </Field>
 
-                    <Field label="Project ID">
-                      <TextInput value={data?.id ?? ""} readOnly />
-                    </Field>
-
                     <Field label="Work Scope">
-                      <SelectInput value="" placeholder="Select work scope" options={["Commercial", "Residential", "Industrial"]} disabled />
+                      <SelectInput
+                        value={workScope}
+                        onChange={isAdmin ? setWorkScope : undefined}
+                        placeholder="Select work scope"
+                        options={workScope && !WORK_SCOPES.includes(workScope) ? [workScope, ...WORK_SCOPES] : WORK_SCOPES}
+                        disabled={!isAdmin}
+                      />
                     </Field>
 
                     <Field label="Project Sector">
-                      <TextInput value={sector} onChange={isAdmin ? setSector : undefined} readOnly={!isAdmin} placeholder="Sector" />
+                      <SelectInput
+                        value={sector}
+                        onChange={isAdmin ? setSector : undefined}
+                        placeholder="Select a sector"
+                        options={sector && !SECTORS.includes(sector) ? [sector, ...SECTORS] : SECTORS}
+                        disabled={!isAdmin}
+                      />
                     </Field>
 
                     <div className="col-span-2">
@@ -527,14 +589,33 @@ export default function AdminClient({
                 <SectionCard id="erp-integration" title="ERP Integration">
                   <div className="space-y-4">
                     <label className="flex items-center gap-3 text-sm text-[color:var(--ink)]">
-                      <input type="checkbox" className="h-5 w-5 accent-[color:var(--ink)]" checked readOnly /> ERP-sync this project
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5 accent-[color:var(--ink)]"
+                        checked={erpSync}
+                        onChange={(e) => isAdmin && setErpSync(e.target.checked)}
+                        disabled={!isAdmin}
+                      />{" "}
+                      ERP-sync this project
                     </label>
                     <label className="flex items-center gap-3 text-sm text-[color:var(--ink)]">
-                      <input type="checkbox" className="h-5 w-5 accent-[color:var(--ink)]" readOnly /> Enable ERP Job Cost Transaction Syncing
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5 accent-[color:var(--ink)]"
+                        checked={erpJobCostSync}
+                        onChange={(e) => isAdmin && setErpJobCostSync(e.target.checked)}
+                        disabled={!isAdmin}
+                      />{" "}
+                      Enable ERP Job Cost Transaction Syncing
                     </label>
                     <div className="max-w-xl">
                       <Field label="Sage 300 ID:">
-                        <TextInput value={projectNumber} readOnly />
+                        <TextInput
+                          value={sage300Id}
+                          onChange={isAdmin ? setSage300Id : undefined}
+                          readOnly={!isAdmin}
+                          placeholder="Enter Sage 300 ID"
+                        />
                       </Field>
                     </div>
                   </div>
@@ -554,14 +635,35 @@ export default function AdminClient({
                     </div>
 
                     <label className="flex items-center gap-3 text-base text-gray-900">
-                      <input type="checkbox" className="h-5 w-5" checked readOnly /> Prevent Overbilling on this Project
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5"
+                        checked={preventOverbilling}
+                        onChange={(e) => isAdmin && setPreventOverbilling(e.target.checked)}
+                        disabled={!isAdmin}
+                      />{" "}
+                      Prevent Overbilling on this Project
                     </label>
                     <label className="flex items-center gap-3 text-base text-gray-900">
-                      <input type="checkbox" className="h-5 w-5" readOnly /> Non-Commitment Costs
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5"
+                        checked={nonCommitmentCosts}
+                        onChange={(e) => isAdmin && setNonCommitmentCosts(e.target.checked)}
+                        disabled={!isAdmin}
+                      />{" "}
+                      Non-Commitment Costs
                     </label>
 
                     <label className="col-span-2 flex items-center gap-3 text-base text-gray-900">
-                      <input type="checkbox" className="h-5 w-5" readOnly /> Test Project
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5"
+                        checked={testProject}
+                        onChange={(e) => isAdmin && setTestProject(e.target.checked)}
+                        disabled={!isAdmin}
+                      />{" "}
+                      Test Project
                     </label>
                   </div>
                 </SectionCard>
