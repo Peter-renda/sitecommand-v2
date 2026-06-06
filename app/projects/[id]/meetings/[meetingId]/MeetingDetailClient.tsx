@@ -631,6 +631,18 @@ export default function MeetingDetailClient({
           </div>
         )}
 
+        {activeTab === "emails" && (
+          <div className="py-16 text-center">
+            <p className="text-sm text-gray-400">Email activity feed is coming soon.</p>
+          </div>
+        )}
+
+        {activeTab === "history" && (
+          <div className="py-16 text-center">
+            <p className="text-sm text-gray-400">Change history is coming soon.</p>
+          </div>
+        )}
+
         {activeTab === "details" && <div className="space-y-4 max-w-7xl">
           {/* ── Meeting Information ──────────────────────────────────────── */}
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">

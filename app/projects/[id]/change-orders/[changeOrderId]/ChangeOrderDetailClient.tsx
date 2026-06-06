@@ -187,7 +187,7 @@ export default function ChangeOrderDetailClient({
   const [fieldChange, setFieldChange] = useState(false);
   const [paidInFull, setPaidInFull] = useState(false);
   const [includedPotentialRows, setIncludedPotentialRows] = useState<IncludedPotentialRow[]>([]);
-  const [activeTab, setActiveTab] = useState<"general" | "related_items">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "related_items" | "emails">("general");
   const [relatedItems, setRelatedItems] = useState<RelatedItem[]>([]);
   const [relatedItemsLoading, setRelatedItemsLoading] = useState(false);
   const [newItemType, setNewItemType] = useState("");
@@ -683,6 +683,16 @@ export default function ChangeOrderDetailClient({
           >
             Related Items{relatedItems.length > 0 ? ` (${relatedItems.length})` : ""}
           </button>
+          <button
+            onClick={() => setActiveTab("emails")}
+            className={`py-2 px-1 text-sm font-medium border-b-2 -mb-px ${
+              activeTab === "emails"
+                ? "text-gray-900 border-orange-500"
+                : "text-gray-500 border-transparent hover:text-gray-700"
+            }`}
+          >
+            Emails
+          </button>
         </div>
 
         {/* Related Items tab */}
@@ -792,6 +802,13 @@ export default function ChangeOrderDetailClient({
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Emails tab */}
+        {activeTab === "emails" && (
+          <div className="flex-1 overflow-y-auto px-6 py-16 text-center">
+            <p className="text-sm text-gray-400">Email activity feed is coming soon.</p>
           </div>
         )}
 
