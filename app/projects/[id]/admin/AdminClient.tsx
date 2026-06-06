@@ -198,6 +198,7 @@ export default function AdminClient({
   username: string;
 }) {
   const isAdmin = role === "admin" || role === "super_admin";
+  const isSuperAdmin = role === "super_admin";
 
   const [data, setData] = useState<ProjectAdmin | null>(null);
   const [loading, setLoading] = useState(true);
@@ -588,13 +589,16 @@ export default function AdminClient({
 
                 <SectionCard id="erp-integration" title="ERP Integration">
                   <div className="space-y-4">
+                    {isAdmin && !isSuperAdmin ? (
+                      <p className="text-xs text-gray-500">Only Company Super Admins can change ERP integration settings.</p>
+                    ) : null}
                     <label className="flex items-center gap-3 text-sm text-[color:var(--ink)]">
                       <input
                         type="checkbox"
                         className="h-5 w-5 accent-[color:var(--ink)]"
                         checked={erpSync}
-                        onChange={(e) => isAdmin && setErpSync(e.target.checked)}
-                        disabled={!isAdmin}
+                        onChange={(e) => isSuperAdmin && setErpSync(e.target.checked)}
+                        disabled={!isSuperAdmin}
                       />{" "}
                       ERP-sync this project
                     </label>
@@ -603,8 +607,8 @@ export default function AdminClient({
                         type="checkbox"
                         className="h-5 w-5 accent-[color:var(--ink)]"
                         checked={erpJobCostSync}
-                        onChange={(e) => isAdmin && setErpJobCostSync(e.target.checked)}
-                        disabled={!isAdmin}
+                        onChange={(e) => isSuperAdmin && setErpJobCostSync(e.target.checked)}
+                        disabled={!isSuperAdmin}
                       />{" "}
                       Enable ERP Job Cost Transaction Syncing
                     </label>
@@ -612,8 +616,8 @@ export default function AdminClient({
                       <Field label="Sage 300 ID:">
                         <TextInput
                           value={sage300Id}
-                          onChange={isAdmin ? setSage300Id : undefined}
-                          readOnly={!isAdmin}
+                          onChange={isSuperAdmin ? setSage300Id : undefined}
+                          readOnly={!isSuperAdmin}
                           placeholder="Enter Sage 300 ID"
                         />
                       </Field>
@@ -634,13 +638,17 @@ export default function AdminClient({
                       </Field>
                     </div>
 
+                    {isAdmin && !isSuperAdmin ? (
+                      <p className="col-span-2 text-xs text-gray-500">Only Company Super Admins can change the settings below.</p>
+                    ) : null}
+
                     <label className="flex items-center gap-3 text-base text-gray-900">
                       <input
                         type="checkbox"
                         className="h-5 w-5"
                         checked={preventOverbilling}
-                        onChange={(e) => isAdmin && setPreventOverbilling(e.target.checked)}
-                        disabled={!isAdmin}
+                        onChange={(e) => isSuperAdmin && setPreventOverbilling(e.target.checked)}
+                        disabled={!isSuperAdmin}
                       />{" "}
                       Prevent Overbilling on this Project
                     </label>
@@ -649,8 +657,8 @@ export default function AdminClient({
                         type="checkbox"
                         className="h-5 w-5"
                         checked={nonCommitmentCosts}
-                        onChange={(e) => isAdmin && setNonCommitmentCosts(e.target.checked)}
-                        disabled={!isAdmin}
+                        onChange={(e) => isSuperAdmin && setNonCommitmentCosts(e.target.checked)}
+                        disabled={!isSuperAdmin}
                       />{" "}
                       Non-Commitment Costs
                     </label>
@@ -660,8 +668,8 @@ export default function AdminClient({
                         type="checkbox"
                         className="h-5 w-5"
                         checked={testProject}
-                        onChange={(e) => isAdmin && setTestProject(e.target.checked)}
-                        disabled={!isAdmin}
+                        onChange={(e) => isSuperAdmin && setTestProject(e.target.checked)}
+                        disabled={!isSuperAdmin}
                       />{" "}
                       Test Project
                     </label>
