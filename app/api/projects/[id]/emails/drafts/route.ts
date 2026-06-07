@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { getValidToken, createOutlookDraft } from "@/lib/microsoft-graph";
+import { createActiveDraft } from "@/lib/email-connection";
 
 export async function POST(
   req: NextRequest,
@@ -33,8 +33,7 @@ export async function POST(
   }
 
   try {
-    const accessToken = await getValidToken(session.id);
-    const draft = await createOutlookDraft(accessToken, {
+    const draft = await createActiveDraft(session.id, {
       to,
       subject,
       body: emailBody,
@@ -42,7 +41,11 @@ export async function POST(
     return NextResponse.json({ draftId: draft.id });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message === "No Outlook connection found") {
+    if (
+      message === "No email connection found" ||
+      message === "No Outlook connection found" ||
+      message === "No Gmail connection found"
+    ) {
       return NextResponse.json({ error: "not_connected" }, { status: 403 });
     }
     return NextResponse.json({ error: message }, { status: 500 });

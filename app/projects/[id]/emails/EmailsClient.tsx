@@ -5,10 +5,18 @@ import ProjectNav from "@/components/ProjectNav";
 import { SkeletonTable } from "@/app/components/Skeleton";
 import type { GraphMessage } from "@/lib/microsoft-graph";
 
+type EmailProvider = "outlook" | "gmail";
+
 type ConnectionInfo = {
   connected: boolean;
+  provider?: EmailProvider;
   email?: string;
   displayName?: string;
+};
+
+const PROVIDER_LABEL: Record<EmailProvider, string> = {
+  outlook: "Outlook",
+  gmail: "Gmail",
 };
 
 type LinkedThread = {
@@ -157,8 +165,10 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
             {connection.connected ? (
               <>
                 <span>
-                  Connected as <strong>{connection.displayName || connection.email}</strong>{" "}
-                  ({connection.email})
+                  Connected to{" "}
+                  <strong>{connection.provider ? PROVIDER_LABEL[connection.provider] : "email"}</strong>{" "}
+                  as <strong>{connection.displayName || connection.email}</strong>
+                  {connection.email ? ` (${connection.email})` : ""}
                 </span>
                 <button onClick={disconnect} className="text-xs underline ml-4 hover:opacity-80">
                   Disconnect
@@ -166,13 +176,21 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
               </>
             ) : (
               <>
-                <span>Connect your Outlook account to link email threads to this project.</span>
-                <a
-                  href={`/api/auth/outlook/connect?projectId=${projectId}`}
-                  className="ml-4 px-3 py-1.5 text-xs font-medium bg-amber-800 text-white rounded hover:bg-amber-900 transition-colors"
-                >
-                  Connect Outlook
-                </a>
+                <span>Connect an email account to link threads to this project.</span>
+                <span className="ml-4 flex items-center gap-2">
+                  <a
+                    href={`/api/auth/outlook/connect?projectId=${projectId}`}
+                    className="px-3 py-1.5 text-xs font-medium bg-[#0078D4] text-white rounded hover:opacity-90 transition-opacity"
+                  >
+                    Connect Outlook
+                  </a>
+                  <a
+                    href={`/api/auth/google/connect?projectId=${projectId}`}
+                    className="px-3 py-1.5 text-xs font-medium bg-[#EA4335] text-white rounded hover:opacity-90 transition-opacity"
+                  >
+                    Connect Gmail
+                  </a>
+                </span>
               </>
             )}
           </div>
@@ -195,8 +213,8 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
             <p className="text-sm font-medium text-gray-500 mb-1">No email threads linked yet</p>
             <p className="text-xs text-gray-400">
               {connection?.connected
-                ? 'Click "Link Email Thread" to attach Outlook conversations to this project.'
-                : "Connect your Outlook account to get started."}
+                ? 'Click "Link Email Thread" to attach conversations to this project.'
+                : "Connect an Outlook or Gmail account to get started."}
             </p>
           </div>
         ) : (

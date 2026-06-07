@@ -1,44 +1,44 @@
 /**
- * GET  /api/emails/connection  — check whether the current user has Outlook connected
- * DELETE /api/emails/connection — disconnect (removes tokens and all thread links)
+ * GET    /api/emails/connection  — return the user's active email connection
+ *                                   (Outlook or Gmail), if any.
+ * DELETE /api/emails/connection  — disconnect. Pass ?provider=outlook|gmail to
+ *                                   remove a specific one; otherwise removes all.
  */
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
+import { getActiveEmailConnection } from "@/lib/email-connection";
 
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const supabase = getSupabase();
-  const { data } = await supabase
-    .from("user_email_connections")
-    .select("ms_user_email, ms_user_display_name, sync_mode, created_at")
-    .eq("user_id", session.id)
-    .eq("provider", "outlook")
-    .single();
-
-  if (!data) return NextResponse.json({ connected: false });
+  const conn = await getActiveEmailConnection(session.id);
+  if (!conn) return NextResponse.json({ connected: false });
 
   return NextResponse.json({
     connected: true,
-    email: data.ms_user_email,
-    displayName: data.ms_user_display_name,
-    syncMode: data.sync_mode,
+    provider: conn.provider,
+    email: conn.email,
+    displayName: conn.displayName,
+    syncMode: conn.syncMode,
   });
 }
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const { searchParams } = new URL(req.url);
+  const provider = searchParams.get("provider");
+
   const supabase = getSupabase();
-  await supabase
-    .from("user_email_connections")
-    .delete()
-    .eq("user_id", session.id)
-    .eq("provider", "outlook");
+  let query = supabase.from("user_email_connections").delete().eq("user_id", session.id);
+  if (provider === "outlook" || provider === "gmail") {
+    query = query.eq("provider", provider);
+  }
+  await query;
 
   return NextResponse.json({ disconnected: true });
 }
