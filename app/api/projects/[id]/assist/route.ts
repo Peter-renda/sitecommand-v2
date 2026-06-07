@@ -20,6 +20,7 @@ const TABLES: Array<{ label: string; table: string; idCol?: string }> = [
   { label: "RFI Responses", table: "rfi_responses" },
   { label: "Submittals", table: "submittals" },
   { label: "Submittal Responses", table: "submittal_responses" },
+  { label: "Submittal Packages", table: "submittal_packages" },
   { label: "Daily Logs", table: "daily_logs" },
   { label: "Meetings", table: "meetings" },
   { label: "Tasks", table: "tasks" },
@@ -29,11 +30,25 @@ const TABLES: Array<{ label: string; table: string; idCol?: string }> = [
   { label: "Scope of Work", table: "scope_items" },
   { label: "Change Orders", table: "change_orders" },
   { label: "Change Events", table: "change_events" },
+  { label: "Change Event RFQs", table: "change_event_rfqs" },
   { label: "Project Schedules", table: "project_schedules" },
   { label: "Specifications", table: "project_specifications" },
   { label: "Photos", table: "project_photos" },
   { label: "Drawing Uploads", table: "drawing_uploads" },
   { label: "Drawing Pages", table: "project_drawings" },
+  { label: "Emails", table: "project_email_threads" },
+  { label: "Punch List", table: "punch_list_items" },
+  { label: "Transaction Orders", table: "project_transaction_orders" },
+  { label: "Transmittals", table: "transmittals" },
+  { label: "Timesheets", table: "timesheets" },
+  { label: "Timesheet Entries", table: "timesheet_entries" },
+  { label: "Permit Applications", table: "project_permit_applications" },
+  { label: "Quick Notes", table: "quick_notes" },
+  { label: "Bid Packages", table: "bid_packages" },
+  { label: "Bids", table: "bids" },
+  { label: "Preconstruction Milestones", table: "preconstruction_milestones" },
+  { label: "Estimate Items", table: "estimate_items" },
+  { label: "Directory Contacts", table: "directory_contacts" },
 ];
 
 const SKIP_KEYS = new Set([
@@ -45,6 +60,10 @@ const SKIP_KEYS = new Set([
   "user_id",
   "uploaded_by_id",
   "storage_path",
+  "source_storage_path",
+  "final_storage_path",
+  "invoice_storage_path",
+  "graph_conversation_id",
   "url",
   "file_url",
   "page_image_path",
@@ -355,7 +374,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     ? uploaded.map((f) => `- [${f.fileId}] ${f.description}: ${f.filename}`).join("\n")
     : "(no files attached)";
 
-  const systemInstruction = `You are SiteCommand Assist, an AI assistant embedded inside a construction project management platform. You answer questions by searching across the project's records (RFIs, submittals, daily logs, meetings, tasks, contracts, budgets, commitments, change orders, change events, schedules, specifications, photos, drawings) and any attached files (drawings, spec book, RFI/submittal attachments, project documents).
+  const systemInstruction = `You are SiteCommand Assist, an AI assistant embedded inside a construction project management platform. You answer questions by searching across the project's records (RFIs, submittals, daily logs, meetings, tasks, contracts, budgets, commitments, change orders, change events, schedules, specifications, photos, drawings, emails, punch list, transaction orders, transmittals, timesheets, permit applications, quick notes, bid packages, bids, preconstruction milestones, estimates, directory contacts) and any attached files (drawings, spec book, RFI/submittal attachments, project documents).
 
 Rules:
 - Ground every answer in the provided project data and attached files. Quote relevant record fields or file content when useful.
