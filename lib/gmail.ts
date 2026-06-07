@@ -1,16 +1,21 @@
 import { getSupabase } from "./supabase";
-import type { GraphMessage } from "./microsoft-graph";
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
-export const GMAIL_SCOPES =
-  "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose openid email profile";
+export interface GmailMessage {
+  id: string;
+  subject: string;
+  bodyPreview: string;
+  conversationId: string; // Gmail threadId
+  isRead: boolean;
+  hasAttachments: boolean;
+  receivedDateTime: string;
+  from: { emailAddress: { name: string; address: string } };
+  toRecipients: { emailAddress: { name: string; address: string } }[];
+}
 
-/**
- * Returns a valid Google access token for the given user, refreshing if it
- * will expire within the next 5 minutes. Throws if no connection exists.
- */
+/** Returns a valid Gmail access token, refreshing if within 5 min of expiry. */
 export async function getValidGmailToken(userId: string): Promise<string> {
   const supabase = getSupabase();
   const { data: conn } = await supabase
@@ -27,7 +32,7 @@ export async function getValidGmailToken(userId: string): Promise<string> {
 
   if (expiresAt > nowPlus5m) return conn.access_token;
 
-  // Token is stale — refresh it
+  // Refresh
   const res = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -41,7 +46,7 @@ export async function getValidGmailToken(userId: string): Promise<string> {
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Token refresh failed: ${body}`);
+    throw new Error(`Gmail token refresh failed: ${body}`);
   }
 
   const json = (await res.json()) as {
@@ -56,7 +61,6 @@ export async function getValidGmailToken(userId: string): Promise<string> {
     .from("user_email_connections")
     .update({
       access_token: json.access_token,
-      // Google only returns a refresh_token on first consent; keep the old one.
       refresh_token: json.refresh_token ?? conn.refresh_token,
       token_expires_at: newExpiry,
       updated_at: new Date().toISOString(),
@@ -67,106 +71,72 @@ export async function getValidGmailToken(userId: string): Promise<string> {
   return json.access_token;
 }
 
-/** Parses an RFC 5322 address header into a name/address pair. */
-function parseAddress(raw: string | undefined): { name: string; address: string } {
-  if (!raw) return { name: "", address: "" };
-  const match = raw.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
-  if (match) return { name: match[1].trim(), address: match[2].trim() };
-  return { name: "", address: raw.trim() };
+function parseHeader(headers: { name: string; value: string }[], name: string) {
+  return headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? "";
 }
 
-function parseAddressList(raw: string | undefined): { emailAddress: { name: string; address: string } }[] {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((part) => parseAddress(part))
-    .filter((a) => a.address)
-    .map((a) => ({ emailAddress: a }));
-}
-
-interface GmailMessageMeta {
-  id: string;
-  threadId: string;
-  snippet?: string;
-  internalDate?: string;
-  labelIds?: string[];
-  payload?: { headers?: { name: string; value: string }[] };
-}
-
-function headerValue(meta: GmailMessageMeta, name: string): string | undefined {
-  return meta.payload?.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value;
-}
-
-/**
- * Fetches the most recent inbox messages for the authenticated user and maps
- * them into the same shape used by the Outlook integration so the UI can stay
- * provider-agnostic.
- */
-export async function fetchGmailInbox(accessToken: string): Promise<GraphMessage[]> {
+/** Fetches the 25 most recent inbox messages. */
+export async function fetchGmailMessages(accessToken: string): Promise<GmailMessage[]> {
+  // Step 1: list message IDs
   const listRes = await fetch(
-    `${GMAIL_BASE}/messages?maxResults=30&labelIds=INBOX`,
+    `${GMAIL_BASE}/messages?maxResults=25&labelIds=INBOX`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
+  if (!listRes.ok) throw new Error(`Gmail list failed: ${listRes.status}`);
+  const list = await listRes.json() as { messages?: { id: string; threadId: string }[] };
+  if (!list.messages?.length) return [];
 
-  if (!listRes.ok) {
-    const body = await listRes.text();
-    throw new Error(`Gmail list failed: ${listRes.status} ${body}`);
-  }
-
-  const list = (await listRes.json()) as { messages?: { id: string; threadId: string }[] };
-  const ids = (list.messages ?? []).map((m) => m.id);
-
-  const headers = "metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date";
-  const metas = await Promise.all(
-    ids.map(async (id) => {
-      const res = await fetch(`${GMAIL_BASE}/messages/${id}?format=metadata&${headers}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (!res.ok) return null;
-      return (await res.json()) as GmailMessageMeta;
-    })
+  // Step 2: fetch metadata for each in parallel
+  const metadataResults = await Promise.all(
+    list.messages.map((m) =>
+      fetch(
+        `${GMAIL_BASE}/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      ).then((r) => r.json())
+    )
   );
 
-  return metas
-    .filter((m): m is GmailMessageMeta => m !== null)
-    .map((m) => {
-      const received = m.internalDate
-        ? new Date(Number(m.internalDate)).toISOString()
-        : new Date().toISOString();
-      return {
-        id: m.id,
-        subject: headerValue(m, "Subject") ?? "",
-        bodyPreview: m.snippet ?? "",
-        conversationId: m.threadId,
-        isRead: !(m.labelIds ?? []).includes("UNREAD"),
-        hasAttachments: false,
-        receivedDateTime: received,
-        from: { emailAddress: parseAddress(headerValue(m, "From")) },
-        toRecipients: parseAddressList(headerValue(m, "To")),
-      } satisfies GraphMessage;
-    });
+  return metadataResults.map((msg: any) => {
+    const headers: { name: string; value: string }[] = msg.payload?.headers ?? [];
+    const from = parseHeader(headers, "From");
+    const nameMatch = from.match(/^(.*?)\s*<(.+)>$/);
+    const fromName = nameMatch ? nameMatch[1].replace(/"/g, "").trim() : from;
+    const fromEmail = nameMatch ? nameMatch[2] : from;
+    const dateStr = parseHeader(headers, "Date");
+
+    return {
+      id: msg.id,
+      subject: parseHeader(headers, "Subject") || "(no subject)",
+      bodyPreview: msg.snippet ?? "",
+      conversationId: msg.threadId,
+      isRead: !(msg.labelIds ?? []).includes("UNREAD"),
+      hasAttachments: false,
+      receivedDateTime: dateStr ? new Date(dateStr).toISOString() : new Date().toISOString(),
+      from: { emailAddress: { name: fromName, address: fromEmail } },
+      toRecipients: [],
+    };
+  });
 }
 
-/**
- * Creates a draft message in the user's Gmail Drafts folder.
- * SiteCommand never sends on the user's behalf — the draft appears in Gmail
- * for the user to review and send. Returns the Gmail draft id.
- */
+/** Creates a draft in the user's Gmail Drafts folder. */
 export async function createGmailDraft(
   accessToken: string,
   opts: { to: { email: string; name?: string }; subject: string; body: string }
 ): Promise<{ id: string }> {
-  const toHeader = opts.to.name ? `${opts.to.name} <${opts.to.email}>` : opts.to.email;
-  const mime = [
+  const toHeader = opts.to.name
+    ? `"${opts.to.name}" <${opts.to.email}>`
+    : opts.to.email;
+
+  const raw = [
     `To: ${toHeader}`,
     `Subject: ${opts.subject}`,
-    "MIME-Version: 1.0",
-    'Content-Type: text/html; charset="UTF-8"',
-    "",
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset=UTF-8`,
+    ``,
     opts.body,
   ].join("\r\n");
 
-  const raw = Buffer.from(mime, "utf-8").toString("base64url");
+  const encoded = Buffer.from(raw).toString("base64url");
 
   const res = await fetch(`${GMAIL_BASE}/drafts`, {
     method: "POST",
@@ -174,7 +144,7 @@ export async function createGmailDraft(
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ message: { raw } }),
+    body: JSON.stringify({ message: { raw: encoded } }),
   });
 
   if (!res.ok) {
