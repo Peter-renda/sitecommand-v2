@@ -28,6 +28,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const body = await req.json();
+  const isSuperAdmin = session.company_role === "super_admin";
 
   const allowed = [
     "name", "description", "project_number", "status", "sector", "work_scope",
@@ -38,13 +39,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     "non_commitment_costs", "test_project", "sage_300_id",
   ];
 
+  // ERP integration + advanced project flags are editable by Company Super Admins only.
+  const superAdminOnly = new Set([
+    "erp_sync", "erp_job_cost_sync", "prevent_overbilling",
+    "non_commitment_costs", "test_project", "sage_300_id",
+  ]);
+
   const update: Record<string, unknown> = {};
   for (const key of allowed) {
-    if (key in body) {
-      const value = body[key];
-      // Preserve boolean false; for other fields normalize empty strings to null.
-      update[key] = typeof value === "boolean" ? value : value || null;
-    }
+    if (!(key in body)) continue;
+    if (superAdminOnly.has(key) && !isSuperAdmin) continue;
+    const value = body[key];
+    // Preserve boolean false; for other fields normalize empty strings to null.
+    update[key] = typeof value === "boolean" ? value : value || null;
   }
 
   const supabase = getSupabase();

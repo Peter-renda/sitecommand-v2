@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
+import { getActiveEmailConnection } from "@/lib/email-connection";
 
 export async function GET() {
   const session = await getSession();

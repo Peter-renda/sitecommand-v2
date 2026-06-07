@@ -1,7 +1,8 @@
--- Per-user Outlook / Microsoft 365 OAuth connections.
--- One row per user per provider (currently only 'outlook').
--- Tokens are stored in plain text; encrypt at the application layer if
--- your compliance requirements demand it.
+-- Per-user email provider OAuth connections (Outlook / Microsoft 365 and Gmail).
+-- One row per user per provider ('outlook' or 'gmail').
+-- The ms_user_* columns hold the connected account's email and display name
+-- regardless of provider. Tokens are stored in plain text; encrypt at the
+-- application layer if your compliance requirements demand it.
 
 CREATE TABLE IF NOT EXISTS user_email_connections (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),

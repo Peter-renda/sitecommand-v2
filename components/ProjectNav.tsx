@@ -26,6 +26,9 @@ function isToolEnabled(slug: string, enabledFeatures: string[] | null | undefine
   // company allowlists were created, so default to visible unless explicitly
   // removed through project/user tool permissions.
   if (slug === "permit-applications") return true;
+  // Core Tools → Emails launched after existing company allowlists were
+  // created, so it shows everywhere by default until allowlists are updated.
+  if (slug === "emails") return true;
   if (!enabledFeatures) return true;
   if (enabledFeatures.includes(slug)) return true;
   // Backward compatibility: existing companies with feature allowlists often enabled
