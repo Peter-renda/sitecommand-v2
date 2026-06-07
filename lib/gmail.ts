@@ -3,6 +3,13 @@ import { getSupabase } from "./supabase";
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
+export const GMAIL_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.compose",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+].join(" ");
+
 export interface GmailMessage {
   id: string;
   subject: string;
@@ -116,6 +123,37 @@ export async function fetchGmailMessages(accessToken: string): Promise<GmailMess
       toRecipients: [],
     };
   });
+}
+
+/** Sends an email directly through Gmail (requires gmail.compose or gmail.send scope). */
+export async function sendGmailEmail(
+  accessToken: string,
+  opts: { to: string; subject: string; body: string; cc?: string[] }
+): Promise<void> {
+  const rawParts = [
+    `To: ${opts.to}`,
+    `Subject: ${opts.subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/plain; charset=UTF-8`,
+  ];
+  if (opts.cc?.length) rawParts.push(`Cc: ${opts.cc.join(", ")}`);
+  rawParts.push("", opts.body);
+
+  const encoded = Buffer.from(rawParts.join("\r\n")).toString("base64url");
+
+  const res = await fetch(`${GMAIL_BASE}/messages/send`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ raw: encoded }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gmail send failed: ${res.status} ${body}`);
+  }
 }
 
 /** Creates a draft in the user's Gmail Drafts folder. */

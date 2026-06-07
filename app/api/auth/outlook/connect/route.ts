@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 
 const MS_AUTH_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
-const SCOPES = "Mail.Read Mail.ReadWrite offline_access User.Read";
+const SCOPES = "Mail.Read Mail.ReadWrite Mail.Send offline_access User.Read";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();

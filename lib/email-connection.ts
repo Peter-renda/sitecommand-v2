@@ -1,6 +1,6 @@
 import { getSupabase } from "./supabase";
-import { getValidToken, fetchInboxMessages, createOutlookDraft, type GraphMessage } from "./microsoft-graph";
-import { getValidGmailToken, fetchGmailInbox, createGmailDraft } from "./gmail";
+import { getValidToken, fetchInboxMessages, createOutlookDraft, sendOutlookEmail, type GraphMessage } from "./microsoft-graph";
+import { getValidGmailToken, fetchGmailMessages, createGmailDraft, sendGmailEmail } from "./gmail";
 
 export type EmailProvider = "outlook" | "gmail";
 
@@ -43,7 +43,7 @@ export async function fetchActiveInbox(userId: string): Promise<GraphMessage[]> 
 
   if (conn.provider === "gmail") {
     const token = await getValidGmailToken(userId);
-    return fetchGmailInbox(token);
+    return fetchGmailMessages(token) as unknown as GraphMessage[];
   }
   const token = await getValidToken(userId);
   return fetchInboxMessages(token);
@@ -63,4 +63,20 @@ export async function createActiveDraft(
   }
   const token = await getValidToken(userId);
   return createOutlookDraft(token, opts);
+}
+
+/** Sends an email using whichever provider the user has connected. */
+export async function sendActiveEmail(
+  userId: string,
+  opts: { to: string; subject: string; body: string; cc?: string[] }
+): Promise<void> {
+  const conn = await getActiveEmailConnection(userId);
+  if (!conn) throw new Error("No email connection found");
+
+  if (conn.provider === "gmail") {
+    const token = await getValidGmailToken(userId);
+    return sendGmailEmail(token, opts);
+  }
+  const token = await getValidToken(userId);
+  return sendOutlookEmail(token, opts);
 }

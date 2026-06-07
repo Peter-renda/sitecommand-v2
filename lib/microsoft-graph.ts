@@ -96,6 +96,40 @@ export async function fetchInboxMessages(accessToken: string): Promise<GraphMess
 }
 
 /**
+ * Sends an email through Outlook (requires Mail.Send scope).
+ * If the token lacks Mail.Send, the API will return 403 — reconnect Outlook to grant it.
+ */
+export async function sendOutlookEmail(
+  accessToken: string,
+  opts: { to: string; subject: string; body: string; cc?: string[] }
+): Promise<void> {
+  const res = await fetch(`${GRAPH_BASE}/me/sendMail`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message: {
+        subject: opts.subject,
+        body: { contentType: "Text", content: opts.body },
+        toRecipients: [{ emailAddress: { address: opts.to } }],
+        ccRecipients: (opts.cc ?? []).map((a) => ({ emailAddress: { address: a } })),
+      },
+      saveToSentItems: true,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    if (res.status === 403) {
+      throw new Error("Outlook send permission denied. Please disconnect and reconnect your Outlook account to grant send access.");
+    }
+    throw new Error(`Outlook send failed: ${res.status} ${body}`);
+  }
+}
+
+/**
  * Creates a draft message in the user's Outlook Drafts folder.
  * Returns the Graph message id of the new draft.
  */
