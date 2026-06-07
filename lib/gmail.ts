@@ -32,7 +32,7 @@ export async function getValidGmailToken(userId: string): Promise<string> {
     .eq("provider", "gmail")
     .single();
 
-  if (!conn) throw new Error("No Gmail connection found");
+  if (!conn || !conn.refresh_token) throw new Error("No Gmail connection found");
 
   const expiresAt = new Date(conn.token_expires_at).getTime();
   const nowPlus5m = Date.now() + 5 * 60 * 1000;

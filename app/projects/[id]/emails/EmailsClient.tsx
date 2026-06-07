@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
 import { SkeletonTable } from "@/app/components/Skeleton";
 
@@ -258,6 +259,17 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
 
   const active = connections ? getActiveProvider(connections) : null;
 
+  const searchParams = useSearchParams();
+  const oauthError = searchParams.get("error");
+  const oauthConnected = searchParams.get("connected");
+
+  const oauthErrorMessage: Record<string, string> = {
+    gmail_denied: "Gmail connection was cancelled.",
+    gmail_token_failed: "Failed to exchange the authorisation code — please try again.",
+    gmail_no_refresh_token: "Google did not return a refresh token. Please disconnect and reconnect Gmail.",
+    gmail_invalid_state: "Invalid OAuth state — please try connecting again.",
+  };
+
   return (
     <div className="min-h-screen bg-[#F9FAFB]">
       <ProjectNav projectId={projectId} />
@@ -293,6 +305,18 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
           )}
         </div>
 
+        {/* OAuth result notifications */}
+        {oauthError && (
+          <div className="mb-4 px-4 py-3 rounded-lg border bg-red-50 border-red-200 text-red-800 text-sm">
+            {oauthErrorMessage[oauthError] ?? `Gmail connection failed (${oauthError}). Please try again.`}
+          </div>
+        )}
+        {oauthConnected && !oauthError && (
+          <div className="mb-4 px-4 py-3 rounded-lg border bg-green-50 border-green-200 text-green-800 text-sm">
+            {oauthConnected === "gmail" ? "Gmail" : "Outlook"} account connected successfully.
+          </div>
+        )}
+
         {/* Connection banner */}
         {connections !== null && (
           <div
@@ -327,7 +351,7 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
                     Connect Outlook
                   </a>
                   <a
-                    href={`/api/auth/google/connect?projectId=${projectId}`}
+                    href={`/api/auth/gmail/connect?projectId=${projectId}`}
                     className="px-3 py-1.5 text-xs font-medium bg-[#EA4335] text-white rounded hover:opacity-90 transition-opacity"
                   >
                     Connect Gmail

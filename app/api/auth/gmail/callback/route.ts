@@ -68,6 +68,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${returnBase}?error=gmail_token_failed`);
   }
 
+  if (!tokens.refresh_token) {
+    // Google only issues a refresh_token on first consent. If missing,
+    // the user previously granted access and needs to revoke + re-grant.
+    // prompt=consent in the connect route normally prevents this.
+    return NextResponse.redirect(`${returnBase}?error=gmail_no_refresh_token`);
+  }
+
   // Fetch Google user profile
   let userEmail = "";
   let userDisplayName = "";
@@ -95,8 +102,7 @@ export async function GET(req: NextRequest) {
         ms_user_email: userEmail,
         ms_user_display_name: userDisplayName,
         access_token: tokens.access_token,
-        // Google only sends refresh_token on first consent — keep existing if absent
-        refresh_token: tokens.refresh_token ?? "",
+        refresh_token: tokens.refresh_token,
         token_expires_at: expiresAt,
         updated_at: new Date().toISOString(),
       },
