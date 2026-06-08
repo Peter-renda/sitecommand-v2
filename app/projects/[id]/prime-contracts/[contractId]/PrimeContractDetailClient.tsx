@@ -241,6 +241,8 @@ export default function PrimeContractDetailClient({
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [qbSyncing, setQbSyncing] = useState(false);
+  const [qbSyncMsg, setQbSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
 
@@ -275,6 +277,32 @@ export default function PrimeContractDetailClient({
       .catch(() => {})
       .finally(() => setHistoryLoading(false));
   }, [tab, historyLoaded, historyLoading, projectId, contractId]);
+
+  async function handleSyncToQBO() {
+    setQbSyncing(true);
+    setQbSyncMsg(null);
+    setContract((c) => (c ? { ...c, erp_status: "pending" } : c));
+    try {
+      const res = await fetch("/api/integrations/quickbooks/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordType: "prime_contracts", recordId: contractId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setContract((c) => (c ? { ...c, erp_status: "not_synced" } : c));
+        setQbSyncMsg({ ok: false, text: data.error ?? "Sync failed" });
+      } else {
+        setContract((c) => (c ? { ...c, erp_status: "synced" } : c));
+        setQbSyncMsg({ ok: true, text: "Synced to QuickBooks Online." });
+      }
+    } catch {
+      setContract((c) => (c ? { ...c, erp_status: "not_synced" } : c));
+      setQbSyncMsg({ ok: false, text: "Network error while syncing." });
+    } finally {
+      setQbSyncing(false);
+    }
+  }
 
   // Track active sidebar section based on scroll position
   useEffect(() => {
@@ -557,6 +585,17 @@ export default function PrimeContractDetailClient({
             <div ref={contentRef} className="flex-1 overflow-y-auto">
               {/* Export / Edit Contract actions */}
               <div className="flex justify-end gap-2 px-8 pt-4 pb-2 bg-gray-50">
+                <button
+                  onClick={handleSyncToQBO}
+                  disabled={qbSyncing}
+                  title="Push this prime contract to QuickBooks Online"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#2CA01C] rounded hover:bg-[#237d16] transition-colors disabled:opacity-50"
+                >
+                  <svg className={`w-3 h-3 ${qbSyncing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  {qbSyncing ? "Syncing…" : "Sync to QuickBooks"}
+                </button>
                 <button className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors">
                   Export <ChevronDown className="w-3 h-3" />
                 </button>
@@ -567,6 +606,12 @@ export default function PrimeContractDetailClient({
                   Edit Contract
                 </button>
               </div>
+              {qbSyncMsg && (
+                <div className={`mx-8 mb-2 px-3 py-2 text-xs rounded flex items-center justify-between ${qbSyncMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                  <span>{qbSyncMsg.text}</span>
+                  <button onClick={() => setQbSyncMsg(null)} className="opacity-60 hover:opacity-100 ml-3">✕</button>
+                </div>
+              )}
 
               {/* General Information */}
               <div id="general-info" className="scroll-mt-2 bg-white border-b border-gray-200 px-8 py-6">
