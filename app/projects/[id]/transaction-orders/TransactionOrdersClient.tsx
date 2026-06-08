@@ -136,7 +136,9 @@ export default function TransactionOrdersClient({
   const [processing, setProcessing] = useState(false);
   const [processError, setProcessError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ProcessedPreview | null>(null);
+  const originalPreviewRef = useRef<ProcessedPreview | null>(null);
   const [saving, setSaving] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
 
   const [templateBusy, setTemplateBusy] = useState(false);
   const templateInputRef = useRef<HTMLInputElement>(null);
@@ -232,7 +234,7 @@ export default function TransactionOrdersClient({
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      setPreview({
+      const newPreview: ProcessedPreview = {
         pdfBlobUrl: url,
         pdfBlob: blob,
         filename: decodeHeader(res.headers.get("X-TO-Filename")) || "transaction-order.pdf",
@@ -244,11 +246,59 @@ export default function TransactionOrdersClient({
         date: decodeHeader(res.headers.get("X-TO-Date")),
         sourceFilename:
           decodeHeader(res.headers.get("X-TO-Source-Filename")) || sourceFile.name,
-      });
+      };
+      originalPreviewRef.current = newPreview;
+      setPreview(newPreview);
     } catch (err) {
       setProcessError(err instanceof Error ? err.message : "Failed to process Transaction Order");
     } finally {
       setProcessing(false);
+    }
+  }
+
+  async function uploadAndRegister(p: ProcessedPreview) {
+    const urlRes = await fetch(
+      `/api/projects/${projectId}/transaction-orders/upload-url?filename=${encodeURIComponent(p.filename)}`,
+    );
+    if (!urlRes.ok) {
+      const data = await urlRes.json().catch(() => ({}));
+      throw new Error(data?.error ?? "Could not request upload URL");
+    }
+    const { signedUrl, storagePath } = await urlRes.json();
+
+    const putRes = await fetch(signedUrl, {
+      method: "PUT",
+      body: p.pdfBlob,
+      headers: { "Content-Type": "application/pdf" },
+    });
+    if (!putRes.ok) {
+      const text = await putRes.text().catch(() => "");
+      throw new Error(
+        `Upload failed (${putRes.status})${text ? `: ${text.slice(0, 200)}` : ""}`,
+      );
+    }
+
+    const registerRes = await fetch(
+      `/api/projects/${projectId}/transaction-orders`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vendor: p.vendor,
+          amount: p.amount,
+          scope: p.scope,
+          piCode: p.piCode,
+          costCode: p.costCode,
+          date: p.date,
+          sourceFilename: p.sourceFilename,
+          filename: p.filename,
+          storagePath,
+        }),
+      },
+    );
+    if (!registerRes.ok) {
+      const data = await registerRes.json().catch(() => ({}));
+      throw new Error(data?.error ?? `Register failed (${registerRes.status})`);
     }
   }
 
@@ -257,50 +307,7 @@ export default function TransactionOrdersClient({
     setSaving(true);
     setProcessError(null);
     try {
-      const urlRes = await fetch(
-        `/api/projects/${projectId}/transaction-orders/upload-url?filename=${encodeURIComponent(preview.filename)}`,
-      );
-      if (!urlRes.ok) {
-        const data = await urlRes.json().catch(() => ({}));
-        throw new Error(data?.error ?? "Could not request upload URL");
-      }
-      const { signedUrl, storagePath } = await urlRes.json();
-
-      const putRes = await fetch(signedUrl, {
-        method: "PUT",
-        body: preview.pdfBlob,
-        headers: { "Content-Type": "application/pdf" },
-      });
-      if (!putRes.ok) {
-        const text = await putRes.text().catch(() => "");
-        throw new Error(
-          `Upload failed (${putRes.status})${text ? `: ${text.slice(0, 200)}` : ""}`,
-        );
-      }
-
-      const registerRes = await fetch(
-        `/api/projects/${projectId}/transaction-orders`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            vendor: preview.vendor,
-            amount: preview.amount,
-            scope: preview.scope,
-            piCode: preview.piCode,
-            costCode: preview.costCode,
-            date: preview.date,
-            sourceFilename: preview.sourceFilename,
-            filename: preview.filename,
-            storagePath,
-          }),
-        },
-      );
-      if (!registerRes.ok) {
-        const data = await registerRes.json().catch(() => ({}));
-        throw new Error(data?.error ?? `Register failed (${registerRes.status})`);
-      }
-
+      await uploadAndRegister(preview);
       if (preview.pdfBlobUrl) URL.revokeObjectURL(preview.pdfBlobUrl);
       setPreview(null);
       setSourceFile(null);
@@ -310,6 +317,75 @@ export default function TransactionOrdersClient({
       setProcessError(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function regenerateWithOverrides(): Promise<ProcessedPreview> {
+    if (!preview || !sourceFile) throw new Error("No preview or source file");
+    const formData = new FormData();
+    formData.append("file", sourceFile);
+    formData.append("vendor", preview.vendor);
+    formData.append("amount", preview.amount);
+    formData.append("scope", preview.scope);
+    formData.append("piCode", preview.piCode);
+    formData.append("costCode", preview.costCode);
+
+    const res = await fetch(
+      `/api/projects/${projectId}/transaction-orders/adjust`,
+      { method: "POST", body: formData },
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data?.error ?? "Failed to re-fill Transaction Order");
+    }
+    const blob = await res.blob();
+    if (preview.pdfBlobUrl) URL.revokeObjectURL(preview.pdfBlobUrl);
+    const url = URL.createObjectURL(blob);
+    return {
+      ...preview,
+      pdfBlobUrl: url,
+      pdfBlob: blob,
+      filename: decodeHeader(res.headers.get("X-TO-Filename")) || preview.filename,
+    };
+  }
+
+  async function handleAdjustAndSave() {
+    if (!preview || !sourceFile) return;
+    setAdjusting(true);
+    setProcessError(null);
+    try {
+      const adjusted = await regenerateWithOverrides();
+      await uploadAndRegister(adjusted);
+      URL.revokeObjectURL(adjusted.pdfBlobUrl);
+      setPreview(null);
+      setSourceFile(null);
+      setShowNewModal(false);
+      void loadOrders();
+    } catch (err) {
+      setProcessError(err instanceof Error ? err.message : "Failed to adjust and save");
+    } finally {
+      setAdjusting(false);
+    }
+  }
+
+  async function handleAdjustAndDownload() {
+    if (!preview || !sourceFile) return;
+    setAdjusting(true);
+    setProcessError(null);
+    try {
+      const adjusted = await regenerateWithOverrides();
+      originalPreviewRef.current = adjusted;
+      setPreview(adjusted);
+      const a = document.createElement("a");
+      a.href = adjusted.pdfBlobUrl;
+      a.download = adjusted.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      setProcessError(err instanceof Error ? err.message : "Failed to adjust and download");
+    } finally {
+      setAdjusting(false);
     }
   }
 
@@ -876,7 +952,7 @@ export default function TransactionOrdersClient({
             <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100 bg-gray-50">
               <button
                 onClick={closeNewModal}
-                disabled={processing || saving}
+                disabled={processing || saving || adjusting}
                 className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50"
               >
                 Cancel
@@ -889,24 +965,44 @@ export default function TransactionOrdersClient({
                 >
                   {processing ? "Processing…" : "Generate Transaction Order"}
                 </button>
-              ) : (
-                <>
-                  <a
-                    href={preview.pdfBlobUrl}
-                    download={preview.filename}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md hover:bg-gray-100"
-                  >
-                    Download
-                  </a>
-                  <button
-                    onClick={handleSavePreview}
-                    disabled={saving}
-                    className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 disabled:opacity-50"
-                  >
-                    {saving ? "Saving…" : "Save Transaction Order"}
-                  </button>
-                </>
-              )}
+              ) : (() => {
+                const orig = originalPreviewRef.current;
+                const hasChanges = orig !== null && (
+                  preview.vendor !== orig.vendor ||
+                  preview.amount !== orig.amount ||
+                  preview.scope !== orig.scope ||
+                  preview.piCode !== orig.piCode ||
+                  preview.costCode !== orig.costCode
+                );
+                return (
+                  <>
+                    {hasChanges ? (
+                      <button
+                        onClick={handleAdjustAndDownload}
+                        disabled={saving || adjusting}
+                        className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md hover:bg-gray-100 disabled:opacity-50"
+                      >
+                        {adjusting ? "Adjusting…" : "Adjust & Download"}
+                      </button>
+                    ) : (
+                      <a
+                        href={preview.pdfBlobUrl}
+                        download={preview.filename}
+                        className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md hover:bg-gray-100"
+                      >
+                        Download
+                      </a>
+                    )}
+                    <button
+                      onClick={hasChanges ? handleAdjustAndSave : handleSavePreview}
+                      disabled={saving || adjusting}
+                      className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 disabled:opacity-50"
+                    >
+                      {saving ? "Saving…" : adjusting ? "Adjusting…" : hasChanges ? "Adjust & Save Transaction Order" : "Save Transaction Order"}
+                    </button>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
