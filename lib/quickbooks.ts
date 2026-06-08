@@ -233,7 +233,10 @@ export async function callQBO(
 ): Promise<{ status: number; json: unknown; rawText: string }> {
   let accessToken = companyCreds.accessToken!;
   const realmId = companyCreds.realmId!;
-  const url = `${QBO_BASE}/${realmId}/${path}?minorversion=${QBO_MINOR_VERSION}`;
+  // `path` may already carry a query string (e.g. "bill?operation=update" or a
+  // "query?query=..." call), so pick the right separator for minorversion.
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `${QBO_BASE}/${realmId}/${path}${sep}minorversion=${QBO_MINOR_VERSION}`;
 
   async function attempt(token: string) {
     return fetch(url, {
@@ -320,7 +323,7 @@ export async function fetchQBOVendors(
     const { status, json, rawText } = await callQBO(
       companyId, appCreds, companyCreds,
       "GET",
-      `query?query=${query}&minorversion=${QBO_MINOR_VERSION}`.replace(`?query=`, "query?query="),
+      `query?query=${query}`,
     );
 
     if (status !== 200) {
@@ -357,7 +360,7 @@ export async function fetchQBOCustomers(
     const { status, json, rawText } = await callQBO(
       companyId, appCreds, companyCreds,
       "GET",
-      `query?query=${query}&minorversion=${QBO_MINOR_VERSION}`.replace(`?query=`, "query?query="),
+      `query?query=${query}`,
     );
 
     if (status !== 200) {
@@ -374,6 +377,153 @@ export async function fetchQBOCustomers(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
+}
+
+// ── Reference resolution (P0: post with Ref.value, not Ref.name) ───────────────
+//
+// QBO *Ref fields resolve most reliably by Id (`value`). Posting by `name`
+// silently fails when the display name isn't an exact existing match, so we
+// resolve every reference to an Id (creating master records when missing) and a
+// Bill's expense line to a *real* expense/COGS account (never A/P).
+
+/** Escapes single quotes for use inside a QBO query string literal. */
+function escapeQBOString(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/**
+ * Runs a QBO query and returns the named entity rows: [] when none match,
+ * null on a transport/HTTP error.
+ */
+async function queryQBO(
+  companyId: string,
+  appCreds: QBOAppCredentials,
+  companyCreds: QBOCompanyCredentials,
+  query: string,
+  entityKey: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any[] | null> {
+  const { status, json } = await callQBO(
+    companyId, appCreds, companyCreds, "GET", `query?query=${encodeURIComponent(query)}`
+  );
+  if (status !== 200) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = (json as any)?.QueryResponse?.[entityKey];
+  if (rows == null) return [];
+  return Array.isArray(rows) ? rows : [rows];
+}
+
+/** Per-company posting defaults (overridable via company_integrations or env). */
+export async function getQBOPostingConfig(
+  companyId: string
+): Promise<{ expenseAccountName: string | null; itemName: string | null }> {
+  try {
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from("company_integrations")
+      .select("key, value")
+      .eq("company_id", companyId)
+      .in("key", ["QBO_AP_EXPENSE_ACCOUNT", "QBO_DEFAULT_ITEM"]);
+    const map: Record<string, string> = {};
+    for (const row of data ?? []) map[row.key] = row.value;
+    return {
+      expenseAccountName: map.QBO_AP_EXPENSE_ACCOUNT ?? process.env.QBO_AP_EXPENSE_ACCOUNT ?? null,
+      itemName:           map.QBO_DEFAULT_ITEM       ?? process.env.QBO_DEFAULT_ITEM       ?? null,
+    };
+  } catch {
+    return {
+      expenseAccountName: process.env.QBO_AP_EXPENSE_ACCOUNT ?? null,
+      itemName:           process.env.QBO_DEFAULT_ITEM       ?? null,
+    };
+  }
+}
+
+/** Resolves a Vendor by exact DisplayName → Id, creating a minimal one if absent. */
+export async function findOrCreateVendorId(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, displayName: string
+): Promise<string | null> {
+  const name = (displayName ?? "").trim();
+  if (!name) return null;
+  const found = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Vendor WHERE DisplayName = '${escapeQBOString(name)}'`, "Vendor"
+  );
+  if (found && found.length > 0) return String(found[0].Id);
+  const { status, json } = await callQBO(
+    companyId, appCreds, companyCreds, "POST", "vendor", { DisplayName: name }
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return status === 200 ? (String((json as any)?.Vendor?.Id ?? "") || null) : null;
+}
+
+/** Resolves a Customer by exact DisplayName → Id, creating a minimal one if absent. */
+export async function findOrCreateCustomerId(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, displayName: string
+): Promise<string | null> {
+  const name = (displayName ?? "").trim();
+  if (!name) return null;
+  const found = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Customer WHERE DisplayName = '${escapeQBOString(name)}'`, "Customer"
+  );
+  if (found && found.length > 0) return String(found[0].Id);
+  const { status, json } = await callQBO(
+    companyId, appCreds, companyCreds, "POST", "customer", { DisplayName: name }
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return status === 200 ? (String((json as any)?.Customer?.Id ?? "") || null) : null;
+}
+
+/**
+ * Resolves the expense/COGS account to debit on a Bill. Uses the configured
+ * account name when provided; otherwise auto-detects the first active COGS
+ * (then Expense) account. Returns null when none can be found — never A/P.
+ */
+export async function findExpenseAccountId(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, configuredName?: string | null
+): Promise<string | null> {
+  const name = (configuredName ?? "").trim();
+  if (name) {
+    const rows = await queryQBO(
+      companyId, appCreds, companyCreds,
+      `SELECT Id FROM Account WHERE Name = '${escapeQBOString(name)}' AND Active = true`, "Account"
+    );
+    return rows && rows.length > 0 ? String(rows[0].Id) : null;
+  }
+  for (const acctType of ["Cost of Goods Sold", "Expense"]) {
+    const rows = await queryQBO(
+      companyId, appCreds, companyCreds,
+      `SELECT Id FROM Account WHERE AccountType = '${acctType}' AND Active = true MAXRESULTS 1`, "Account"
+    );
+    if (rows && rows.length > 0) return String(rows[0].Id);
+  }
+  return null;
+}
+
+/**
+ * Resolves an Item by name → Id, creating a Service item (wired to the first
+ * active income account) when absent. Returns null on failure.
+ */
+export async function findOrCreateItemId(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, itemName?: string | null
+): Promise<string | null> {
+  const name = (itemName ?? "").trim() || "Services";
+  const found = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Item WHERE Name = '${escapeQBOString(name)}'`, "Item"
+  );
+  if (found && found.length > 0) return String(found[0].Id);
+  const incomeRows = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Account WHERE AccountType = 'Income' AND Active = true MAXRESULTS 1`, "Account"
+  );
+  if (!incomeRows || incomeRows.length === 0) return null;
+  const { status, json } = await callQBO(
+    companyId, appCreds, companyCreds, "POST", "item",
+    { Name: name, Type: "Service", IncomeAccountRef: { value: String(incomeRows[0].Id) } }
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return status === 200 ? (String((json as any)?.Item?.Id ?? "") || null) : null;
 }
 
 // ── Commitment sync ───────────────────────────────────────────────────────────
@@ -411,6 +561,13 @@ export async function syncCommitmentToQBO(
   const amount = Number(commitment.original_contract_amount.toFixed(2));
   const entity = commitment.type === "subcontract" ? "bill" : "purchaseorder";
 
+  // Resolve references to QBO Ids (post by value, not name).
+  const vendorId = await findOrCreateVendorId(companyId, appCreds, companyCreds, commitment.contract_company);
+  if (!vendorId) {
+    return { ok: false, error: `Could not resolve or create QBO vendor "${commitment.contract_company}".`, rawResponse: "" };
+  }
+  const config = await getQBOPostingConfig(companyId);
+
   // For updates, fetch the latest SyncToken from QBO
   let syncToken: string | null = null;
   if (existingQboId) {
@@ -423,8 +580,12 @@ export async function syncCommitmentToQBO(
 
   try {
     if (commitment.type === "subcontract") {
+      const expenseAccountId = await findExpenseAccountId(companyId, appCreds, companyCreds, config.expenseAccountName);
+      if (!expenseAccountId) {
+        return { ok: false, error: "No QBO expense account found. Set QBO_AP_EXPENSE_ACCOUNT to a valid expense or COGS account.", rawResponse: "" };
+      }
       const basePayload: Record<string, unknown> = {
-        VendorRef: { name: commitment.contract_company },
+        VendorRef: { value: vendorId },
         TxnDate: today,
         DocNumber: String(commitment.number),
         PrivateNote: commitment.title,
@@ -434,7 +595,7 @@ export async function syncCommitmentToQBO(
             Amount: amount,
             Description: commitment.title,
             AccountBasedExpenseLineDetail: {
-              AccountRef: { name: "Accounts Payable (A/P)" },
+              AccountRef: { value: expenseAccountId },
             },
           },
         ],
@@ -457,8 +618,12 @@ export async function syncCommitmentToQBO(
       return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
 
     } else {
+      const itemId = await findOrCreateItemId(companyId, appCreds, companyCreds, config.itemName);
+      if (!itemId) {
+        return { ok: false, error: "Could not resolve or create a QBO item for the purchase order line.", rawResponse: "" };
+      }
       const basePayload: Record<string, unknown> = {
-        VendorRef: { name: commitment.contract_company },
+        VendorRef: { value: vendorId },
         TxnDate: today,
         DocNumber: String(commitment.number),
         PrivateNote: commitment.title,
@@ -468,7 +633,7 @@ export async function syncCommitmentToQBO(
             Amount: amount,
             Description: commitment.title,
             ItemBasedExpenseLineDetail: {
-              ItemRef: { name: "Services" },
+              ItemRef: { value: itemId },
               Qty: 1,
               UnitPrice: amount,
             },
@@ -543,6 +708,17 @@ export async function syncPrimeContractToQBO(
     `Status: ${contract.status}`,
   ].filter(Boolean).join("\n");
 
+  // Resolve references to QBO Ids (post by value, not name).
+  const customerId = await findOrCreateCustomerId(companyId, appCreds, companyCreds, contract.owner_client);
+  if (!customerId) {
+    return { ok: false, error: `Could not resolve or create QBO customer "${contract.owner_client}".`, rawResponse: "" };
+  }
+  const config = await getQBOPostingConfig(companyId);
+  const itemId = await findOrCreateItemId(companyId, appCreds, companyCreds, config.itemName);
+  if (!itemId) {
+    return { ok: false, error: "Could not resolve or create a QBO item for the invoice line.", rawResponse: "" };
+  }
+
   // For updates, fetch the latest SyncToken from QBO
   let syncToken: string | null = null;
   if (existingQboId) {
@@ -552,7 +728,7 @@ export async function syncPrimeContractToQBO(
 
   try {
     const basePayload: Record<string, unknown> = {
-      CustomerRef: { name: contract.owner_client },
+      CustomerRef: { value: customerId },
       TxnDate: contract.start_date ?? today,
       DueDate: contract.estimated_completion_date ?? undefined,
       DocNumber: String(contract.contract_number),
@@ -564,7 +740,7 @@ export async function syncPrimeContractToQBO(
           Amount: revisedAmount,
           Description: contract.title,
           SalesItemLineDetail: {
-            ItemRef: { name: "Services" },
+            ItemRef: { value: itemId },
             Qty: 1,
             UnitPrice: revisedAmount,
           },
@@ -616,6 +792,17 @@ export async function syncAPInvoiceToQBO(
 ): Promise<QBOResult> {
   const today = new Date().toISOString().slice(0, 10);
 
+  // Resolve references to QBO Ids (post by value, not name).
+  const vendorId = await findOrCreateVendorId(companyId, appCreds, companyCreds, invoice.vendorName);
+  if (!vendorId) {
+    return { ok: false, error: `Could not resolve or create QBO vendor "${invoice.vendorName}".`, rawResponse: "" };
+  }
+  const config = await getQBOPostingConfig(companyId);
+  const expenseAccountId = await findExpenseAccountId(companyId, appCreds, companyCreds, config.expenseAccountName);
+  if (!expenseAccountId) {
+    return { ok: false, error: "No QBO expense account found. Set QBO_AP_EXPENSE_ACCOUNT to a valid expense or COGS account.", rawResponse: "" };
+  }
+
   let syncToken: string | null = null;
   if (existingQboId) {
     syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, "bill", existingQboId);
@@ -624,7 +811,7 @@ export async function syncAPInvoiceToQBO(
 
   try {
     const basePayload: Record<string, unknown> = {
-      VendorRef: { name: invoice.vendorName },
+      VendorRef: { value: vendorId },
       TxnDate: today,
       DocNumber: String(invoice.commitmentNumber),
       PrivateNote: invoice.description,
@@ -633,7 +820,7 @@ export async function syncAPInvoiceToQBO(
         Amount: Number(li.amount.toFixed(2)),
         Description: li.description,
         AccountBasedExpenseLineDetail: {
-          AccountRef: { name: "Accounts Payable (A/P)" },
+          AccountRef: { value: expenseAccountId },
         },
       })),
     };
@@ -678,6 +865,17 @@ export async function syncARInvoiceToQBO(
 ): Promise<QBOResult> {
   const today = new Date().toISOString().slice(0, 10);
 
+  // Resolve references to QBO Ids (post by value, not name).
+  const customerId = await findOrCreateCustomerId(companyId, appCreds, companyCreds, invoice.customerName);
+  if (!customerId) {
+    return { ok: false, error: `Could not resolve or create QBO customer "${invoice.customerName}".`, rawResponse: "" };
+  }
+  const config = await getQBOPostingConfig(companyId);
+  const itemId = await findOrCreateItemId(companyId, appCreds, companyCreds, config.itemName);
+  if (!itemId) {
+    return { ok: false, error: "Could not resolve or create a QBO item for the invoice line.", rawResponse: "" };
+  }
+
   let syncToken: string | null = null;
   if (existingQboId) {
     syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, "invoice", existingQboId);
@@ -686,7 +884,7 @@ export async function syncARInvoiceToQBO(
 
   try {
     const basePayload: Record<string, unknown> = {
-      CustomerRef: { name: invoice.customerName },
+      CustomerRef: { value: customerId },
       TxnDate: today,
       DocNumber: String(invoice.contractNumber),
       PrivateNote: invoice.description,
@@ -695,7 +893,7 @@ export async function syncARInvoiceToQBO(
         Amount: Number(li.amount.toFixed(2)),
         Description: li.description,
         SalesItemLineDetail: {
-          ItemRef: { name: "Services" },
+          ItemRef: { value: itemId },
           Qty: 1,
           UnitPrice: Number(li.amount.toFixed(2)),
         },

@@ -109,11 +109,32 @@ a fresh record.
 Sub-hourly cron schedules require Vercel **Pro** or higher. On the Hobby plan
 use a once-daily cron expression in `vercel.json` (as configured here).
 
+## Reference resolution & posting config
+
+When creating transactions, SiteCommand resolves every QBO reference to an **Id**
+(`Ref.value`) rather than posting by name — names that don't exactly match an existing
+record silently fail. Vendors and Customers are created on demand from the contract
+company / owner name when they don't already exist.
+
+Bill expense lines post to a real expense/COGS account and PO/Invoice lines to a real
+Item (never to `Accounts Payable (A/P)`). The targets are configurable per company via
+`company_integrations` keys (or the matching env vars), and auto-detected when unset:
+
+| Key | Purpose | Default when unset |
+|---|---|---|
+| `QBO_AP_EXPENSE_ACCOUNT` | Account name to debit on Bills (AP) | first active **Cost of Goods Sold**, then **Expense**, account in the realm |
+| `QBO_DEFAULT_ITEM` | Item name for PO / Invoice lines | `Services` (created as a Service item wired to the first active Income account if missing) |
+
+If no valid account/item can be resolved, the sync fails fast with a clear message
+instead of posting an invalid transaction.
+
 ## Current limitations
 
 - Sync is **push-only** from SiteCommand to QBO. There is no pull from QBO into
   SiteCommand.
-- Mapping is name-based for customer/vendor records when creating transactions.
+- Auto-created Vendors/Customers carry only a `DisplayName`; address/email/phone
+  enrichment from the directory is a planned follow-up (see data-mapping spec G2).
+- Budget codes / cost codes are not yet mapped to QBO Accounts/Classes (spec G5).
 
 
 ## Enterprise Suite compatibility

@@ -12,6 +12,15 @@ gaps that must be closed for "all necessary fields" to flow correctly.
 > Legend for the **Status** column in every table:
 > ✅ mapped today · ⚠️ mapped but needs correction · ❌ gap (not mapped) · 🔭 future/out-of-scope
 
+> **Implemented (P0, this revision):** All `VendorRef` / `CustomerRef` now resolve to a
+> QBO **Id** (`value`), creating the master record when it doesn't exist (**G2**). Bill
+> expense lines post to a **real expense/COGS account** and PO/Invoice lines to a **real
+> Item** — never to `Accounts Payable (A/P)` (**G4**). A foundational URL bug in `callQBO`
+> (a stray `?` broke every query and `?operation=update`) was also fixed. The ⚠️ rows below
+> for `*Ref` / `AccountRef` / `ItemRef` are therefore now ✅; they are kept here for history.
+> New config keys: `QBO_AP_EXPENSE_ACCOUNT`, `QBO_DEFAULT_ITEM` (per-company or env;
+> auto-detected when unset).
+
 ---
 
 ## 1. Tenancy & connection model
@@ -98,8 +107,8 @@ Required OAuth scope: `com.intuit.quickbooks.accounting` (override with
 
 | SiteCommand source | QBO target | Status | Notes |
 |---|---|---|---|
-| Subcontract Bill expense line | `AccountBasedExpenseLineDetail.AccountRef` → an **expense/COGS account** | ⚠️ | Today hard-coded to `"Accounts Payable (A/P)"`, which is the implicit liability credit on a Bill, **not** a valid debit/expense account — §7 G4. |
-| PO / SOV line item | `ItemBasedExpenseLineDetail.ItemRef` → **Item** | ⚠️ | Today hard-coded to `"Services"`; must exist in the realm or QBO errors. |
+| Subcontract Bill expense line | `AccountBasedExpenseLineDetail.AccountRef` → an **expense/COGS account** | ✅ | Resolved by `findExpenseAccountId` (`QBO_AP_EXPENSE_ACCOUNT` or first active COGS/Expense). No longer `A/P`. |
+| PO / SOV line item | `ItemBasedExpenseLineDetail.ItemRef` → **Item** | ✅ | Resolved/created by `findOrCreateItemId` (`QBO_DEFAULT_ITEM`, default "Services"). |
 | SOV `budget_code` / budget `cost_code` (WBS) | `AccountRef` (cost code) and/or `ClassRef` (phase/cost type) | ❌ | Requires a per-realm code→account/class map — §7 G5. |
 | `commitments.payment_terms` | `SalesTermRef` (+ derived `DueDate`) | ❌ | Map free-text terms to a QBO Term Id — §7 G6. |
 
@@ -224,8 +233,8 @@ Prioritized. **P0 = blocks correct posting; P1 = completeness/accuracy; P2 = nic
 
 | ID | Pri | Gap | Recommendation |
 |---|---|---|---|
-| **G2** | P0 | Vendor/Customer sent as `*Ref.name` only; errors when the display name doesn't exactly match an existing record. | Resolve `DisplayName → Id` via `fetchQBOVendors`/`fetchQBOCustomers`; **auto-create** the Vendor/Customer (with address/email/phone from the directory contact) when absent; cache the Id. |
-| **G4** | P0 | Bill expense line `AccountRef = "Accounts Payable (A/P)"` is invalid (A/P is the Bill's implicit credit); `ItemRef = "Services"` assumed to exist. | Add a per-realm **default expense account** + **default item** setting (validated against the realm's chart of accounts at connect time). Use `ItemBasedExpenseLineDetail` with a real Item, or `AccountBasedExpenseLineDetail` with a real expense/COGS account. |
+| **G2** | ✅ done | ~~Vendor/Customer sent as `*Ref.name` only; errors when the display name doesn't exactly match.~~ | **Implemented:** `findOrCreateVendorId`/`findOrCreateCustomerId` resolve `DisplayName → Id` and auto-create a minimal record when absent; all transactions now post `*Ref.value`. *Remaining (P1):* enrich the auto-created record with address/email/phone from the directory contact. |
+| **G4** | ✅ done | ~~Bill line `AccountRef = "Accounts Payable (A/P)"` invalid; `ItemRef = "Services"` assumed.~~ | **Implemented:** `findExpenseAccountId` posts Bills to a configured (`QBO_AP_EXPENSE_ACCOUNT`) or auto-detected COGS/Expense account; `findOrCreateItemId` resolves/creates the PO/Invoice Item (`QBO_DEFAULT_ITEM`, default "Services"). Sync fails fast with a clear message if no valid account/item can be found. |
 | **G1** | P1 | Subcontract header → Bill *and* SOV billed-to-date → Bill double-books the liability. | Map subcontract/PO header → **PurchaseOrder** (commitment, non-posting); map the actual invoice/SOV billing → **Bill** (payable). Decision needed before changing posting behavior. |
 | **G5** | P1 | `budget_code` / `cost_code` (WBS) not mapped → no job costing. | Introduce a `qbo_code_map` (realm + SiteCommand code → `AccountRef`/`ClassRef`/`ItemRef`). Apply per SOV line. |
 | **G3** | P1 | Project not mapped → costs/revenue not job-tracked. | Map `projects` → **Customer:Job** (sub-customer of owner) or **Class**; set `Line…CustomerRef` + `BillableStatus` on bills and `ClassRef` on lines. |
@@ -247,11 +256,11 @@ Prioritized. **P0 = blocks correct posting; P1 = completeness/accuracy; P2 = nic
 
 | QBO entity | Required on create | Provided today? |
 |---|---|---|
-| `Bill` | `VendorRef`, ≥1 `Line` with `DetailType` + `Amount` + detail | ⚠️ Vendor by name; line account invalid (G2/G4). |
-| `PurchaseOrder` | `VendorRef`, ≥1 `Line` (`ItemBasedExpenseLineDetail` needs valid `ItemRef`) | ⚠️ Vendor by name; item assumed (G2/G4). |
-| `Invoice` | `CustomerRef`, ≥1 `Line` (`SalesItemLineDetail` needs valid `ItemRef`) | ⚠️ Customer by name; item assumed (G2/G4). |
-| `Vendor` | `DisplayName` (unique) | n/a (not created today — G2). |
-| `Customer` | `DisplayName` (unique) | n/a (not created today — G2). |
+| `Bill` | `VendorRef`, ≥1 `Line` with `DetailType` + `Amount` + detail | ✅ Vendor by Id; valid expense account (G2/G4 done). |
+| `PurchaseOrder` | `VendorRef`, ≥1 `Line` (`ItemBasedExpenseLineDetail` needs valid `ItemRef`) | ✅ Vendor by Id; resolved Item (G2/G4 done). |
+| `Invoice` | `CustomerRef`, ≥1 `Line` (`SalesItemLineDetail` needs valid `ItemRef`) | ✅ Customer by Id; resolved Item (G2/G4 done). |
+| `Vendor` | `DisplayName` (unique) | ✅ created on demand (G2). |
+| `Customer` | `DisplayName` (unique) | ✅ created on demand (G2). |
 
 ---
 
@@ -269,7 +278,9 @@ Prioritized. **P0 = blocks correct posting; P1 = completeness/accuracy; P2 = nic
 
 1. **G1** — subcontract = `PurchaseOrder` (commitment) or `Bill` (payable)?
 2. **G8** — header amount = original or revised (incl. approved COs)?
-3. **G4/G5** — default expense account, default item, and the budget-code → account/class
-   map per realm (this is customer-specific chart-of-accounts data).
+3. **G4 (config) / G5** — G4 auto-detects a COGS/Expense account and an Item, but each
+   realm should confirm the *correct* posting targets via `QBO_AP_EXPENSE_ACCOUNT` /
+   `QBO_DEFAULT_ITEM`. Still open: the budget-code → account/class map (G5), which is
+   customer-specific chart-of-accounts data.
 4. **G3** — job costing via Customer:Job vs Class.
 5. Push vs two-way sync (today: push-only, QBO → SiteCommand not implemented).
