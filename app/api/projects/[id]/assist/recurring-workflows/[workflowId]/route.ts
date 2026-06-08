@@ -5,6 +5,14 @@ import { getSupabase } from "@/lib/supabase";
 
 const ALLOWED_FREQUENCIES = new Set(["daily", "weekly", "monthly"]);
 
+function isValidDateString(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 function isRecurringWorkflowTableMissing(errorMessage: string | null | undefined) {
   if (!errorMessage) return false;
   const normalized = errorMessage.toLowerCase();
@@ -30,6 +38,7 @@ export async function PATCH(
     prompt?: unknown;
     frequency?: unknown;
     runDayOfWeek?: unknown;
+    runDate?: unknown;
     runHourEt?: unknown;
     runMinuteEt?: unknown;
     recipients?: unknown;
@@ -70,6 +79,15 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid day of week" }, { status: 400 });
     }
     updates.run_day_of_week = v;
+  }
+  if (body.runDate !== undefined) {
+    if (body.runDate === null || body.runDate === "") {
+      updates.run_date = null;
+    } else if (typeof body.runDate === "string" && isValidDateString(body.runDate.trim())) {
+      updates.run_date = body.runDate.trim();
+    } else {
+      return NextResponse.json({ error: "Invalid date (expected YYYY-MM-DD)" }, { status: 400 });
+    }
   }
   if (body.runHourEt !== undefined) {
     const v = typeof body.runHourEt === "number" ? body.runHourEt : Number(body.runHourEt);

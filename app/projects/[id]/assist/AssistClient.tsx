@@ -13,6 +13,15 @@ type Message = {
   sourceDocuments?: SourceDocument[];
 };
 
+type HistoryItem = {
+  id: string;
+  question: string;
+  answer: string;
+  stats?: { recordCount: number; toolsSearched: number; filesAttached: number; filesCited: number } | null;
+  source_documents?: SourceDocument[] | null;
+  created_at: string;
+};
+
 type Frequency = "daily" | "weekly" | "monthly";
 type Weekday = "sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday";
 
@@ -30,6 +39,7 @@ type RecurringWorkflow = {
   prompt: string;
   frequency: Frequency;
   runDayOfWeek: Weekday | null;
+  runDate: string | null;
   runHourEt: number | null;
   runMinuteEt: number | null;
   recipients: string[];
@@ -46,6 +56,24 @@ const FREQUENCY_LABELS: Record<Frequency, string> = {
 };
 const WEEKDAY_OPTIONS: Weekday[] = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
+function formatRunDate(d: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+  if (!m) return d;
+  return `${m[2]}/${m[3]}/${m[1]}`;
+}
+
+function formatRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 export default function AssistClient({ projectId }: { projectId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -54,6 +82,9 @@ export default function AssistClient({ projectId }: { projectId: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+
   const [workflows, setWorkflows] = useState<RecurringWorkflow[]>([]);
   const [wfName, setWfName] = useState("");
   const [wfPrompt, setWfPrompt] = useState("");
@@ -61,8 +92,8 @@ export default function AssistClient({ projectId }: { projectId: string }) {
   const [wfRecipients, setWfRecipients] = useState("");
   const [selectedWorkflow, setSelectedWorkflow] = useState<RecurringWorkflow | null>(null);
   const [wfRunDayOfWeek, setWfRunDayOfWeek] = useState<Weekday>("monday");
+  const [wfRunDate, setWfRunDate] = useState<string>("");
   const [wfRunHourEt, setWfRunHourEt] = useState<number>(6);
-  const [wfRunMinuteEt, setWfRunMinuteEt] = useState<number>(0);
   const [directoryRecipients, setDirectoryRecipients] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [wfSaving, setWfSaving] = useState(false);
   const [wfError, setWfError] = useState<string | null>(null);
@@ -87,11 +118,25 @@ export default function AssistClient({ projectId }: { projectId: string }) {
         // ignore
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [projectId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/assist/history`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data.history)) {
+          setHistory(data.history);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,10 +163,9 @@ export default function AssistClient({ projectId }: { projectId: string }) {
         // ignore
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [projectId]);
+
   async function ask(question: string) {
     const trimmed = question.trim();
     if (!trimmed || loading) return;
@@ -140,6 +184,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Request failed");
+
       setMessages((prev) => [
         ...prev,
         {
@@ -150,6 +195,28 @@ export default function AssistClient({ projectId }: { projectId: string }) {
           sourceDocuments: data.sourceDocuments,
         },
       ]);
+
+      // Persist to history (non-fatal)
+      try {
+        const histRes = await fetch(`/api/projects/${projectId}/assist/history`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question: trimmed,
+            answer: data.answer,
+            stats: data.stats ?? null,
+            sourceDocuments: data.sourceDocuments ?? null,
+          }),
+        });
+        if (histRes.ok) {
+          const histData = await histRes.json();
+          if (histData.item) {
+            setHistory((prev) => [histData.item, ...prev]);
+          }
+        }
+      } catch {
+        // ignore history persistence failure
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to get a response");
     } finally {
@@ -165,27 +232,32 @@ export default function AssistClient({ projectId }: { projectId: string }) {
     }
   }
 
+  async function deleteHistoryItem(historyId: string) {
+    setHistory((prev) => prev.filter((h) => h.id !== historyId));
+    try {
+      await fetch(`/api/projects/${projectId}/assist/history/${historyId}`, { method: "DELETE" });
+    } catch {
+      // best-effort; item already removed from UI
+    }
+  }
+
   async function saveWorkflow(e: React.FormEvent) {
     e.preventDefault();
     setWfError(null);
 
     const name = wfName.trim();
     const prompt = wfPrompt.trim();
-    if (!name) {
-      setWfError("Name is required.");
-      return;
-    }
-    if (!prompt) {
-      setWfError("Prompt is required.");
-      return;
-    }
+    if (!name) { setWfError("Name is required."); return; }
+    if (!prompt) { setWfError("Prompt is required."); return; }
 
     const recipients = wfRecipients.split(",").map((r) => r.trim().toLowerCase()).filter((s) => s.length > 0);
     for (const r of recipients) {
-      if (!r.includes("@")) {
-        setWfError(`"${r}" is not a valid email.`);
-        return;
-      }
+      if (!r.includes("@")) { setWfError(`"${r}" is not a valid email.`); return; }
+    }
+
+    if (wfFrequency === "monthly" && !wfRunDate) {
+      setWfError("Date is required for monthly workflows.");
+      return;
     }
 
     setWfSaving(true);
@@ -199,8 +271,9 @@ export default function AssistClient({ projectId }: { projectId: string }) {
           frequency: wfFrequency,
           recipients,
           runDayOfWeek: wfRunDayOfWeek,
+          runDate: wfFrequency === "monthly" ? wfRunDate : null,
           runHourEt: wfRunHourEt,
-          runMinuteEt: wfRunMinuteEt,
+          runMinuteEt: 0,
         }),
       });
       const data = await res.json();
@@ -211,6 +284,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       setWfFrequency("weekly");
       setWfRecipients("");
       setWfRunDayOfWeek("monday");
+      setWfRunDate("");
       setWfRunHourEt(6);
     } catch (err) {
       setWfError(err instanceof Error ? err.message : "Failed to save");
@@ -229,9 +303,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
         body: JSON.stringify({ active: next }),
       });
     } catch {
-      setWorkflows((prev) =>
-        prev.map((w) => (w.id === workflow.id ? { ...w, active: workflow.active } : w)),
-      );
+      setWorkflows((prev) => prev.map((w) => (w.id === workflow.id ? { ...w, active: workflow.active } : w)));
     }
   }
 
@@ -262,7 +334,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
           <p className="sub mt-1.5">
             <em>Ask anything about this project</em>
             <span className="sep">·</span>
-            <span className="num">{messages.filter((m) => m.role === "user").length}</span> asked
+            <span className="num">{history.length}</span> saved
             <span className="sep">·</span>
             <span className="num" style={{ color: "var(--brand-500)" }}>{workflows.filter((w) => w.active).length}</span> active workflows
           </p>
@@ -385,14 +457,113 @@ export default function AssistClient({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        <section className="card card-pad mt-6">
-          <div className="mb-4">
-            <h2 className="h3-warm">Recurring Workflows</h2>
-            <p className="mt-1 text-sm text-gray-600">
-              Save a prompt to run on a recurring schedule. Results are saved below as recurring workflow reports.
-            </p>
-          </div>
+        {/* History */}
+        <div className="mt-10">
+          <h2 className="font-display text-[28px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
+            History
+          </h2>
+          <p className="sub mt-1">
+            <span className="num">{history.length}</span> saved question{history.length !== 1 ? "s" : ""}
+          </p>
+        </div>
 
+        <div className="card card-pad mt-4">
+          {history.length === 0 ? (
+            <p className="text-sm text-gray-500">No history yet. Ask a question above to get started.</p>
+          ) : (
+            <ul className="space-y-2">
+              {history.map((item) => {
+                const expanded = expandedHistoryId === item.id;
+                return (
+                  <li key={item.id} className="rounded-md border border-[color:var(--border-base)] overflow-hidden">
+                    <div
+                      className="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-[color:var(--surface-sunken)] select-none"
+                      onClick={() => setExpandedHistoryId(expanded ? null : item.id)}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform ${expanded ? "rotate-90" : ""}`}
+                      >
+                        <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                      </svg>
+                      <span className="flex-1 text-sm font-medium text-[color:var(--ink)] truncate">
+                        {item.question}
+                      </span>
+                      <span className="text-[11px] text-gray-400 flex-shrink-0 tabular-nums">
+                        {formatRelativeTime(item.created_at)}
+                      </span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteHistoryItem(item.id); }}
+                        className="flex-shrink-0 text-gray-400 hover:text-red-600 p-0.5 rounded"
+                        title="Delete"
+                        aria-label="Delete"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                          <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {expanded && (
+                      <div className="border-t border-[color:var(--border-base)] px-3 py-3 bg-[color:var(--surface-sunken)]">
+                        <p className="text-sm whitespace-pre-wrap text-[color:var(--ink)]">{item.answer}</p>
+                        {item.source_documents && item.source_documents.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-[color:var(--border-base)]">
+                            <div className="mono-label text-[11px] text-gray-500 mb-1.5">Source documents</div>
+                            <ul className="space-y-1">
+                              {item.source_documents.map((doc) => (
+                                <li key={doc.url}>
+                                  <a
+                                    href={doc.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-start gap-1.5 text-xs text-[color:var(--brand-700)] hover:text-[color:var(--brand-500)] hover:underline"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true">
+                                      <path fillRule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm6 0v3a1 1 0 0 0 1 1h3l-4-4Z" clipRule="evenodd" />
+                                    </svg>
+                                    <span>
+                                      {doc.filename}
+                                      {doc.description && <span className="text-gray-500"> — {doc.description}</span>}
+                                    </span>
+                                  </a>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {item.stats && (
+                          <div className="mt-2 pt-2 border-t border-[color:var(--border-base)] text-[11px] text-gray-500 tabular-nums">
+                            Searched {item.stats.recordCount} records across {item.stats.toolsSearched} tools
+                            {item.stats.filesAttached > 0
+                              ? ` · ${item.stats.filesCited} of ${item.stats.filesAttached} file${item.stats.filesAttached === 1 ? "" : "s"} cited`
+                              : ""}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Recurring Workflows */}
+        <div className="mt-10">
+          <h2 className="font-display text-[28px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
+            Recurring Workflows
+          </h2>
+          <p className="sub mt-1">
+            Save a prompt to run on a recurring schedule.
+            <span className="sep">·</span>
+            <span className="num" style={{ color: "var(--brand-500)" }}>{workflows.filter((w) => w.active).length}</span> active
+          </p>
+        </div>
+
+        <div className="card card-pad mt-4">
           <form onSubmit={saveWorkflow} className="space-y-3 border-b border-[color:var(--border-base)] pb-5 mb-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -417,38 +588,46 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                   <option value="monthly">Monthly</option>
                 </select>
               </div>
+              {wfFrequency === "weekly" && (
+                <div>
+                  <label className="mono-label block text-gray-600 mb-1">Day of week</label>
+                  <select
+                    value={wfRunDayOfWeek}
+                    onChange={(e) => setWfRunDayOfWeek(e.target.value as Weekday)}
+                    className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+                  >
+                    {WEEKDAY_OPTIONS.map((day) => (
+                      <option key={day} value={day}>
+                        {day[0].toUpperCase() + day.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {wfFrequency === "monthly" && (
+                <div>
+                  <label className="mono-label block text-gray-600 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={wfRunDate}
+                    onChange={(e) => setWfRunDate(e.target.value)}
+                    className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+                  />
+                  <p className="mt-1 text-[11px] text-gray-500">Runs on this day each month.</p>
+                </div>
+              )}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Day of week</label>
-                <select
-                  value={wfRunDayOfWeek}
-                  onChange={(e) => setWfRunDayOfWeek(e.target.value as Weekday)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                >
-                  {WEEKDAY_OPTIONS.map((day) => (
-                    <option key={day} value={day}>
-                      {day[0].toUpperCase() + day.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Run time (ET)</label>
+                <label className="mono-label block text-gray-600 mb-1">Run time (ET)</label>
                 <select
                   value={String(wfRunHourEt)}
                   onChange={(e) => setWfRunHourEt(Number(e.target.value))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
                 >
                   {Array.from({ length: 24 }).map((_, h) => (
                     <option key={h} value={h}>
                       {h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`}
                     </option>
                   ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Run minute (ET)</label>
-                <select value={String(wfRunMinuteEt)} onChange={(e) => setWfRunMinuteEt(Number(e.target.value))} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
-                  {Array.from({ length: 60 }).map((_, m) => (<option key={m} value={m}>{String(m).padStart(2, "0")}</option>))}
                 </select>
               </div>
             </div>
@@ -509,14 +688,19 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                       <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
                         {FREQUENCY_LABELS[w.frequency]}
                       </span>
-                      {w.runDayOfWeek && (
+                      {w.frequency === "weekly" && w.runDayOfWeek && (
                         <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
                           {w.runDayOfWeek[0].toUpperCase() + w.runDayOfWeek.slice(1)}
                         </span>
                       )}
+                      {w.frequency === "monthly" && w.runDate && (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                          {formatRunDate(w.runDate)}
+                        </span>
+                      )}
                       {typeof w.runHourEt === "number" && (
                         <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
-                          {(w.runHourEt === 0 ? "12" : w.runHourEt <= 12 ? String(w.runHourEt) : String(w.runHourEt - 12)) + `:${String(w.runMinuteEt ?? 0).padStart(2, "0")} ` + (w.runHourEt < 12 ? "AM ET" : "PM ET")}
+                          {(w.runHourEt === 0 ? "12" : w.runHourEt <= 12 ? String(w.runHourEt) : String(w.runHourEt - 12)) + " " + (w.runHourEt < 12 ? "AM ET" : "PM ET")}
                         </span>
                       )}
                       {!w.active && (
@@ -526,7 +710,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                       )}
                     </div>
                     <p className="mt-1 text-xs text-gray-600 whitespace-pre-wrap break-words">{w.prompt}</p>
-                    
+
                     <div className="mt-2">
                       <p className="text-[11px] font-medium text-gray-600">Latest reports</p>
                       {w.reports && w.reports.length > 0 ? (
@@ -543,7 +727,8 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                         <p className="text-xs text-gray-500 mt-1">No reports yet.</p>
                       )}
                       <a
-                        href="#" onClick={(e) => { e.preventDefault(); setSelectedWorkflow(w); }}
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); setSelectedWorkflow(w); }}
                         className="mt-2 inline-block text-xs font-medium text-gray-700 hover:text-gray-900 hover:underline"
                       >
                         See all reports
@@ -568,9 +753,31 @@ export default function AssistClient({ projectId }: { projectId: string }) {
               ))}
             </ul>
           )}
-        {selectedWorkflow && (<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSelectedWorkflow(null)}><div className="w-full max-w-2xl rounded-lg bg-white p-4" onClick={(e) => e.stopPropagation()}><div className="flex items-center justify-between"><h3 className="text-sm font-semibold">{selectedWorkflow.name} — All Reports</h3><button className="text-sm" onClick={() => setSelectedWorkflow(null)}>Close</button></div><ul className="mt-3 max-h-[60vh] overflow-auto space-y-2">{(selectedWorkflow.reports ?? []).map((report) => (<li key={report.id}><a href={report.fileUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline">{report.fileName}</a></li>))}</ul></div></div>)}
-        </section>
+        </div>
       </main>
+
+      {selectedWorkflow && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setSelectedWorkflow(null)}
+        >
+          <div className="w-full max-w-2xl rounded-lg bg-white p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">{selectedWorkflow.name} — All Reports</h3>
+              <button className="text-sm" onClick={() => setSelectedWorkflow(null)}>Close</button>
+            </div>
+            <ul className="mt-3 max-h-[60vh] overflow-auto space-y-2">
+              {(selectedWorkflow.reports ?? []).map((report) => (
+                <li key={report.id}>
+                  <a href={report.fileUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline">
+                    {report.fileName}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
