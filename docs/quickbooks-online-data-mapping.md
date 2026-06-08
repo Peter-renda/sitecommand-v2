@@ -12,14 +12,23 @@ gaps that must be closed for "all necessary fields" to flow correctly.
 > Legend for the **Status** column in every table:
 > ✅ mapped today · ⚠️ mapped but needs correction · ❌ gap (not mapped) · 🔭 future/out-of-scope
 
-> **Implemented (P0, this revision):** All `VendorRef` / `CustomerRef` now resolve to a
-> QBO **Id** (`value`), creating the master record when it doesn't exist (**G2**). Bill
-> expense lines post to a **real expense/COGS account** and PO/Invoice lines to a **real
-> Item** — never to `Accounts Payable (A/P)` (**G4**). A foundational URL bug in `callQBO`
-> (a stray `?` broke every query and `?operation=update`) was also fixed. The ⚠️ rows below
-> for `*Ref` / `AccountRef` / `ItemRef` are therefore now ✅; they are kept here for history.
-> New config keys: `QBO_AP_EXPENSE_ACCOUNT`, `QBO_DEFAULT_ITEM` (per-company or env;
-> auto-detected when unset).
+> **Implemented (P0):** All `VendorRef` / `CustomerRef` resolve to a QBO **Id** (`value`),
+> creating the master record when it doesn't exist (**G2**). Bill expense lines post to a
+> **real expense/COGS account** and PO/Invoice lines to a **real Item** — never to
+> `Accounts Payable (A/P)` (**G4**). A foundational URL bug in `callQBO` (a stray `?` broke
+> every query and `?operation=update`) was also fixed.
+>
+> **Implemented (P1):** Header and invoice transactions now carry the **full Schedule of
+> Values** — one QBO line per SOV item with qty/unit preserved when consistent (**G13**);
+> each line's **budget code** maps to an Account/Class/Item via `QBO_BUDGET_CODE_MAP`,
+> falling back to defaults when unmapped (**G5**); transactions use **real document dates**
+> instead of today (**G9**); and **retainage** is withheld as a negative line on AP/AR
+> invoices when the retainage account is configured (**G10**). The ⚠️ rows below for these
+> are now ✅; they are kept for history.
+>
+> New config keys: `QBO_AP_EXPENSE_ACCOUNT`, `QBO_DEFAULT_ITEM`, `QBO_BUDGET_CODE_MAP`
+> (JSON), `QBO_RETAINAGE_RECEIVABLE_ACCOUNT`, `QBO_RETAINAGE_PAYABLE_ACCOUNT` (per-company
+> in `company_integrations`, or env; accounts/items auto-detected/created where safe).
 
 ---
 
@@ -236,12 +245,12 @@ Prioritized. **P0 = blocks correct posting; P1 = completeness/accuracy; P2 = nic
 | **G2** | ✅ done | ~~Vendor/Customer sent as `*Ref.name` only; errors when the display name doesn't exactly match.~~ | **Implemented:** `findOrCreateVendorId`/`findOrCreateCustomerId` resolve `DisplayName → Id` and auto-create a minimal record when absent; all transactions now post `*Ref.value`. *Remaining (P1):* enrich the auto-created record with address/email/phone from the directory contact. |
 | **G4** | ✅ done | ~~Bill line `AccountRef = "Accounts Payable (A/P)"` invalid; `ItemRef = "Services"` assumed.~~ | **Implemented:** `findExpenseAccountId` posts Bills to a configured (`QBO_AP_EXPENSE_ACCOUNT`) or auto-detected COGS/Expense account; `findOrCreateItemId` resolves/creates the PO/Invoice Item (`QBO_DEFAULT_ITEM`, default "Services"). Sync fails fast with a clear message if no valid account/item can be found. |
 | **G1** | P1 | Subcontract header → Bill *and* SOV billed-to-date → Bill double-books the liability. | Map subcontract/PO header → **PurchaseOrder** (commitment, non-posting); map the actual invoice/SOV billing → **Bill** (payable). Decision needed before changing posting behavior. |
-| **G5** | P1 | `budget_code` / `cost_code` (WBS) not mapped → no job costing. | Introduce a `qbo_code_map` (realm + SiteCommand code → `AccountRef`/`ClassRef`/`ItemRef`). Apply per SOV line. |
+| **G5** | ✅ done | ~~`budget_code` / `cost_code` (WBS) not mapped → no job costing.~~ | **Implemented:** `resolveCodeRefs` maps each SOV line's budget code → `AccountRef`/`ClassRef`/`ItemRef` via the `QBO_BUDGET_CODE_MAP` JSON (Class auto-created best-effort). Unmapped codes fall back to the transaction default. *Remaining:* populate the map for each realm (chart-of-accounts data). |
+| **G13** | ✅ done | ~~Header sync sends one lump-sum line; SOV `qty/uom/unit_cost` dropped.~~ | **Implemented:** `buildBillLine`/`buildItemLine` emit one QBO line per SOV item; `Qty`/`UnitPrice` preserved when `qty*unitCost ≈ amount`. Falls back to a single lump-sum line when the SOV is empty. |
+| **G9** | ✅ done | ~~`TxnDate = today` ignores real document dates.~~ | **Implemented:** subcontract Bill `TxnDate=start_date` + `DueDate=estimated_completion`; PO `TxnDate=issued_on_date\|\|contract_date`; prime Invoice already used `start_date`/`estimated_completion_date`. |
+| **G10** | ✅ done | ~~Retainage only in `PrivateNote`.~~ | **Implemented:** AR invoices withhold per-line retainage (`work_completed_this_period × retainage_pct`) as a negative "Retainage" item line; AP bills withhold `billed × default_retainage%` as a negative account line. Emitted only when `QBO_RETAINAGE_RECEIVABLE_ACCOUNT` / `QBO_RETAINAGE_PAYABLE_ACCOUNT` is set. *Remaining:* `materials_stored` line. |
 | **G3** | P1 | Project not mapped → costs/revenue not job-tracked. | Map `projects` → **Customer:Job** (sub-customer of owner) or **Class**; set `Line…CustomerRef` + `BillableStatus` on bills and `ClassRef` on lines. |
-| **G13** | P1 | Header sync sends one lump-sum line; SOV `qty/uom/unit_cost` dropped. | Send the full SOV breakdown as multiple lines with `Qty`/`UnitPrice`; keep header total = Σ lines. |
-| **G8** | P1 | Commitments post `original_contract_amount` (no COs); prime posts revised (incl. approved COs). Inconsistent. | Decide one rule (recommend **revised** for both) and apply consistently. |
-| **G9** | P1 | `TxnDate = today` ignores real document dates. | Use `start_date`/`contract_date`/`issued_on_date`; set `DueDate` from `delivery_date`/terms. |
-| **G10** | P1 | Retainage only in `PrivateNote`; AIA G-703 columns (`materials_stored`, `retainage_*`) dropped. | Add explicit retainage line to a "Retainage Receivable/Payable" account; add stored-materials line. |
+| **G8** | P1 | Commitments post `original_contract_amount` (no COs); prime posts revised (incl. approved COs). Inconsistent. Note: header lines now reflect the SOV total when an SOV exists (G13). | Decide one rule (recommend **revised** for both) and apply consistently. |
 | **G11** | P1 | `status` (`void`/`terminated`) doesn't void the QBO doc. | On void/terminate, issue QBO `void`/`delete`; reflect back to `erp_status`. |
 | **G6** | P2 | `payment_terms` unmapped. | Map free-text terms → `SalesTermRef`; derive `DueDate`. |
 | **G7** | P2 | `DocNumber` from per-project `number` can collide across projects in one realm. | Prefix (e.g., `SC-{projectNo}-{number}`) or disable QBO duplicate-DocNumber check. |
@@ -278,9 +287,10 @@ Prioritized. **P0 = blocks correct posting; P1 = completeness/accuracy; P2 = nic
 
 1. **G1** — subcontract = `PurchaseOrder` (commitment) or `Bill` (payable)?
 2. **G8** — header amount = original or revised (incl. approved COs)?
-3. **G4 (config) / G5** — G4 auto-detects a COGS/Expense account and an Item, but each
-   realm should confirm the *correct* posting targets via `QBO_AP_EXPENSE_ACCOUNT` /
-   `QBO_DEFAULT_ITEM`. Still open: the budget-code → account/class map (G5), which is
-   customer-specific chart-of-accounts data.
+3. **Config to populate per realm** — the *mechanisms* for G4/G5/G10 ship, but each realm
+   must supply its own chart-of-accounts values: `QBO_AP_EXPENSE_ACCOUNT`,
+   `QBO_DEFAULT_ITEM`, the `QBO_BUDGET_CODE_MAP` (budget code → account/class/item), and the
+   retainage accounts. Until set, the integration uses safe auto-detected/default targets and
+   omits retainage.
 4. **G3** — job costing via Customer:Job vs Class.
 5. Push vs two-way sync (today: push-only, QBO → SiteCommand not implemented).

@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
     // set and apply the comparison in JS. Hard cap keeps the candidate set small.
     const { data: commitmentCandidates } = await supabase
       .from("commitments")
-      .select("id, type, number, title, contract_company, original_contract_amount, status, project_id, qbo_id, last_synced_at, updated_at")
+      .select("id, type, number, title, contract_company, original_contract_amount, status, project_id, qbo_id, last_synced_at, updated_at, start_date, estimated_completion, contract_date, issued_on_date, delivery_date, default_retainage, qbo_ap_invoice_id, qbo_ap_invoice_synced_at")
       .in("project_id", projectIds)
       .is("deleted_at", null)
       .order("updated_at", { ascending: true })
@@ -126,8 +126,22 @@ export async function GET(req: NextRequest) {
       .slice(0, MAX_COMMITMENTS_PER_COMPANY);
 
     for (const commitment of dirtyCommitments) {
+      const { data: sovRows } = await supabase
+        .from("commitment_sov_items")
+        .select("budget_code, description, amount, qty, uom, unit_cost")
+        .eq("commitment_id", commitment.id)
+        .eq("is_group_header", false)
+        .order("sort_order", { ascending: true });
+      const sovLines = (sovRows ?? []).map((r) => ({
+        budgetCode: r.budget_code ?? "",
+        description: r.description || commitment.title,
+        amount: Number(r.amount),
+        qty: Number(r.qty) || undefined,
+        uom: r.uom || undefined,
+        unitCost: Number(r.unit_cost) || undefined,
+      }));
       const result = await syncCommitmentToQBO(
-        companyId, appCreds, companyCreds, commitment, commitment.qbo_id
+        companyId, appCreds, companyCreds, { ...commitment, sovLines }, commitment.qbo_id
       );
 
       const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
@@ -161,8 +175,22 @@ export async function GET(req: NextRequest) {
       .slice(0, MAX_PRIME_CONTRACTS_PER_COMPANY);
 
     for (const contract of dirtyContracts) {
+      const { data: psovRows } = await supabase
+        .from("prime_contract_sov_items")
+        .select("budget_code, description, scheduled_value, qty, uom, unit_cost")
+        .eq("prime_contract_id", contract.id)
+        .eq("is_group_header", false)
+        .order("sort_order", { ascending: true });
+      const sovLines = (psovRows ?? []).map((r) => ({
+        budgetCode: r.budget_code ?? "",
+        description: r.description || contract.title,
+        amount: Number(r.scheduled_value),
+        qty: Number(r.qty) || undefined,
+        uom: r.uom || undefined,
+        unitCost: Number(r.unit_cost) || undefined,
+      }));
       const result = await syncPrimeContractToQBO(
-        companyId, appCreds, companyCreds, contract, contract.qbo_id
+        companyId, appCreds, companyCreds, { ...contract, sovLines }, contract.qbo_id
       );
 
       const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
@@ -196,7 +224,7 @@ export async function GET(req: NextRequest) {
 
         const { data: sovItems } = await supabase
           .from("commitment_sov_items")
-          .select("description, billed_to_date, updated_at")
+          .select("budget_code, description, billed_to_date, updated_at")
           .eq("commitment_id", commitmentId)
           .eq("is_group_header", false)
           .gt("billed_to_date", 0)
@@ -222,9 +250,11 @@ export async function GET(req: NextRequest) {
             vendorName: commitment.contract_company,
             description: commitment.title,
             lineItems: sovItems.map((item) => ({
+              budgetCode: item.budget_code ?? "",
               description: item.description || commitment.title,
               amount: Number(item.billed_to_date),
             })),
+            retainagePct: Number((commitment as { default_retainage?: number }).default_retainage) || 0,
           },
           existingApId
         );
@@ -261,7 +291,7 @@ export async function GET(req: NextRequest) {
 
         const { data: sovItems } = await supabase
           .from("prime_contract_sov_items")
-          .select("description, work_completed_this_period, updated_at")
+          .select("budget_code, description, work_completed_this_period, retainage_pct, updated_at")
           .eq("prime_contract_id", contractId)
           .eq("is_group_header", false)
           .gt("work_completed_this_period", 0)
@@ -285,10 +315,16 @@ export async function GET(req: NextRequest) {
             contractNumber: contract.contract_number,
             customerName: contract.owner_client,
             description: contract.title,
-            lineItems: sovItems.map((item) => ({
-              description: item.description || contract.title,
-              amount: Number(item.work_completed_this_period),
-            })),
+            lineItems: sovItems.map((item) => {
+              const amount = Number(item.work_completed_this_period);
+              const pct = Number(item.retainage_pct) || 0;
+              return {
+                budgetCode: item.budget_code ?? "",
+                description: item.description || contract.title,
+                amount,
+                retainageAmount: pct > 0 ? Number(((amount * pct) / 100).toFixed(2)) : 0,
+              };
+            }),
           },
           existingArId
         );

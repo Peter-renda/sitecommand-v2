@@ -124,9 +124,31 @@ Item (never to `Accounts Payable (A/P)`). The targets are configurable per compa
 |---|---|---|
 | `QBO_AP_EXPENSE_ACCOUNT` | Account name to debit on Bills (AP) | first active **Cost of Goods Sold**, then **Expense**, account in the realm |
 | `QBO_DEFAULT_ITEM` | Item name for PO / Invoice lines | `Services` (created as a Service item wired to the first active Income account if missing) |
+| `QBO_BUDGET_CODE_MAP` | JSON map of SOV budget code → QBO refs | `{}` — unmapped codes fall back to the defaults above |
+| `QBO_RETAINAGE_RECEIVABLE_ACCOUNT` | Account behind the AR "Retainage" item | unset → no retainage line on invoices |
+| `QBO_RETAINAGE_PAYABLE_ACCOUNT` | Account for AP retainage withholding | unset → no retainage line on bills |
 
 If no valid account/item can be resolved, the sync fails fast with a clear message
 instead of posting an invalid transaction.
+
+### Schedule of Values, dates & retainage
+
+- **Line detail** — commitment Bills/POs and prime Invoices post one QBO line per SOV item
+  (description prefixed with the budget code; `Qty`/`UnitPrice` preserved when they
+  reconcile to the line amount). A commitment with no SOV lines falls back to a single
+  lump-sum line.
+- **Budget-code mapping** — each line's budget code is looked up in `QBO_BUDGET_CODE_MAP`:
+  ```json
+  { "01-100": { "account": "Job Materials", "class": "Phase 1", "item": "Materials" } }
+  ```
+  Any of `account` / `class` / `item` may be set; the Class is auto-created when missing
+  (skipped silently if class tracking is off). Unmapped codes use the transaction defaults.
+- **Document dates** — subcontract Bills use the commitment start/estimated-completion
+  dates, POs use the issued/contract date, prime Invoices use the contract start/estimated
+  dates — rather than the sync date.
+- **Retainage** — AR invoices withhold `work-completed × retainage %` per line and AP bills
+  withhold `billed × default retainage %`, each as a single negative line, **only** when the
+  matching retainage account key above is set.
 
 ## Current limitations
 
@@ -134,7 +156,10 @@ instead of posting an invalid transaction.
   SiteCommand.
 - Auto-created Vendors/Customers carry only a `DisplayName`; address/email/phone
   enrichment from the directory is a planned follow-up (see data-mapping spec G2).
-- Budget codes / cost codes are not yet mapped to QBO Accounts/Classes (spec G5).
+- Budget-code → Account/Class/Item mapping works but is **config-driven**: it only takes
+  effect for codes listed in `QBO_BUDGET_CODE_MAP` (spec G5).
+- Projects are not yet mapped to a QBO Customer:Job/Class, and change orders are not pushed
+  (spec G3 / CO).
 
 
 ## Enterprise Suite compatibility

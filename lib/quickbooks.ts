@@ -413,28 +413,44 @@ async function queryQBO(
   return Array.isArray(rows) ? rows : [rows];
 }
 
+export type QBOPostingConfig = {
+  expenseAccountName: string | null;
+  itemName: string | null;
+  retainageReceivableAccount: string | null; // AR retainage (Invoices)
+  retainagePayableAccount: string | null;     // AP retainage (Bills)
+};
+
 /** Per-company posting defaults (overridable via company_integrations or env). */
-export async function getQBOPostingConfig(
-  companyId: string
-): Promise<{ expenseAccountName: string | null; itemName: string | null }> {
+export async function getQBOPostingConfig(companyId: string): Promise<QBOPostingConfig> {
+  const keys = [
+    "QBO_AP_EXPENSE_ACCOUNT",
+    "QBO_DEFAULT_ITEM",
+    "QBO_RETAINAGE_RECEIVABLE_ACCOUNT",
+    "QBO_RETAINAGE_PAYABLE_ACCOUNT",
+  ];
+  const env: QBOPostingConfig = {
+    expenseAccountName:        process.env.QBO_AP_EXPENSE_ACCOUNT          ?? null,
+    itemName:                  process.env.QBO_DEFAULT_ITEM               ?? null,
+    retainageReceivableAccount: process.env.QBO_RETAINAGE_RECEIVABLE_ACCOUNT ?? null,
+    retainagePayableAccount:    process.env.QBO_RETAINAGE_PAYABLE_ACCOUNT    ?? null,
+  };
   try {
     const supabase = getSupabase();
     const { data } = await supabase
       .from("company_integrations")
       .select("key, value")
       .eq("company_id", companyId)
-      .in("key", ["QBO_AP_EXPENSE_ACCOUNT", "QBO_DEFAULT_ITEM"]);
+      .in("key", keys);
     const map: Record<string, string> = {};
     for (const row of data ?? []) map[row.key] = row.value;
     return {
-      expenseAccountName: map.QBO_AP_EXPENSE_ACCOUNT ?? process.env.QBO_AP_EXPENSE_ACCOUNT ?? null,
-      itemName:           map.QBO_DEFAULT_ITEM       ?? process.env.QBO_DEFAULT_ITEM       ?? null,
+      expenseAccountName:         map.QBO_AP_EXPENSE_ACCOUNT          ?? env.expenseAccountName,
+      itemName:                   map.QBO_DEFAULT_ITEM                ?? env.itemName,
+      retainageReceivableAccount: map.QBO_RETAINAGE_RECEIVABLE_ACCOUNT ?? env.retainageReceivableAccount,
+      retainagePayableAccount:    map.QBO_RETAINAGE_PAYABLE_ACCOUNT    ?? env.retainagePayableAccount,
     };
   } catch {
-    return {
-      expenseAccountName: process.env.QBO_AP_EXPENSE_ACCOUNT ?? null,
-      itemName:           process.env.QBO_DEFAULT_ITEM       ?? null,
-    };
+    return env;
   }
 }
 
@@ -479,17 +495,24 @@ export async function findOrCreateCustomerId(
  * account name when provided; otherwise auto-detects the first active COGS
  * (then Expense) account. Returns null when none can be found — never A/P.
  */
+/** Resolves an Account by exact Name → Id (no auto-create; accounts require a type). */
+export async function findAccountIdByName(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, name?: string | null
+): Promise<string | null> {
+  const n = (name ?? "").trim();
+  if (!n) return null;
+  const rows = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Account WHERE Name = '${escapeQBOString(n)}' AND Active = true`, "Account"
+  );
+  return rows && rows.length > 0 ? String(rows[0].Id) : null;
+}
+
 export async function findExpenseAccountId(
   companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, configuredName?: string | null
 ): Promise<string | null> {
   const name = (configuredName ?? "").trim();
-  if (name) {
-    const rows = await queryQBO(
-      companyId, appCreds, companyCreds,
-      `SELECT Id FROM Account WHERE Name = '${escapeQBOString(name)}' AND Active = true`, "Account"
-    );
-    return rows && rows.length > 0 ? String(rows[0].Id) : null;
-  }
+  if (name) return findAccountIdByName(companyId, appCreds, companyCreds, name);
   for (const acctType of ["Cost of Goods Sold", "Expense"]) {
     const rows = await queryQBO(
       companyId, appCreds, companyCreds,
@@ -526,6 +549,159 @@ export async function findOrCreateItemId(
   return status === 200 ? (String((json as any)?.Item?.Id ?? "") || null) : null;
 }
 
+// ── Schedule-of-Values line mapping (P1: line detail, job costing, retainage) ──
+//
+// A single normalized SOV line shape feeds every transaction. Each line maps to
+// one QBO line; its budget code resolves (via QBO_BUDGET_CODE_MAP) to an
+// Account / Class / Item so costs and revenue are tracked by cost code. When a
+// code has no mapping the line falls back to the transaction's default
+// account/item, so syncing never blocks on an incomplete map.
+
+export type QBOSovLine = {
+  budgetCode: string;
+  description: string;
+  amount: number;        // scheduled value (header sync) or billed amount (invoice sync)
+  qty?: number;
+  uom?: string;
+  unitCost?: number;
+  retainageAmount?: number; // withheld on this line (AR billing)
+};
+
+type QBOCodeRef = { accountId?: string; classId?: string; itemId?: string };
+
+function roundMoney(n: number): number {
+  return Number((Number.isFinite(n) ? n : 0).toFixed(2));
+}
+
+/** Per-company budget-code → QBO ref-name map (JSON in company_integrations or env). */
+export async function getQBOBudgetCodeMap(
+  companyId: string
+): Promise<Record<string, { account?: string; class?: string; item?: string }>> {
+  try {
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from("company_integrations")
+      .select("value")
+      .eq("company_id", companyId)
+      .eq("key", "QBO_BUDGET_CODE_MAP")
+      .maybeSingle();
+    const raw = (data?.value ?? process.env.QBO_BUDGET_CODE_MAP ?? "").trim();
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Resolves a Class by exact Name → Id, creating it when absent. Best-effort:
+ * returns null (caller omits ClassRef) when class tracking is disabled in the
+ * QBO company, so an unconfigured realm never fails the whole sync.
+ */
+export async function findOrCreateClassId(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, className?: string | null
+): Promise<string | null> {
+  const name = (className ?? "").trim();
+  if (!name) return null;
+  const found = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Class WHERE Name = '${escapeQBOString(name)}'`, "Class"
+  );
+  if (found && found.length > 0) return String(found[0].Id);
+  const { status, json } = await callQBO(
+    companyId, appCreds, companyCreds, "POST", "class", { Name: name }
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return status === 200 ? (String((json as any)?.Class?.Id ?? "") || null) : null;
+}
+
+/**
+ * Resolves the per-line Account/Class/Item refs for the budget codes in use.
+ * Only codes present in `map` are resolved; everything else falls back to
+ * transaction defaults at line-build time.
+ */
+export async function resolveCodeRefs(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials,
+  codes: string[],
+  map: Record<string, { account?: string; class?: string; item?: string }>
+): Promise<Record<string, QBOCodeRef>> {
+  const out: Record<string, QBOCodeRef> = {};
+  const unique = Array.from(new Set(codes.map((c) => (c ?? "").trim()).filter(Boolean)));
+  for (const code of unique) {
+    const entry = map[code];
+    if (!entry) continue;
+    const ref: QBOCodeRef = {};
+    if (entry.account) { const id = await findAccountIdByName(companyId, appCreds, companyCreds, entry.account); if (id) ref.accountId = id; }
+    if (entry.class)   { const id = await findOrCreateClassId(companyId, appCreds, companyCreds, entry.class);   if (id) ref.classId = id; }
+    if (entry.item)    { const id = await findOrCreateItemId(companyId, appCreds, companyCreds, entry.item);      if (id) ref.itemId = id; }
+    out[code] = ref;
+  }
+  return out;
+}
+
+/**
+ * Resolves (creating if needed) a "Retainage" Service item wired to the given
+ * retainage account name. Returns null if the account can't be found, so
+ * retainage lines are only emitted for realms that have configured the account.
+ */
+async function findOrCreateRetainageItemId(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, accountName?: string | null
+): Promise<string | null> {
+  const acctId = await findAccountIdByName(companyId, appCreds, companyCreds, accountName);
+  if (!acctId) return null;
+  const found = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Item WHERE Name = 'Retainage'`, "Item"
+  );
+  if (found && found.length > 0) return String(found[0].Id);
+  const { status, json } = await callQBO(
+    companyId, appCreds, companyCreds, "POST", "item",
+    { Name: "Retainage", Type: "Service", IncomeAccountRef: { value: acctId } }
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return status === 200 ? (String((json as any)?.Item?.Id ?? "") || null) : null;
+}
+
+function lineDescription(line: QBOSovLine): string {
+  return line.budgetCode ? `${line.budgetCode} — ${line.description}` : line.description;
+}
+
+/** Account-based expense line (Bills). */
+function buildBillLine(line: QBOSovLine, ref: QBOCodeRef, defaultAccountId: string): Record<string, unknown> {
+  const detail: Record<string, unknown> = { AccountRef: { value: ref.accountId ?? defaultAccountId } };
+  if (ref.classId) detail.ClassRef = { value: ref.classId };
+  return {
+    DetailType: "AccountBasedExpenseLineDetail",
+    Amount: roundMoney(line.amount),
+    Description: lineDescription(line),
+    AccountBasedExpenseLineDetail: detail,
+  };
+}
+
+/** Item-based line (PurchaseOrder) or sales line (Invoice). Preserves qty/unit when consistent. */
+function buildItemLine(
+  line: QBOSovLine, ref: QBOCodeRef, defaultItemId: string,
+  detailType: "ItemBasedExpenseLineDetail" | "SalesItemLineDetail"
+): Record<string, unknown> {
+  const amount = roundMoney(line.amount);
+  let qty = 1;
+  let unitPrice = amount;
+  if (line.qty && line.qty > 0 && line.unitCost && line.unitCost > 0
+      && Math.abs(line.qty * line.unitCost - line.amount) < 0.01) {
+    qty = line.qty;
+    unitPrice = roundMoney(line.unitCost);
+  }
+  const detail: Record<string, unknown> = { ItemRef: { value: ref.itemId ?? defaultItemId }, Qty: qty, UnitPrice: unitPrice };
+  if (ref.classId) detail.ClassRef = { value: ref.classId };
+  return {
+    DetailType: detailType,
+    Amount: amount,
+    Description: lineDescription(line),
+    [detailType]: detail,
+  };
+}
+
 // ── Commitment sync ───────────────────────────────────────────────────────────
 
 export type QBOCommitmentPayload = {
@@ -537,6 +713,14 @@ export type QBOCommitmentPayload = {
   original_contract_amount: number;
   status: string;
   project_id: string;
+  // Document dates (P1 G9) — fall back to today when absent.
+  start_date?: string | null;
+  estimated_completion?: string | null;
+  contract_date?: string | null;
+  issued_on_date?: string | null;
+  delivery_date?: string | null;
+  // Schedule of Values (P1 G13) — one QBO line per item when present.
+  sovLines?: QBOSovLine[];
 };
 
 /**
@@ -568,6 +752,13 @@ export async function syncCommitmentToQBO(
   }
   const config = await getQBOPostingConfig(companyId);
 
+  // Resolve per-line cost-code refs (Account/Class/Item) for any mapped codes.
+  const sovLines = commitment.sovLines ?? [];
+  const codeRefs = sovLines.length
+    ? await resolveCodeRefs(companyId, appCreds, companyCreds, sovLines.map((l) => l.budgetCode), await getQBOBudgetCodeMap(companyId))
+    : {};
+  const refFor = (code: string): QBOCodeRef => codeRefs[(code ?? "").trim()] ?? {};
+
   // For updates, fetch the latest SyncToken from QBO
   let syncToken: string | null = null;
   if (existingQboId) {
@@ -584,22 +775,17 @@ export async function syncCommitmentToQBO(
       if (!expenseAccountId) {
         return { ok: false, error: "No QBO expense account found. Set QBO_AP_EXPENSE_ACCOUNT to a valid expense or COGS account.", rawResponse: "" };
       }
+      const lines = sovLines.length
+        ? sovLines.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId))
+        : [buildBillLine({ budgetCode: "", description: commitment.title, amount }, {}, expenseAccountId)];
       const basePayload: Record<string, unknown> = {
         VendorRef: { value: vendorId },
-        TxnDate: today,
+        TxnDate: commitment.start_date || today,
         DocNumber: String(commitment.number),
         PrivateNote: commitment.title,
-        Line: [
-          {
-            DetailType: "AccountBasedExpenseLineDetail",
-            Amount: amount,
-            Description: commitment.title,
-            AccountBasedExpenseLineDetail: {
-              AccountRef: { value: expenseAccountId },
-            },
-          },
-        ],
+        Line: lines,
       };
+      if (commitment.estimated_completion) basePayload.DueDate = commitment.estimated_completion;
       const path = existingQboId ? "bill?operation=update" : "bill";
       const payload = existingQboId
         ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true }
@@ -622,23 +808,15 @@ export async function syncCommitmentToQBO(
       if (!itemId) {
         return { ok: false, error: "Could not resolve or create a QBO item for the purchase order line.", rawResponse: "" };
       }
+      const lines = sovLines.length
+        ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "ItemBasedExpenseLineDetail"))
+        : [buildItemLine({ budgetCode: "", description: commitment.title, amount }, {}, itemId, "ItemBasedExpenseLineDetail")];
       const basePayload: Record<string, unknown> = {
         VendorRef: { value: vendorId },
-        TxnDate: today,
+        TxnDate: commitment.issued_on_date || commitment.contract_date || today,
         DocNumber: String(commitment.number),
         PrivateNote: commitment.title,
-        Line: [
-          {
-            DetailType: "ItemBasedExpenseLineDetail",
-            Amount: amount,
-            Description: commitment.title,
-            ItemBasedExpenseLineDetail: {
-              ItemRef: { value: itemId },
-              Qty: 1,
-              UnitPrice: amount,
-            },
-          },
-        ],
+        Line: lines,
       };
       const path = existingQboId ? "purchaseorder?operation=update" : "purchaseorder";
       const payload = existingQboId
@@ -680,6 +858,8 @@ export type QBOPrimeContractPayload = {
   executed: boolean;
   start_date: string | null;
   estimated_completion_date: string | null;
+  // Schedule of Values (P1 G13) — one QBO line per item when present.
+  sovLines?: QBOSovLine[];
 };
 
 /**
@@ -719,6 +899,13 @@ export async function syncPrimeContractToQBO(
     return { ok: false, error: "Could not resolve or create a QBO item for the invoice line.", rawResponse: "" };
   }
 
+  // Resolve per-line cost-code refs (Class/Item) for any mapped codes.
+  const sovLines = contract.sovLines ?? [];
+  const codeRefs = sovLines.length
+    ? await resolveCodeRefs(companyId, appCreds, companyCreds, sovLines.map((l) => l.budgetCode), await getQBOBudgetCodeMap(companyId))
+    : {};
+  const refFor = (code: string): QBOCodeRef => codeRefs[(code ?? "").trim()] ?? {};
+
   // For updates, fetch the latest SyncToken from QBO
   let syncToken: string | null = null;
   if (existingQboId) {
@@ -727,6 +914,9 @@ export async function syncPrimeContractToQBO(
   }
 
   try {
+    const lines = sovLines.length
+      ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail"))
+      : [buildItemLine({ budgetCode: "", description: contract.title, amount: revisedAmount }, {}, itemId, "SalesItemLineDetail")];
     const basePayload: Record<string, unknown> = {
       CustomerRef: { value: customerId },
       TxnDate: contract.start_date ?? today,
@@ -734,18 +924,7 @@ export async function syncPrimeContractToQBO(
       DocNumber: String(contract.contract_number),
       PrivateNote: privateNote,
       CustomerMemo: { value: contract.description || contract.title },
-      Line: [
-        {
-          DetailType: "SalesItemLineDetail",
-          Amount: revisedAmount,
-          Description: contract.title,
-          SalesItemLineDetail: {
-            ItemRef: { value: itemId },
-            Qty: 1,
-            UnitPrice: revisedAmount,
-          },
-        },
-      ],
+      Line: lines,
     };
 
     // Remove undefined values so QBO doesn't reject
@@ -780,7 +959,8 @@ export type QBOAPInvoicePayload = {
   commitmentNumber: number;
   vendorName: string;
   description: string;
-  lineItems: { description: string; amount: number }[];
+  lineItems: QBOSovLine[];
+  retainagePct?: number; // % withheld; emits a negative line when QBO_RETAINAGE_PAYABLE_ACCOUNT is set
 };
 
 export async function syncAPInvoiceToQBO(
@@ -802,6 +982,8 @@ export async function syncAPInvoiceToQBO(
   if (!expenseAccountId) {
     return { ok: false, error: "No QBO expense account found. Set QBO_AP_EXPENSE_ACCOUNT to a valid expense or COGS account.", rawResponse: "" };
   }
+  const codeRefs = await resolveCodeRefs(companyId, appCreds, companyCreds, invoice.lineItems.map((l) => l.budgetCode), await getQBOBudgetCodeMap(companyId));
+  const refFor = (code: string): QBOCodeRef => codeRefs[(code ?? "").trim()] ?? {};
 
   let syncToken: string | null = null;
   if (existingQboId) {
@@ -810,19 +992,30 @@ export async function syncAPInvoiceToQBO(
   }
 
   try {
+    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId));
+
+    // Retainage withheld — negative line to the payable account (best-effort, config-gated).
+    const pct = invoice.retainagePct ?? 0;
+    if (pct > 0 && config.retainagePayableAccount) {
+      const retAcctId = await findAccountIdByName(companyId, appCreds, companyCreds, config.retainagePayableAccount);
+      const billed = invoice.lineItems.reduce((s, l) => s + l.amount, 0);
+      const retainage = roundMoney((billed * pct) / 100);
+      if (retAcctId && retainage > 0) {
+        lines.push({
+          DetailType: "AccountBasedExpenseLineDetail",
+          Amount: -retainage,
+          Description: `Retainage withheld (${pct}%)`,
+          AccountBasedExpenseLineDetail: { AccountRef: { value: retAcctId } },
+        });
+      }
+    }
+
     const basePayload: Record<string, unknown> = {
       VendorRef: { value: vendorId },
       TxnDate: today,
       DocNumber: String(invoice.commitmentNumber),
       PrivateNote: invoice.description,
-      Line: invoice.lineItems.map((li) => ({
-        DetailType: "AccountBasedExpenseLineDetail",
-        Amount: Number(li.amount.toFixed(2)),
-        Description: li.description,
-        AccountBasedExpenseLineDetail: {
-          AccountRef: { value: expenseAccountId },
-        },
-      })),
+      Line: lines,
     };
     const path = existingQboId ? "bill?operation=update" : "bill";
     const payload = existingQboId
@@ -853,7 +1046,7 @@ export type QBOARInvoicePayload = {
   contractNumber: number;
   customerName: string;
   description: string;
-  lineItems: { description: string; amount: number }[];
+  lineItems: QBOSovLine[]; // per-line retainageAmount emits a negative retainage line when configured
 };
 
 export async function syncARInvoiceToQBO(
@@ -875,6 +1068,8 @@ export async function syncARInvoiceToQBO(
   if (!itemId) {
     return { ok: false, error: "Could not resolve or create a QBO item for the invoice line.", rawResponse: "" };
   }
+  const codeRefs = await resolveCodeRefs(companyId, appCreds, companyCreds, invoice.lineItems.map((l) => l.budgetCode), await getQBOBudgetCodeMap(companyId));
+  const refFor = (code: string): QBOCodeRef => codeRefs[(code ?? "").trim()] ?? {};
 
   let syncToken: string | null = null;
   if (existingQboId) {
@@ -883,21 +1078,29 @@ export async function syncARInvoiceToQBO(
   }
 
   try {
+    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail"));
+
+    // Retainage withheld — negative line via a "Retainage" item wired to the
+    // receivable account (best-effort, config-gated).
+    const totalRetainage = roundMoney(invoice.lineItems.reduce((s, l) => s + (l.retainageAmount ?? 0), 0));
+    if (totalRetainage > 0 && config.retainageReceivableAccount) {
+      const retItemId = await findOrCreateRetainageItemId(companyId, appCreds, companyCreds, config.retainageReceivableAccount);
+      if (retItemId) {
+        lines.push({
+          DetailType: "SalesItemLineDetail",
+          Amount: -totalRetainage,
+          Description: "Retainage withheld",
+          SalesItemLineDetail: { ItemRef: { value: retItemId }, Qty: 1, UnitPrice: -totalRetainage },
+        });
+      }
+    }
+
     const basePayload: Record<string, unknown> = {
       CustomerRef: { value: customerId },
       TxnDate: today,
       DocNumber: String(invoice.contractNumber),
       PrivateNote: invoice.description,
-      Line: invoice.lineItems.map((li) => ({
-        DetailType: "SalesItemLineDetail",
-        Amount: Number(li.amount.toFixed(2)),
-        Description: li.description,
-        SalesItemLineDetail: {
-          ItemRef: { value: itemId },
-          Qty: 1,
-          UnitPrice: Number(li.amount.toFixed(2)),
-        },
-      })),
+      Line: lines,
     };
     const path = existingQboId ? "invoice?operation=update" : "invoice";
     const payload = existingQboId
