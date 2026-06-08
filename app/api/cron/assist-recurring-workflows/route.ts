@@ -76,17 +76,16 @@ function mostRecentOccurrence(
   }
 
   if (frequency === "monthly") {
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(runDate);
-    if (!m) return null;
-    const dom = Number(m[3]);
+    const dom = Number(runDate); // runDate now carries the raw day-of-month integer as a string
+    if (!Number.isInteger(dom) || dom < 1 || dom > 31) return null;
     const np = etParts(now);
     for (let back = 0; back < 13; back++) {
       let year = np.year;
       let month = np.month - back;
       while (month < 1) { month += 12; year -= 1; }
       const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-      if (dom > daysInMonth) continue; // month doesn't have this day (e.g. Feb 30)
-      const occ = startOfEtDay(year, month, dom);
+      const effectiveDay = Math.min(dom, daysInMonth); // clamp to last day of short months
+      const occ = startOfEtDay(year, month, effectiveDay);
       if (occ.getTime() <= now.getTime()) return occ;
     }
     return null;
@@ -108,7 +107,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabase
     .from("assist_recurring_workflows")
-    .select("id, project_id, name, prompt, frequency, run_day_of_week, run_date, last_run_at, active")
+    .select("id, project_id, name, prompt, frequency, run_day_of_week, run_day_of_month, last_run_at, active")
     .eq("active", true);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -121,7 +120,7 @@ export async function GET(req: NextRequest) {
       now,
       String(w.frequency ?? "daily"),
       String(w.run_day_of_week ?? "").toLowerCase(),
-      String(w.run_date ?? ""),
+      String(w.run_day_of_month ?? ""),
     );
     if (!occ) return false;
     const lastRun = w.last_run_at ? new Date(w.last_run_at).getTime() : 0;

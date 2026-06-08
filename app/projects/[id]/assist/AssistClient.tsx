@@ -39,7 +39,7 @@ type RecurringWorkflow = {
   prompt: string;
   frequency: Frequency;
   runDayOfWeek: Weekday | null;
-  runDate: string | null;
+  runDayOfMonth: number | null;
   runHourEt: number | null;
   runMinuteEt: number | null;
   recipients: string[];
@@ -55,12 +55,6 @@ const FREQUENCY_LABELS: Record<Frequency, string> = {
   monthly: "Monthly",
 };
 const WEEKDAY_OPTIONS: Weekday[] = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-
-function formatRunDate(d: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
-  if (!m) return d;
-  return `${m[2]}/${m[3]}/${m[1]}`;
-}
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -92,7 +86,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
   const [wfRecipients, setWfRecipients] = useState("");
   const [selectedWorkflow, setSelectedWorkflow] = useState<RecurringWorkflow | null>(null);
   const [wfRunDayOfWeek, setWfRunDayOfWeek] = useState<Weekday>("monday");
-  const [wfRunDate, setWfRunDate] = useState<string>("");
+  const [wfRunDayOfMonth, setWfRunDayOfMonth] = useState<number>(1);
   const [wfRunHourEt, setWfRunHourEt] = useState<number>(6);
   const [directoryRecipients, setDirectoryRecipients] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [wfSaving, setWfSaving] = useState(false);
@@ -255,8 +249,8 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       if (!r.includes("@")) { setWfError(`"${r}" is not a valid email.`); return; }
     }
 
-    if (wfFrequency === "monthly" && !wfRunDate) {
-      setWfError("Date is required for monthly workflows.");
+    if (wfFrequency === "monthly" && (!Number.isInteger(wfRunDayOfMonth) || wfRunDayOfMonth < 1 || wfRunDayOfMonth > 31)) {
+      setWfError("Day of month must be between 1 and 31.");
       return;
     }
 
@@ -271,7 +265,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
           frequency: wfFrequency,
           recipients,
           runDayOfWeek: wfRunDayOfWeek,
-          runDate: wfFrequency === "monthly" ? wfRunDate : null,
+          runDayOfMonth: wfFrequency === "monthly" ? wfRunDayOfMonth : null,
           runHourEt: wfRunHourEt,
           runMinuteEt: 0,
         }),
@@ -284,7 +278,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       setWfFrequency("weekly");
       setWfRecipients("");
       setWfRunDayOfWeek("monday");
-      setWfRunDate("");
+      setWfRunDayOfMonth(1);
       setWfRunHourEt(6);
     } catch (err) {
       setWfError(err instanceof Error ? err.message : "Failed to save");
@@ -606,14 +600,19 @@ export default function AssistClient({ projectId }: { projectId: string }) {
               )}
               {wfFrequency === "monthly" && (
                 <div>
-                  <label className="mono-label block text-gray-600 mb-1">Date</label>
+                  <label className="mono-label block text-gray-600 mb-1">Day of month</label>
                   <input
-                    type="date"
-                    value={wfRunDate}
-                    onChange={(e) => setWfRunDate(e.target.value)}
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={wfRunDayOfMonth}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (!isNaN(v)) setWfRunDayOfMonth(Math.min(31, Math.max(1, v)));
+                    }}
                     className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
                   />
-                  <p className="mt-1 text-[11px] text-gray-500">Runs on this day each month.</p>
+                  <p className="mt-1 text-[11px] text-gray-500">Runs on this day each month. If the month is shorter, runs on the last day.</p>
                 </div>
               )}
               <div>
@@ -693,9 +692,9 @@ export default function AssistClient({ projectId }: { projectId: string }) {
                           {w.runDayOfWeek[0].toUpperCase() + w.runDayOfWeek.slice(1)}
                         </span>
                       )}
-                      {w.frequency === "monthly" && w.runDate && (
+                      {w.frequency === "monthly" && w.runDayOfMonth != null && (
                         <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
-                          {formatRunDate(w.runDate)}
+                          Day {w.runDayOfMonth}
                         </span>
                       )}
                       {typeof w.runHourEt === "number" && (
