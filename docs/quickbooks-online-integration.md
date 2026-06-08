@@ -51,6 +51,43 @@ in this order:
 When the callback fails, the settings page now shows Intuit's own reason (e.g.
 `invalid_grant`) appended to the error message.
 
+## Testing against the QuickBooks sandbox
+
+The OAuth authorize/token URLs are identical for sandbox and production — only the REST
+API base and the **key set** differ. SiteCommand selects the base from the company's
+environment:
+
+| Setting | Effect |
+|---|---|
+| `QBO_ENVIRONMENT=sandbox` (env var, or a per-company `company_integrations` row) | Routes API calls to `https://sandbox-quickbooks.api.intuit.com` |
+| `QBO_ENVIRONMENT` unset / `production` | Routes to `https://quickbooks.api.intuit.com` (default) |
+| `QBO_API_BASE=<url>` | Explicit override of the REST base (wins over `QBO_ENVIRONMENT`) |
+
+To test end-to-end against a sandbox company:
+
+1. **Intuit Developer portal** → your app → use the **Development** keys (sandbox), and add
+   the redirect URI under the **Development** "Redirect URIs" list.
+2. Make sure you have a **sandbox company** (Developer portal → *Sandbox* → it provisions one
+   automatically; or add another).
+3. **SiteCommand env** (local `.env` or a preview deployment): set
+   `QBO_ENVIRONMENT=sandbox`, `INTUIT_REDIRECT_URI=<your-callback-url>`, and enter the
+   **Development** Client ID/Secret on the company's Integrations page (or in
+   `platform_settings`). Locally the callback is usually
+   `http://localhost:3000/api/integrations/quickbooks/callback`.
+4. **Connect** from Settings → Integrations → QuickBooks; pick the sandbox company on the
+   Intuit consent screen.
+5. **Trigger a sync.** There is no QuickBooks "Sync" button in the UI yet — push via either:
+   - the cron endpoint `GET /api/cron/quickbooks-sync` (locally, with `CRON_SECRET` unset, you
+     can just open it in the browser; deployed, send `Authorization: Bearer $CRON_SECRET`), or
+   - a direct `POST /api/integrations/quickbooks/sync` with `{ recordType, recordId }` while
+     logged in.
+6. **Verify** in the sandbox company UI (sign in at the Intuit sandbox) that the Bill /
+   Purchase Order / Invoice and any auto-created Vendor/Customer appear, and check the
+   `erp_sync_logs` rows (`integration='quickbooks'`) or `/api/integrations/quickbooks/logs`.
+
+When done, point the same company at production by removing `QBO_ENVIRONMENT=sandbox`,
+swapping in the **Production** keys, and reconnecting.
+
 ## How to use it
 
 1. Create or update a commitment / prime contract / SOV billing data in SiteCommand.

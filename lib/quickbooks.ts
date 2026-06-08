@@ -16,9 +16,30 @@
 
 import { getSupabase } from "@/lib/supabase";
 
-const QBO_BASE = "https://quickbooks.api.intuit.com/v3/company";
+const QBO_API_BASE_PRODUCTION = "https://quickbooks.api.intuit.com/v3/company";
+const QBO_API_BASE_SANDBOX    = "https://sandbox-quickbooks.api.intuit.com/v3/company";
 const QBO_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 const QBO_MINOR_VERSION = "65";
+
+export type QBOEnvironment = "sandbox" | "production";
+
+/** Normalizes an environment value; defaults to production. */
+function resolveQBOEnvironment(value?: string | null): QBOEnvironment {
+  return (value ?? "").trim().toLowerCase() === "sandbox" ? "sandbox" : "production";
+}
+
+/**
+ * Resolves the accounting-API base for a company's environment. The OAuth
+ * authorize/token URLs are identical across environments — only this REST base
+ * (and the key set) differs: sandbox keys + sandbox base for test companies,
+ * production keys + production base for real companies. `QBO_API_BASE` overrides
+ * everything when explicitly set.
+ */
+function qboApiBase(environment: QBOEnvironment): string {
+  const explicit = process.env.QBO_API_BASE?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  return environment === "sandbox" ? QBO_API_BASE_SANDBOX : QBO_API_BASE_PRODUCTION;
+}
 
 /** Path Intuit redirects back to after OAuth authorization. */
 export const QBO_CALLBACK_PATH = "/api/integrations/quickbooks/callback";
@@ -66,6 +87,7 @@ export type QBOCompanyCredentials = {
   realmId: string | null;
   accessToken: string | null;
   refreshToken: string | null;
+  environment: QBOEnvironment;
 };
 
 // ── Credential helpers ────────────────────────────────────────────────────────
@@ -127,7 +149,7 @@ export async function getQBOAppCredentials(companyId?: string): Promise<QBOAppCr
 export async function getQBOCompanyCredentials(
   companyId: string
 ): Promise<QBOCompanyCredentials> {
-  const keys = ["QBO_REALM_ID", "QBO_ACCESS_TOKEN", "QBO_REFRESH_TOKEN"] as const;
+  const keys = ["QBO_REALM_ID", "QBO_ACCESS_TOKEN", "QBO_REFRESH_TOKEN", "QBO_ENVIRONMENT"] as const;
 
   try {
     const supabase = getSupabase();
@@ -144,9 +166,14 @@ export async function getQBOCompanyCredentials(
       realmId:      map.QBO_REALM_ID      ?? null,
       accessToken:  map.QBO_ACCESS_TOKEN  ?? null,
       refreshToken: map.QBO_REFRESH_TOKEN ?? null,
+      // Per-company QBO_ENVIRONMENT row wins; falls back to the QBO_ENVIRONMENT env var, else production.
+      environment:  resolveQBOEnvironment(map.QBO_ENVIRONMENT ?? process.env.QBO_ENVIRONMENT),
     };
   } catch {
-    return { realmId: null, accessToken: null, refreshToken: null };
+    return {
+      realmId: null, accessToken: null, refreshToken: null,
+      environment: resolveQBOEnvironment(process.env.QBO_ENVIRONMENT),
+    };
   }
 }
 
@@ -236,7 +263,7 @@ export async function callQBO(
   // `path` may already carry a query string (e.g. "bill?operation=update" or a
   // "query?query=..." call), so pick the right separator for minorversion.
   const sep = path.includes("?") ? "&" : "?";
-  const url = `${QBO_BASE}/${realmId}/${path}${sep}minorversion=${QBO_MINOR_VERSION}`;
+  const url = `${qboApiBase(companyCreds.environment)}/${realmId}/${path}${sep}minorversion=${QBO_MINOR_VERSION}`;
 
   async function attempt(token: string) {
     return fetch(url, {
