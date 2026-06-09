@@ -5,6 +5,8 @@ import React, { useState, useEffect, useRef, useCallback, ChangeEvent } from "re
 import { Hand } from "lucide-react";
 import ProjectNav from "@/components/ProjectNav";
 import { Brand, Pill } from "@/components/design-system/Primitives";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { DOCUMENT_REPORT_FIELDS } from "@/lib/report-fields";
 
 type DocItem = {
   id: string;
@@ -17,6 +19,7 @@ type DocItem = {
   created_by_name: string | null;
   parent_id: string | null;
   is_private: boolean;
+  report_fields?: ReportFieldValues | null;
 };
 
 type BreadcrumbItem = { id: string | null; name: string };
@@ -1638,6 +1641,9 @@ export default function DocumentsClient({
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [renameTarget, setRenameTarget] = useState<DocItem | null>(null);
+  const [propsTarget, setPropsTarget] = useState<DocItem | null>(null);
+  const [propsFields, setPropsFields] = useState<ReportFieldValues>({});
+  const [propsSaving, setPropsSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DocItem | null>(null);
   const [moveTarget, setMoveTarget] = useState<DocItem | null>(null);
   const [allFolders, setAllFolders] = useState<{ id: string; name: string; parent_id: string | null }[]>([]);
@@ -1923,6 +1929,28 @@ export default function DocumentsClient({
         prev?.id === renameTarget.id ? { ...prev, name } : prev
       );
       if (renameTarget.type === "folder") await loadAllFolders();
+    }
+  }
+
+  function openProps(item: DocItem) {
+    setPropsTarget(item);
+    setPropsFields(item.report_fields ?? {});
+  }
+
+  async function handleSaveProps() {
+    if (!propsTarget) return;
+    setPropsSaving(true);
+    const res = await fetch(`/api/projects/${projectId}/documents/${propsTarget.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ report_fields: propsFields }),
+    });
+    setPropsSaving(false);
+    if (res.ok) {
+      setItems((prev) =>
+        prev.map((it) => (it.id === propsTarget.id ? { ...it, report_fields: propsFields } : it))
+      );
+      setPropsTarget(null);
     }
   }
 
@@ -2367,6 +2395,25 @@ export default function DocumentsClient({
           onCancel={() => setRenameTarget(null)}
         />
       )}
+      {propsTarget && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[9999] px-4" onMouseDown={() => setPropsTarget(null)}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-5" onMouseDown={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-semibold text-gray-900 mb-1">Properties — {propsTarget.name}</h2>
+            <ReportFieldsSection
+              title="Report Fields"
+              description="Extra document attributes surfaced as columns in 360 Reports."
+              fields={DOCUMENT_REPORT_FIELDS}
+              values={propsFields}
+              onChange={(key, value) => setPropsFields((prev) => ({ ...prev, [key]: value }))}
+              columns={2}
+            />
+            <div className="flex items-center justify-end gap-3 mt-4">
+              <button type="button" onClick={() => setPropsTarget(null)} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={handleSaveProps} disabled={propsSaving} className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 disabled:opacity-50">{propsSaving ? "Saving..." : "Save"}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {deleteTarget && (
         <ConfirmModal
           title="Delete"
@@ -2399,6 +2446,12 @@ export default function DocumentsClient({
               className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Rename
+            </button>
+            <button
+              onMouseDown={() => { openProps(item); setOpenMenuId(null); setMenuPos(null); }}
+              className="w-full text-left px-4 py-2 text-sm text-violet-700 hover:bg-violet-50 transition-colors"
+            >
+              Properties
             </button>
             <button
               onMouseDown={() => openMoveModal(item)}

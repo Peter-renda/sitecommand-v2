@@ -19,13 +19,13 @@ surfaced on the relevant edit page in a **violet "Report Fields" section**
 | RFI | RFI edit page | 8 | 8 | 16 | ✅ WIRED (violet section live) |
 | Submittal | Submittal detail (inline edit) | 7 | 0 | 7 | ✅ WIRED (violet section live) |
 | Punch Item | Punch item edit modal | 4 | 3 | 7 | ✅ WIRED (violet section live) |
-| Task | Task (list edit) | 4 | 2 | 6 | API + loadSource wired; UI pending |
+| Task | Task detail modal | 4 | 2 | 6 | ✅ WIRED (violet section live) |
 | Meeting | Meeting detail (autosave) | 3 | 1 | 4 | ✅ WIRED (violet section live) |
-| Drawing | Drawing (extraction review) | 8 | 2 | 10 | API + loadSource wired; UI deferred |
-| Folder/Document | Documents edit | 4 | 3 | 7 | DB stored; UI pending |
+| Drawing | Drawing edit panel | 8 | 2 | 10 | ✅ WIRED (violet section live) |
+| Folder/Document | Document Properties modal | 4 | 3 | 7 | ✅ WIRED (violet section live) |
 | Photo | (upload-managed) | 0 | 9 | 9 | DB-only storage |
 | Specification Section | (parsed from spec book) | 0 | 7 | 7 | DB-only storage |
-| Change Order (CCO/PCCO) | Change order detail | 8 | 8 | 16 | loadSource wired; UI pending |
+| Change Order (CCO/PCCO) | Change order detail | 8 | 8 | 16 | ✅ WIRED (violet section live) |
 | Prime Contract | Prime contract edit | 21 | 9 | 30 | ✅ WIRED (violet section live) |
 | Budget Line Item | (budget grid) | 0 | 11 | 11 | DB-only storage |
 | Timecard Entry | (timesheet grid) | 0 | 12 | 12 | DB-only storage |

@@ -4427,13 +4427,20 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
     if (!res.ok) return [];
     const data: Row[] = await res.json();
     return (data ?? []).map((d) => ({
+      ...((d.report_fields as Row) ?? {}),
       name: d.name,
       type: d.type,
+      is_folder: d.type === "folder",
       mime_type: d.mime_type,
       size: d.size,
+      file_size_bytes: d.size,
       parent_name: d.parent_name ?? d.parent_id,
+      name_with_path: d.name_with_path ?? d.name,
+      private: d.is_private,
       created_by: d.created_by_name ?? d.created_by,
       created_at: d.created_at,
+      date_created: d.created_at,
+      date_updated: d.updated_at,
     }));
   }
 

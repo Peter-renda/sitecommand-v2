@@ -123,6 +123,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.name !== undefined) update.name = body.name;
   if (body.parent_id !== undefined) update.parent_id = body.parent_id;
   if (body.is_private !== undefined) update.is_private = Boolean(body.is_private);
+  if (body.report_fields !== undefined) update.report_fields = body.report_fields;
 
   const supabase = getSupabase();
 
