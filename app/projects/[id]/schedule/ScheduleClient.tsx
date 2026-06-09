@@ -601,6 +601,46 @@ function CalendarView({ tasks }: { tasks: Task[] }) {
 
 // ── Upload Zone ───────────────────────────────────────────────────────────────
 
+// Uploads the XML straight to Supabase Storage via a signed URL, then registers
+// the metadata. Routing the file around the Vercel function avoids the 4.5 MB
+// serverless body limit, so large MS Project exports (30-50 MB) go through.
+async function uploadScheduleFile(
+  projectId: string,
+  file: File
+): Promise<{ ok: boolean; error?: string }> {
+  // Step 1: get a signed upload URL (no file data sent to the API function).
+  const urlRes = await fetch(
+    `/api/projects/${projectId}/schedule/upload-url?filename=${encodeURIComponent(file.name)}`
+  );
+  if (!urlRes.ok) {
+    const err = await urlRes.json().catch(() => ({}));
+    return { ok: false, error: err.error ?? "Could not prepare the upload." };
+  }
+  const { signedUrl, storagePath } = await urlRes.json();
+
+  // Step 2: upload directly to Supabase Storage.
+  const putRes = await fetch(signedUrl, {
+    method: "PUT",
+    body: file,
+    headers: { "Content-Type": "text/xml" },
+  });
+  if (!putRes.ok) {
+    return { ok: false, error: `Storage upload failed (${putRes.status}).` };
+  }
+
+  // Step 3: register the schedule metadata.
+  const regRes = await fetch(`/api/projects/${projectId}/schedule`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ storagePath, filename: file.name }),
+  });
+  if (!regRes.ok) {
+    const err = await regRes.json().catch(() => ({}));
+    return { ok: false, error: err.error ?? "Upload failed." };
+  }
+  return { ok: true };
+}
+
 function UploadZone({
   projectId,
   uploading,
@@ -622,15 +662,12 @@ function UploadZone({
     }
     setError(null);
     setIsUploading(true);
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`/api/projects/${projectId}/schedule`, { method: "POST", body: fd });
+    const result = await uploadScheduleFile(projectId, file);
     setIsUploading(false);
-    if (res.ok) {
+    if (result.ok) {
       onUploaded();
     } else {
-      const data = await res.json();
-      setError(data.error ?? "Upload failed.");
+      setError(result.error ?? "Upload failed.");
     }
   }
 
@@ -770,15 +807,12 @@ export default function ScheduleClient({
     }
     setReplaceError(null);
     setUploading(true);
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`/api/projects/${projectId}/schedule`, { method: "POST", body: fd });
+    const result = await uploadScheduleFile(projectId, file);
     setUploading(false);
-    if (res.ok) {
+    if (result.ok) {
       fetchSchedule();
     } else {
-      const data = await res.json().catch(() => ({}));
-      setReplaceError(data.error ?? "Upload failed. Please try again.");
+      setReplaceError(result.error ?? "Upload failed. Please try again.");
     }
   }
 
