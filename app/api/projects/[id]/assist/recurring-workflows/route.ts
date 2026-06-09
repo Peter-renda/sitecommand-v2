@@ -4,6 +4,7 @@ import { canAccessProject } from "@/lib/project-access";
 import { getSupabase } from "@/lib/supabase";
 
 const ALLOWED_FREQUENCIES = new Set(["daily", "weekly", "monthly"]);
+const ALLOWED_DOCUMENT_TYPES = new Set(["pdf", "word"]);
 
 function isRecurringWorkflowTableMissing(errorMessage: string | null | undefined) {
   if (!errorMessage) return false;
@@ -28,7 +29,7 @@ export async function GET(
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("assist_recurring_workflows")
-    .select("id, name, prompt, frequency, run_day_of_week, run_day_of_month, run_hour_et, run_minute_et, recipients, active, created_at, last_run_at")
+    .select("id, name, prompt, frequency, document_type, run_day_of_week, run_day_of_month, run_hour_et, run_minute_et, recipients, active, created_at, last_run_at")
     .eq("project_id", projectId)
     .order("created_at", { ascending: false });
 
@@ -62,6 +63,7 @@ export async function GET(
     name: row.name,
     prompt: row.prompt,
     frequency: row.frequency,
+    documentType: row.document_type ?? "pdf",
     runDayOfWeek: row.run_day_of_week,
     runDayOfMonth: row.run_day_of_month,
     runHourEt: row.run_hour_et,
@@ -97,6 +99,7 @@ export async function POST(
     name?: unknown;
     prompt?: unknown;
     frequency?: unknown;
+    documentType?: unknown;
     runDayOfWeek?: unknown;
     runDayOfMonth?: unknown;
     runHourEt?: unknown;
@@ -117,6 +120,13 @@ export async function POST(
   if (!ALLOWED_FREQUENCIES.has(frequency)) {
     return NextResponse.json(
       { error: "Frequency must be one of daily, weekly, monthly" },
+      { status: 400 },
+    );
+  }
+  const documentType = typeof body.documentType === "string" ? body.documentType.trim().toLowerCase() : "pdf";
+  if (!ALLOWED_DOCUMENT_TYPES.has(documentType)) {
+    return NextResponse.json(
+      { error: "Document type must be one of pdf, word" },
       { status: 400 },
     );
   }
@@ -166,13 +176,14 @@ export async function POST(
       name,
       prompt,
       frequency,
+      document_type: documentType,
       run_day_of_week: runDayOfWeek,
       run_day_of_month: runDayOfMonth,
       run_hour_et: runHourEt,
       run_minute_et: runMinuteEt,
       recipients,
     })
-    .select("id, name, prompt, frequency, run_day_of_week, run_day_of_month, run_hour_et, run_minute_et, recipients, active, created_at, last_run_at")
+    .select("id, name, prompt, frequency, document_type, run_day_of_week, run_day_of_month, run_hour_et, run_minute_et, recipients, active, created_at, last_run_at")
     .single();
 
   if (insertError) {
@@ -194,6 +205,7 @@ export async function POST(
       name: inserted.name,
       prompt: inserted.prompt,
       frequency: inserted.frequency,
+      documentType: inserted.document_type ?? "pdf",
       runDayOfWeek: inserted.run_day_of_week,
       runDayOfMonth: inserted.run_day_of_month,
       runHourEt: inserted.run_hour_et,

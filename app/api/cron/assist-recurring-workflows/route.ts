@@ -107,7 +107,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabase
     .from("assist_recurring_workflows")
-    .select("id, project_id, name, prompt, frequency, run_day_of_week, run_day_of_month, last_run_at, active")
+    .select("id, project_id, name, prompt, frequency, document_type, run_day_of_week, run_day_of_month, last_run_at, active")
     .eq("active", true);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -137,14 +137,31 @@ export async function GET(req: NextRequest) {
       });
       const text = (response.text ?? "").trim() || "No output generated.";
       const safeName = String(w.name ?? "Recurring Workflow").replace(/[^a-z0-9\- ]/gi, "").trim() || "Recurring Workflow";
-      const fileName = `${safeName} - ${new Date().toISOString()}.md`;
-      const fileUrl = `data:text/markdown;charset=utf-8,${encodeURIComponent(text)}`;
+      const documentType = String(w.document_type ?? "pdf").toLowerCase() === "word" ? "word" : "pdf";
+
+      let fileName: string;
+      let fileUrl: string;
+      if (documentType === "word") {
+        // A minimal Word-openable .doc: HTML wrapped with the msword MIME so the
+        // file opens directly in Microsoft Word / Google Docs.
+        const escaped = text
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${safeName}</title></head><body><h1>${safeName}</h1><pre style="font-family:Calibri,Arial,sans-serif;white-space:pre-wrap">${escaped}</pre></body></html>`;
+        fileName = `${safeName} - ${new Date().toISOString()}.doc`;
+        fileUrl = `data:application/msword;charset=utf-8,${encodeURIComponent(html)}`;
+      } else {
+        fileName = `${safeName} - ${new Date().toISOString()}.md`;
+        fileUrl = `data:text/markdown;charset=utf-8,${encodeURIComponent(text)}`;
+      }
+
       const { error: insertErr } = await supabase.from("assist_recurring_workflow_reports").insert({
         workflow_id: w.id,
         project_id: w.project_id,
         file_name: fileName,
         file_url: fileUrl,
-        file_type: "pdf",
+        file_type: documentType,
       });
       if (!insertErr) created++;
       await supabase.from("assist_recurring_workflows").update({ last_run_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", w.id);

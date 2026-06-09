@@ -24,12 +24,13 @@ type HistoryItem = {
 
 type Frequency = "daily" | "weekly" | "monthly";
 type Weekday = "sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday";
+type DocumentType = "pdf" | "word";
 
 type WorkflowReport = {
   id: string;
   fileName: string;
   fileUrl: string;
-  fileType: "pdf" | "excel";
+  fileType: "pdf" | "excel" | "word";
   createdAt: string;
 };
 
@@ -38,6 +39,7 @@ type RecurringWorkflow = {
   name: string;
   prompt: string;
   frequency: Frequency;
+  documentType: DocumentType;
   runDayOfWeek: Weekday | null;
   runDayOfMonth: number | null;
   runHourEt: number | null;
@@ -55,6 +57,17 @@ const FREQUENCY_LABELS: Record<Frequency, string> = {
   monthly: "Monthly",
 };
 const WEEKDAY_OPTIONS: Weekday[] = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
+  pdf: "PDF",
+  word: "Word",
+};
+
+const ASSIST_SECTIONS = [
+  { id: "discover", label: "Discover" },
+  { id: "recurring-workflows", label: "Recurring Workflows" },
+  { id: "looking-ahead", label: "Looking Ahead" },
+] as const;
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -206,6 +219,8 @@ export default function AssistClient({ projectId }: { projectId: string }) {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
 
+  const [activeSection, setActiveSection] = useState<(typeof ASSIST_SECTIONS)[number]["id"]>("discover");
+
   const [notes, setNotes] = useState<LookingAheadNote[]>([]);
   const [notesLoading, setNotesLoading] = useState(true);
   const [notesRefreshing, setNotesRefreshing] = useState(false);
@@ -215,6 +230,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
   const [wfName, setWfName] = useState("");
   const [wfPrompt, setWfPrompt] = useState("");
   const [wfFrequency, setWfFrequency] = useState<Frequency>("weekly");
+  const [wfDocumentType, setWfDocumentType] = useState<DocumentType>("pdf");
   const [wfRecipients, setWfRecipients] = useState("");
   const [selectedWorkflow, setSelectedWorkflow] = useState<RecurringWorkflow | null>(null);
   const [wfRunDayOfWeek, setWfRunDayOfWeek] = useState<Weekday>("monday");
@@ -347,6 +363,32 @@ export default function AssistClient({ projectId }: { projectId: string }) {
     return () => { cancelled = true; };
   }, [projectId]);
 
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (!visible) return;
+        const id = visible.target.getAttribute("id") as (typeof ASSIST_SECTIONS)[number]["id"] | null;
+        if (id) setActiveSection(id);
+      },
+      { rootMargin: "-30% 0px -55% 0px", threshold: [0.2, 0.4, 0.6] }
+    );
+
+    ASSIST_SECTIONS.forEach((section) => {
+      const element = document.getElementById(section.id);
+      if (element) observer.observe(element);
+    });
+
+    return () => observer.disconnect();
+  }, [notesLoading]);
+
+  function jumpToSection(id: (typeof ASSIST_SECTIONS)[number]["id"]) {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setActiveSection(id);
+  }
+
   async function ask(question: string) {
     const trimmed = question.trim();
     if (!trimmed || loading) return;
@@ -450,6 +492,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
           name,
           prompt,
           frequency: wfFrequency,
+          documentType: wfDocumentType,
           recipients,
           runDayOfWeek: wfRunDayOfWeek,
           runDayOfMonth: wfFrequency === "monthly" ? wfRunDayOfMonth : null,
@@ -463,6 +506,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
       setWfName("");
       setWfPrompt("");
       setWfFrequency("weekly");
+      setWfDocumentType("pdf");
       setWfRecipients("");
       setWfRunDayOfWeek("monday");
       setWfRunDayOfMonth(1);
@@ -507,7 +551,7 @@ export default function AssistClient({ projectId }: { projectId: string }) {
     <div className="min-h-screen bg-[#F9FAFB]">
       <ProjectNav projectId={projectId} />
 
-      <main className="mx-auto max-w-[900px] px-4 py-8">
+      <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="mb-6">
           <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
             Assist
@@ -526,473 +570,524 @@ export default function AssistClient({ projectId }: { projectId: string }) {
           </p>
         </div>
 
-        {/* Looking Ahead */}
-        {!notesLoading && (
-          <section className="mb-6 rounded-xl border hairline bg-[color:var(--surface-sunken)] p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="text-sm font-semibold text-[color:var(--ink)] flex items-center gap-2">
-                  <svg className="w-4 h-4 text-[color:var(--brand-600)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                  Looking Ahead
-                  {notes.length > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-full bg-[color:var(--brand-100)] text-[color:var(--brand-700)] text-[10px] font-medium">
-                      {notes.length}
-                    </span>
-                  )}
-                </h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  <span className="serif-italic text-[color:var(--brand-700)]">A daily briefing</span> of things to know &amp; remember — drawn from your plans, specs, contracts, emails, and schedule.
-                </p>
-              </div>
-              <button
-                onClick={refreshNotes}
-                disabled={notesRefreshing}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
-              >
-                <svg className={`w-3.5 h-3.5 ${notesRefreshing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                {notesRefreshing ? "Thinking..." : "Refresh"}
-              </button>
-            </div>
-
-            {notes.length === 0 ? (
-              <p className="text-xs text-gray-400 py-2">
-                {notesRefreshing ? "Reviewing where the project stands…" : "Nothing to flag right now. Check back tomorrow morning, or Refresh to generate now."}
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {notes.map((note) => (
-                  <LookingAheadCard
-                    key={note.id}
-                    note={note}
-                    busy={noteBusyId === note.id}
-                    onPin={() => actOnNote(note.id, { action: note.pinned ? "unpin" : "pin" })}
-                    onDismiss={() => actOnNote(note.id, { action: "dismiss" })}
-                    onSnooze={(v) => actOnNote(note.id, { action: "snooze", snooze: v })}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        <div className="rounded-xl border border-[color:var(--border-base)] bg-white flex flex-col h-[calc(100vh-260px)]">
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 && (
-              <div className="text-center py-12">
-                <p className="font-display text-[20px] leading-tight text-[color:var(--ink)]">
-                  What would you like to know about this project?
-                </p>
-                <p className="mt-1.5 text-sm text-gray-500 serif-italic">
-                  Type a question below to begin.
-                </p>
-              </div>
-            )}
-
-            {messages.map((m) => (
-              <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[85%] rounded-lg px-4 py-3 text-sm whitespace-pre-wrap ${
-                    m.role === "user"
-                      ? "bg-[color:var(--ink)] text-white"
-                      : "bg-[color:var(--surface-sunken)] border border-[color:var(--border-base)] text-[color:var(--ink)]"
+        <div className="grid grid-cols-12 gap-5">
+          {/* Navigation tree */}
+          <aside className="col-span-12 lg:col-span-2">
+            <div className="sticky top-24 border-l border-black/10 pl-3">
+              {ASSIST_SECTIONS.map((section) => (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => jumpToSection(section.id)}
+                  className={`mb-1 block w-full border-l-2 px-3 py-1.5 text-left text-sm transition-colors ${
+                    activeSection === section.id
+                      ? "border-[color:var(--brand-500)] bg-[color:var(--surface-sunken)] font-semibold text-[color:var(--ink)]"
+                      : "border-transparent text-gray-600 hover:bg-[color:var(--surface-sunken)] hover:text-[color:var(--ink)]"
                   }`}
                 >
-                  {m.content}
-                  {m.sourceDocuments && m.sourceDocuments.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-[color:var(--border-base)]">
-                      <div className="mono-label text-[11px] text-gray-500 mb-1.5">
-                        Source documents
+                  {section.label}
+                </button>
+              ))}
+            </div>
+          </aside>
+
+          {/* Sections */}
+          <div className="col-span-12 space-y-12 lg:col-span-10">
+            {/* Discover — ask + history in one tile */}
+            <section id="discover" className="scroll-mt-24">
+              <h2 className="font-display text-[28px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
+                Discover
+              </h2>
+              <p className="sub mt-1">
+                Ask a question and review your saved history.
+                <span className="sep">·</span>
+                <span className="num">{history.length}</span> saved question{history.length !== 1 ? "s" : ""}
+              </p>
+
+              <div className="card mt-4 overflow-hidden">
+                {/* Ask */}
+                <div className="flex flex-col h-[480px]">
+                  <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {messages.length === 0 && (
+                      <div className="text-center py-12">
+                        <p className="font-display text-[20px] leading-tight text-[color:var(--ink)]">
+                          What would you like to know about this project?
+                        </p>
+                        <p className="mt-1.5 text-sm text-gray-500 serif-italic">
+                          Type a question below to begin.
+                        </p>
                       </div>
-                      <ul className="space-y-1">
-                        {m.sourceDocuments.map((doc) => (
-                          <li key={doc.url}>
-                            <a
-                              href={doc.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-start gap-1.5 text-xs text-[color:var(--brand-700)] hover:text-[color:var(--brand-500)] hover:underline"
+                    )}
+
+                    {messages.map((m) => (
+                      <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                        <div
+                          className={`max-w-[85%] rounded-lg px-4 py-3 text-sm whitespace-pre-wrap ${
+                            m.role === "user"
+                              ? "bg-[color:var(--ink)] text-white"
+                              : "bg-[color:var(--surface-sunken)] border border-[color:var(--border-base)] text-[color:var(--ink)]"
+                          }`}
+                        >
+                          {m.content}
+                          {m.sourceDocuments && m.sourceDocuments.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-[color:var(--border-base)]">
+                              <div className="mono-label text-[11px] text-gray-500 mb-1.5">
+                                Source documents
+                              </div>
+                              <ul className="space-y-1">
+                                {m.sourceDocuments.map((doc) => (
+                                  <li key={doc.url}>
+                                    <a
+                                      href={doc.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-start gap-1.5 text-xs text-[color:var(--brand-700)] hover:text-[color:var(--brand-500)] hover:underline"
+                                    >
+                                      <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        viewBox="0 0 20 20"
+                                        fill="currentColor"
+                                        className="w-3.5 h-3.5 mt-0.5 flex-shrink-0"
+                                        aria-hidden="true"
+                                      >
+                                        <path
+                                          fillRule="evenodd"
+                                          d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm6 0v3a1 1 0 0 0 1 1h3l-4-4Z"
+                                          clipRule="evenodd"
+                                        />
+                                      </svg>
+                                      <span>
+                                        {doc.filename}
+                                        {doc.description && (
+                                          <span className="text-gray-500"> — {doc.description}</span>
+                                        )}
+                                      </span>
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {m.stats && (
+                            <div className="mt-2 pt-2 border-t border-[color:var(--border-base)] text-[11px] text-gray-500 tabular-nums">
+                              Searched {m.stats.recordCount} records across {m.stats.toolsSearched} tools
+                              {m.stats.filesAttached > 0
+                                ? ` · ${m.stats.filesCited} of ${m.stats.filesAttached} file${m.stats.filesAttached === 1 ? "" : "s"} cited`
+                                : ""}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {loading && (
+                      <div className="flex justify-start">
+                        <div className="bg-[color:var(--surface-sunken)] border border-[color:var(--border-base)] rounded-lg px-4 py-3 text-sm text-gray-500 serif-italic">
+                          Searching project data…
+                        </div>
+                      </div>
+                    )}
+
+                    {error && (
+                      <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                        {error}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border-t border-[color:var(--border-base)] p-3">
+                    <div className="flex gap-2 items-end">
+                      <textarea
+                        ref={inputRef}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        rows={2}
+                        placeholder="Ask anything about this project… (Enter to send, Shift+Enter for new line)"
+                        disabled={loading}
+                        className="flex-1 resize-none rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)] disabled:bg-[color:var(--surface-sunken)]"
+                      />
+                      <button
+                        onClick={() => ask(input)}
+                        disabled={loading || !input.trim()}
+                        className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* History (same tile) */}
+                <div className="border-t border-[color:var(--border-base)] p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-[color:var(--ink)]">History</h3>
+                    <span className="text-[11px] text-gray-400 tabular-nums">
+                      {history.length} saved question{history.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+
+                  {history.length === 0 ? (
+                    <p className="text-sm text-gray-500">No history yet. Ask a question above to get started.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {history.map((item) => {
+                        const expanded = expandedHistoryId === item.id;
+                        return (
+                          <li key={item.id} className="rounded-md border border-[color:var(--border-base)] overflow-hidden">
+                            <div
+                              className="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-[color:var(--surface-sunken)] select-none"
+                              onClick={() => setExpandedHistoryId(expanded ? null : item.id)}
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
                                 viewBox="0 0 20 20"
                                 fill="currentColor"
-                                className="w-3.5 h-3.5 mt-0.5 flex-shrink-0"
-                                aria-hidden="true"
+                                className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform ${expanded ? "rotate-90" : ""}`}
                               >
-                                <path
-                                  fillRule="evenodd"
-                                  d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm6 0v3a1 1 0 0 0 1 1h3l-4-4Z"
-                                  clipRule="evenodd"
-                                />
+                                <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
                               </svg>
-                              <span>
-                                {doc.filename}
-                                {doc.description && (
-                                  <span className="text-gray-500"> — {doc.description}</span>
-                                )}
+                              <span className="flex-1 text-sm font-medium text-[color:var(--ink)] truncate">
+                                {item.question}
                               </span>
-                            </a>
+                              <span className="text-[11px] text-gray-400 flex-shrink-0 tabular-nums">
+                                {formatRelativeTime(item.created_at)}
+                              </span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); deleteHistoryItem(item.id); }}
+                                className="flex-shrink-0 text-gray-400 hover:text-red-600 p-0.5 rounded"
+                                title="Delete"
+                                aria-label="Delete"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                  <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                                </svg>
+                              </button>
+                            </div>
+
+                            {expanded && (
+                              <div className="border-t border-[color:var(--border-base)] px-3 py-3 bg-[color:var(--surface-sunken)]">
+                                <p className="text-sm whitespace-pre-wrap text-[color:var(--ink)]">{item.answer}</p>
+                                {item.source_documents && item.source_documents.length > 0 && (
+                                  <div className="mt-3 pt-3 border-t border-[color:var(--border-base)]">
+                                    <div className="mono-label text-[11px] text-gray-500 mb-1.5">Source documents</div>
+                                    <ul className="space-y-1">
+                                      {item.source_documents.map((doc) => (
+                                        <li key={doc.url}>
+                                          <a
+                                            href={doc.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-start gap-1.5 text-xs text-[color:var(--brand-700)] hover:text-[color:var(--brand-500)] hover:underline"
+                                          >
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true">
+                                              <path fillRule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm6 0v3a1 1 0 0 0 1 1h3l-4-4Z" clipRule="evenodd" />
+                                            </svg>
+                                            <span>
+                                              {doc.filename}
+                                              {doc.description && <span className="text-gray-500"> — {doc.description}</span>}
+                                            </span>
+                                          </a>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {item.stats && (
+                                  <div className="mt-2 pt-2 border-t border-[color:var(--border-base)] text-[11px] text-gray-500 tabular-nums">
+                                    Searched {item.stats.recordCount} records across {item.stats.toolsSearched} tools
+                                    {item.stats.filesAttached > 0
+                                      ? ` · ${item.stats.filesCited} of ${item.stats.filesAttached} file${item.stats.filesAttached === 1 ? "" : "s"} cited`
+                                      : ""}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {m.stats && (
-                    <div className="mt-2 pt-2 border-t border-[color:var(--border-base)] text-[11px] text-gray-500 tabular-nums">
-                      Searched {m.stats.recordCount} records across {m.stats.toolsSearched} tools
-                      {m.stats.filesAttached > 0
-                        ? ` · ${m.stats.filesCited} of ${m.stats.filesAttached} file${m.stats.filesAttached === 1 ? "" : "s"} cited`
-                        : ""}
-                    </div>
+                        );
+                      })}
+                    </ul>
                   )}
                 </div>
               </div>
-            ))}
+            </section>
 
-            {loading && (
-              <div className="flex justify-start">
-                <div className="bg-[color:var(--surface-sunken)] border border-[color:var(--border-base)] rounded-lg px-4 py-3 text-sm text-gray-500 serif-italic">
-                  Searching project data…
-                </div>
-              </div>
-            )}
+            {/* Recurring Workflows */}
+            <section id="recurring-workflows" className="scroll-mt-24">
+              <h2 className="font-display text-[28px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
+                Recurring Workflows
+              </h2>
+              <p className="sub mt-1">
+                Save a prompt to run on a recurring schedule.
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{workflows.filter((w) => w.active).length}</span> active
+              </p>
 
-            {error && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-          </div>
-
-          <div className="border-t border-[color:var(--border-base)] p-3">
-            <div className="flex gap-2 items-end">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                rows={2}
-                placeholder="Ask anything about this project… (Enter to send, Shift+Enter for new line)"
-                disabled={loading}
-                className="flex-1 resize-none rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)] disabled:bg-[color:var(--surface-sunken)]"
-              />
-              <button
-                onClick={() => ask(input)}
-                disabled={loading || !input.trim()}
-                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Send
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* History */}
-        <div className="mt-10">
-          <h2 className="font-display text-[28px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
-            History
-          </h2>
-          <p className="sub mt-1">
-            <span className="num">{history.length}</span> saved question{history.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-
-        <div className="card card-pad mt-4">
-          {history.length === 0 ? (
-            <p className="text-sm text-gray-500">No history yet. Ask a question above to get started.</p>
-          ) : (
-            <ul className="space-y-2">
-              {history.map((item) => {
-                const expanded = expandedHistoryId === item.id;
-                return (
-                  <li key={item.id} className="rounded-md border border-[color:var(--border-base)] overflow-hidden">
-                    <div
-                      className="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-[color:var(--surface-sunken)] select-none"
-                      onClick={() => setExpandedHistoryId(expanded ? null : item.id)}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform ${expanded ? "rotate-90" : ""}`}
-                      >
-                        <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-                      </svg>
-                      <span className="flex-1 text-sm font-medium text-[color:var(--ink)] truncate">
-                        {item.question}
-                      </span>
-                      <span className="text-[11px] text-gray-400 flex-shrink-0 tabular-nums">
-                        {formatRelativeTime(item.created_at)}
-                      </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteHistoryItem(item.id); }}
-                        className="flex-shrink-0 text-gray-400 hover:text-red-600 p-0.5 rounded"
-                        title="Delete"
-                        aria-label="Delete"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                          <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
-                        </svg>
-                      </button>
+              <div className="card card-pad mt-4">
+                <form onSubmit={saveWorkflow} className="space-y-3 border-b border-[color:var(--border-base)] pb-5 mb-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="mono-label block text-gray-600 mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={wfName}
+                        onChange={(e) => setWfName(e.target.value)}
+                        placeholder="Weekly RFI summary"
+                        className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+                      />
                     </div>
-
-                    {expanded && (
-                      <div className="border-t border-[color:var(--border-base)] px-3 py-3 bg-[color:var(--surface-sunken)]">
-                        <p className="text-sm whitespace-pre-wrap text-[color:var(--ink)]">{item.answer}</p>
-                        {item.source_documents && item.source_documents.length > 0 && (
-                          <div className="mt-3 pt-3 border-t border-[color:var(--border-base)]">
-                            <div className="mono-label text-[11px] text-gray-500 mb-1.5">Source documents</div>
-                            <ul className="space-y-1">
-                              {item.source_documents.map((doc) => (
-                                <li key={doc.url}>
-                                  <a
-                                    href={doc.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-start gap-1.5 text-xs text-[color:var(--brand-700)] hover:text-[color:var(--brand-500)] hover:underline"
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true">
-                                      <path fillRule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm6 0v3a1 1 0 0 0 1 1h3l-4-4Z" clipRule="evenodd" />
-                                    </svg>
-                                    <span>
-                                      {doc.filename}
-                                      {doc.description && <span className="text-gray-500"> — {doc.description}</span>}
-                                    </span>
-                                  </a>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {item.stats && (
-                          <div className="mt-2 pt-2 border-t border-[color:var(--border-base)] text-[11px] text-gray-500 tabular-nums">
-                            Searched {item.stats.recordCount} records across {item.stats.toolsSearched} tools
-                            {item.stats.filesAttached > 0
-                              ? ` · ${item.stats.filesCited} of ${item.stats.filesAttached} file${item.stats.filesAttached === 1 ? "" : "s"} cited`
-                              : ""}
-                          </div>
-                        )}
+                    <div>
+                      <label className="mono-label block text-gray-600 mb-1">Frequency</label>
+                      <select
+                        value={wfFrequency}
+                        onChange={(e) => setWfFrequency(e.target.value as Frequency)}
+                        className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+                      >
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                      </select>
+                    </div>
+                    {wfFrequency === "weekly" && (
+                      <div>
+                        <label className="mono-label block text-gray-600 mb-1">Day of week</label>
+                        <select
+                          value={wfRunDayOfWeek}
+                          onChange={(e) => setWfRunDayOfWeek(e.target.value as Weekday)}
+                          className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+                        >
+                          {WEEKDAY_OPTIONS.map((day) => (
+                            <option key={day} value={day}>
+                              {day[0].toUpperCase() + day.slice(1)}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {/* Recurring Workflows */}
-        <div className="mt-10">
-          <h2 className="font-display text-[28px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
-            Recurring Workflows
-          </h2>
-          <p className="sub mt-1">
-            Save a prompt to run on a recurring schedule.
-            <span className="sep">·</span>
-            <span className="num" style={{ color: "var(--brand-500)" }}>{workflows.filter((w) => w.active).length}</span> active
-          </p>
-        </div>
-
-        <div className="card card-pad mt-4">
-          <form onSubmit={saveWorkflow} className="space-y-3 border-b border-[color:var(--border-base)] pb-5 mb-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="mono-label block text-gray-600 mb-1">Name</label>
-                <input
-                  type="text"
-                  value={wfName}
-                  onChange={(e) => setWfName(e.target.value)}
-                  placeholder="Weekly RFI summary"
-                  className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
-                />
-              </div>
-              <div>
-                <label className="mono-label block text-gray-600 mb-1">Frequency</label>
-                <select
-                  value={wfFrequency}
-                  onChange={(e) => setWfFrequency(e.target.value as Frequency)}
-                  className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
-                >
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-              </div>
-              {wfFrequency === "weekly" && (
-                <div>
-                  <label className="mono-label block text-gray-600 mb-1">Day of week</label>
-                  <select
-                    value={wfRunDayOfWeek}
-                    onChange={(e) => setWfRunDayOfWeek(e.target.value as Weekday)}
-                    className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
-                  >
-                    {WEEKDAY_OPTIONS.map((day) => (
-                      <option key={day} value={day}>
-                        {day[0].toUpperCase() + day.slice(1)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {wfFrequency === "monthly" && (
-                <div>
-                  <label className="mono-label block text-gray-600 mb-1">Day of month</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={wfRunDayOfMonth}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!isNaN(v)) setWfRunDayOfMonth(Math.min(31, Math.max(1, v)));
-                    }}
-                    className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
-                  />
-                  <p className="mt-1 text-[11px] text-gray-500">Runs on this day each month. If the month is shorter, runs on the last day.</p>
-                </div>
-              )}
-              <div>
-                <label className="mono-label block text-gray-600 mb-1">Run time (ET)</label>
-                <select
-                  value={String(wfRunHourEt)}
-                  onChange={(e) => setWfRunHourEt(Number(e.target.value))}
-                  className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
-                >
-                  {Array.from({ length: 24 }).map((_, h) => (
-                    <option key={h} value={h}>
-                      {h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="mono-label block text-gray-600 mb-1">Prompt</label>
-              <textarea
-                value={wfPrompt}
-                onChange={(e) => setWfPrompt(e.target.value)}
-                rows={3}
-                placeholder="Summarize all open RFIs and any submittals waiting on the architect."
-                className="w-full resize-none rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
-              />
-            </div>
-
-            <div>
-              <label className="mono-label block text-gray-600 mb-1">
-                Recipients <span className="normal-case tracking-normal text-gray-500">(comma-separated emails)</span>
-              </label>
-              <input
-                type="text"
-                value={wfRecipients}
-                onChange={(e) => setWfRecipients(e.target.value)}
-                placeholder="pm@example.com, super@example.com"
-                className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
-              />
-            </div>
-
-            {wfError && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {wfError}
-              </div>
-            )}
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={wfSaving}
-                className="px-4 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
-              >
-                {wfSaving ? "Saving…" : "Add Recurring Workflow"}
-              </button>
-            </div>
-          </form>
-
-          {workflows.length === 0 ? (
-            <p className="text-sm text-gray-500">No recurring workflows yet.</p>
-          ) : (
-            <ul className="space-y-3">
-              {workflows.map((w) => (
-                <li
-                  key={w.id}
-                  className="rounded-md border border-gray-200 px-3 py-2.5 flex items-start justify-between gap-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-gray-900">{w.name}</span>
-                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
-                        {FREQUENCY_LABELS[w.frequency]}
-                      </span>
-                      {w.frequency === "weekly" && w.runDayOfWeek && (
-                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
-                          {w.runDayOfWeek[0].toUpperCase() + w.runDayOfWeek.slice(1)}
-                        </span>
-                      )}
-                      {w.frequency === "monthly" && w.runDayOfMonth != null && (
-                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
-                          Day {w.runDayOfMonth}
-                        </span>
-                      )}
-                      {typeof w.runHourEt === "number" && (
-                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
-                          {(w.runHourEt === 0 ? "12" : w.runHourEt <= 12 ? String(w.runHourEt) : String(w.runHourEt - 12)) + " " + (w.runHourEt < 12 ? "AM ET" : "PM ET")}
-                        </span>
-                      )}
-                      {!w.active && (
-                        <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
-                          Paused
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 text-xs text-gray-600 whitespace-pre-wrap break-words">{w.prompt}</p>
-
-                    <div className="mt-2">
-                      <p className="text-[11px] font-medium text-gray-600">Latest reports</p>
-                      {w.reports && w.reports.length > 0 ? (
-                        <ul className="mt-1 space-y-1">
-                          {w.reports.slice(0, 4).map((report) => (
-                            <li key={report.id}>
-                              <a href={report.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
-                                {report.fileName}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-xs text-gray-500 mt-1">No reports yet.</p>
-                      )}
-                      <a
-                        href="#"
-                        onClick={(e) => { e.preventDefault(); setSelectedWorkflow(w); }}
-                        className="mt-2 inline-block text-xs font-medium text-gray-700 hover:text-gray-900 hover:underline"
+                    {wfFrequency === "monthly" && (
+                      <div>
+                        <label className="mono-label block text-gray-600 mb-1">Day of month</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={wfRunDayOfMonth}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value, 10);
+                            if (!isNaN(v)) setWfRunDayOfMonth(Math.min(31, Math.max(1, v)));
+                          }}
+                          className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+                        />
+                        <p className="mt-1 text-[11px] text-gray-500">Runs on this day each month. If the month is shorter, runs on the last day.</p>
+                      </div>
+                    )}
+                    <div>
+                      <label className="mono-label block text-gray-600 mb-1">Run time (ET)</label>
+                      <select
+                        value={String(wfRunHourEt)}
+                        onChange={(e) => setWfRunHourEt(Number(e.target.value))}
+                        className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
                       >
-                        See all reports
-                      </a>
+                        {Array.from({ length: 24 }).map((_, h) => (
+                          <option key={h} value={h}>
+                            {h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mono-label block text-gray-600 mb-1">Document type</label>
+                      <select
+                        value={wfDocumentType}
+                        onChange={(e) => setWfDocumentType(e.target.value as DocumentType)}
+                        className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+                      >
+                        <option value="pdf">PDF</option>
+                        <option value="word">Word</option>
+                      </select>
+                      <p className="mt-1 text-[11px] text-gray-500">Format of the generated report file.</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+
+                  <div>
+                    <label className="mono-label block text-gray-600 mb-1">Prompt</label>
+                    <textarea
+                      value={wfPrompt}
+                      onChange={(e) => setWfPrompt(e.target.value)}
+                      rows={3}
+                      placeholder="Summarize all open RFIs and any submittals waiting on the architect."
+                      className="w-full resize-none rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mono-label block text-gray-600 mb-1">
+                      Recipients <span className="normal-case tracking-normal text-gray-500">(comma-separated emails)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={wfRecipients}
+                      onChange={(e) => setWfRecipients(e.target.value)}
+                      placeholder="pm@example.com, super@example.com"
+                      className="w-full rounded-md border border-[color:var(--border-base)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+                    />
+                  </div>
+
+                  {wfError && (
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {wfError}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end">
                     <button
-                      onClick={() => toggleActive(w)}
-                      className="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 text-gray-700"
+                      type="submit"
+                      disabled={wfSaving}
+                      className="px-4 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
                     >
-                      {w.active ? "Pause" : "Resume"}
-                    </button>
-                    <button
-                      onClick={() => deleteWorkflow(w.id)}
-                      className="text-xs px-2 py-1 rounded border border-red-200 text-red-700 hover:bg-red-50"
-                    >
-                      Delete
+                      {wfSaving ? "Saving…" : "Add Recurring Workflow"}
                     </button>
                   </div>
-                </li>
-              ))}
-            </ul>
-          )}
+                </form>
+
+                {workflows.length === 0 ? (
+                  <p className="text-sm text-gray-500">No recurring workflows yet.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {workflows.map((w) => (
+                      <li
+                        key={w.id}
+                        className="rounded-md border border-gray-200 px-3 py-2.5 flex items-start justify-between gap-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-gray-900">{w.name}</span>
+                            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                              {FREQUENCY_LABELS[w.frequency]}
+                            </span>
+                            {w.frequency === "weekly" && w.runDayOfWeek && (
+                              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                                {w.runDayOfWeek[0].toUpperCase() + w.runDayOfWeek.slice(1)}
+                              </span>
+                            )}
+                            {w.frequency === "monthly" && w.runDayOfMonth != null && (
+                              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                                Day {w.runDayOfMonth}
+                              </span>
+                            )}
+                            {typeof w.runHourEt === "number" && (
+                              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                                {(w.runHourEt === 0 ? "12" : w.runHourEt <= 12 ? String(w.runHourEt) : String(w.runHourEt - 12)) + " " + (w.runHourEt < 12 ? "AM ET" : "PM ET")}
+                              </span>
+                            )}
+                            <span className="inline-flex items-center rounded-full bg-[color:var(--brand-50)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--brand-700)]">
+                              {DOCUMENT_TYPE_LABELS[w.documentType] ?? DOCUMENT_TYPE_LABELS.pdf}
+                            </span>
+                            {!w.active && (
+                              <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
+                                Paused
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-gray-600 whitespace-pre-wrap break-words">{w.prompt}</p>
+
+                          <div className="mt-2">
+                            <p className="text-[11px] font-medium text-gray-600">Latest reports</p>
+                            {w.reports && w.reports.length > 0 ? (
+                              <ul className="mt-1 space-y-1">
+                                {w.reports.slice(0, 4).map((report) => (
+                                  <li key={report.id}>
+                                    <a href={report.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+                                      {report.fileName}
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-xs text-gray-500 mt-1">No reports yet.</p>
+                            )}
+                            <a
+                              href="#"
+                              onClick={(e) => { e.preventDefault(); setSelectedWorkflow(w); }}
+                              className="mt-2 inline-block text-xs font-medium text-gray-700 hover:text-gray-900 hover:underline"
+                            >
+                              See all reports
+                            </a>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => toggleActive(w)}
+                            className="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 text-gray-700"
+                          >
+                            {w.active ? "Pause" : "Resume"}
+                          </button>
+                          <button
+                            onClick={() => deleteWorkflow(w.id)}
+                            className="text-xs px-2 py-1 rounded border border-red-200 text-red-700 hover:bg-red-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
+
+            {/* Looking Ahead */}
+            <section id="looking-ahead" className="scroll-mt-24">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-[28px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)] flex items-center gap-2">
+                    Looking Ahead
+                    {notes.length > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-[color:var(--brand-100)] text-[color:var(--brand-700)] text-[10px] font-medium">
+                        {notes.length}
+                      </span>
+                    )}
+                  </h2>
+                  <p className="sub mt-1">
+                    <span className="serif-italic text-[color:var(--brand-700)]">A daily briefing</span> of things to know &amp; remember — drawn from your plans, specs, contracts, emails, and schedule.
+                  </p>
+                </div>
+                <button
+                  onClick={refreshNotes}
+                  disabled={notesRefreshing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors disabled:opacity-50 shrink-0"
+                >
+                  <svg className={`w-3.5 h-3.5 ${notesRefreshing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  {notesRefreshing ? "Thinking..." : "Refresh"}
+                </button>
+              </div>
+
+              <div className="card card-pad mt-4">
+                {notesLoading ? (
+                  <p className="text-xs text-gray-400 py-2">Loading…</p>
+                ) : notes.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-2">
+                    {notesRefreshing ? "Reviewing where the project stands…" : "Nothing to flag right now. Check back tomorrow morning, or Refresh to generate now."}
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {notes.map((note) => (
+                      <LookingAheadCard
+                        key={note.id}
+                        note={note}
+                        busy={noteBusyId === note.id}
+                        onPin={() => actOnNote(note.id, { action: note.pinned ? "unpin" : "pin" })}
+                        onDismiss={() => actOnNote(note.id, { action: "dismiss" })}
+                        onSnooze={(v) => actOnNote(note.id, { action: "snooze", snooze: v })}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
         </div>
       </main>
 
