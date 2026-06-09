@@ -33,6 +33,17 @@ type DirectoryContact = {
   email: string | null;
 };
 
+type TodoRecommendation = {
+  id: string;
+  title: string;
+  rationale: string;
+  source: string;
+  category: string | null;
+  priority: "high" | "medium" | "low";
+  suggested_due_date: string | null;
+  generated_at: string;
+};
+
 const STATUSES = ["initiated", "in progress", "ready for review", "closed", "void"];
 const CATEGORIES = ["Administrative", "Closeout", "Contract", "Design", "Miscellaneous", "Construction"];
 
@@ -762,6 +773,191 @@ function exportPDF(tasks: Task[]) {
   if (win) { win.document.write(html); win.document.close(); }
 }
 
+// ── To Do (AI recommendations) ────────────────────────────────────────────────
+
+const PRIORITY_BADGE: Record<string, string> = {
+  high: "bg-rose-50 text-rose-700 border-rose-200",
+  medium: "bg-amber-50 text-amber-700 border-amber-200",
+  low: "bg-slate-50 text-slate-600 border-slate-200",
+};
+
+const SNOOZE_OPTIONS: { label: string; value: string }[] = [
+  { label: "Remind me in 1 day", value: "1d" },
+  { label: "Remind me in 1 week", value: "1w" },
+  { label: "Remind me in 2 weeks", value: "2w" },
+];
+
+function fmtDate(d: string): string {
+  return new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function TodoCard({
+  rec,
+  busy,
+  onAccept,
+  onIgnore,
+  onSnooze,
+}: {
+  rec: TodoRecommendation;
+  busy: boolean;
+  onAccept: () => void;
+  onIgnore: () => void;
+  onSnooze: (value: string) => void;
+}) {
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const snoozeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (snoozeRef.current && !snoozeRef.current.contains(e.target as Node)) setSnoozeOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  return (
+    <div className={`rounded-lg border border-gray-100 bg-white px-4 py-3 transition-opacity ${busy ? "opacity-50 pointer-events-none" : ""}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`px-1.5 py-0.5 rounded-full border text-[10px] font-medium capitalize ${PRIORITY_BADGE[rec.priority] ?? PRIORITY_BADGE.low}`}>
+              {rec.priority}
+            </span>
+            <span className="text-sm font-medium text-[color:var(--ink)]">{rec.title}</span>
+            {rec.category && <span className="text-xs text-gray-400">· {rec.category}</span>}
+          </div>
+          {rec.rationale && (
+            <p className="text-xs text-gray-500 mt-1 leading-relaxed">{rec.rationale}</p>
+          )}
+          <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400">
+            {rec.source && (
+              <span className="inline-flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {rec.source}
+              </span>
+            )}
+            {rec.suggested_due_date && <span className="tabular-nums">Suggested due {fmtDate(rec.suggested_due_date)}</span>}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={onAccept}
+            className="px-3 py-1.5 text-xs font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
+          >
+            Accept
+          </button>
+          <div ref={snoozeRef} className="relative">
+            <button
+              onClick={() => setSnoozeOpen((o) => !o)}
+              className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              Later
+            </button>
+            {snoozeOpen && (
+              <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-100 rounded-lg shadow-lg py-1 z-20">
+                {SNOOZE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => { setSnoozeOpen(false); onSnooze(opt.value); }}
+                    className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={onIgnore}
+            className="px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
+          >
+            Ignore
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TodoSection({
+  recommendations,
+  loading,
+  refreshing,
+  busyId,
+  onRefresh,
+  onAccept,
+  onIgnore,
+  onSnooze,
+}: {
+  recommendations: TodoRecommendation[];
+  loading: boolean;
+  refreshing: boolean;
+  busyId: string | null;
+  onRefresh: () => void;
+  onAccept: (id: string) => void;
+  onIgnore: (id: string) => void;
+  onSnooze: (id: string, value: string) => void;
+}) {
+  // While the first load is in flight we render nothing to avoid layout jump;
+  // once loaded, only show the section when there's something to act on.
+  if (loading) return null;
+
+  return (
+    <section className="mb-6 rounded-xl border hairline bg-[color:var(--surface-sunken)] p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-[color:var(--ink)] flex items-center gap-2">
+            <svg className="w-4 h-4 text-[color:var(--brand-600)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            To Do
+            {recommendations.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-[color:var(--brand-100)] text-[color:var(--brand-700)] text-[10px] font-medium">
+                {recommendations.length}
+              </span>
+            )}
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            <span className="serif-italic text-[color:var(--brand-700)]">Recommended each morning</span> from your emails, schedule, and project activity.
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
+        >
+          <svg className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          {refreshing ? "Thinking..." : "Refresh"}
+        </button>
+      </div>
+
+      {recommendations.length === 0 ? (
+        <p className="text-xs text-gray-400 py-2">
+          {refreshing ? "Reviewing project activity…" : "No recommendations right now. Check back tomorrow morning, or Refresh to generate now."}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {recommendations.map((rec) => (
+            <TodoCard
+              key={rec.id}
+              rec={rec}
+              busy={busyId === rec.id}
+              onAccept={() => onAccept(rec.id)}
+              onIgnore={() => onIgnore(rec.id)}
+              onSnooze={(v) => onSnooze(rec.id, v)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function TasksClient({
@@ -782,6 +978,12 @@ export default function TasksClient({
   const [sendingTaskId, setSendingTaskId] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
+  // AI "To Do" recommendations
+  const [recommendations, setRecommendations] = useState<TodoRecommendation[]>([]);
+  const [recsLoading, setRecsLoading] = useState(true);
+  const [recsRefreshing, setRecsRefreshing] = useState(false);
+  const [recBusyId, setRecBusyId] = useState<string | null>(null);
+
   // Click-outside for export menu
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -800,7 +1002,50 @@ export default function TasksClient({
       setDirectory(Array.isArray(dirData) ? dirData : []);
       setLoading(false);
     });
+
+    fetch(`/api/projects/${projectId}/todo-recommendations`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setRecommendations(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setRecsLoading(false));
   }, [projectId]);
+
+  async function handleRefreshRecs() {
+    setRecsRefreshing(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/todo-recommendations`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.recommendations)) setRecommendations(data.recommendations);
+      }
+    } catch {
+      // leave the existing list in place on failure
+    }
+    setRecsRefreshing(false);
+  }
+
+  async function actOnRec(id: string, body: { action: string; snooze?: string }) {
+    setRecBusyId(id);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/todo-recommendations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Accepting spawns a real task — surface it in the table immediately.
+        if (body.action === "accept" && data.task) {
+          const t = data.task as Task;
+          setTasks((prev) => [...prev, { ...t, assignees: t.assignees ?? [], distribution_list: t.distribution_list ?? [] }]);
+        }
+        setRecommendations((prev) => prev.filter((r) => r.id !== id));
+      }
+    } catch {
+      // keep the card in place on failure
+    }
+    setRecBusyId(null);
+  }
 
   const validNums = tasks.map((t) => Number(t.task_number)).filter((n) => Number.isFinite(n));
   const nextNumber = validNums.length > 0 ? Math.max(...validNums) + 1 : 1;
@@ -965,6 +1210,18 @@ export default function TasksClient({
             </button>
           </div>
         </div>
+
+        {/* To Do — AI recommendations */}
+        <TodoSection
+          recommendations={recommendations}
+          loading={recsLoading}
+          refreshing={recsRefreshing}
+          busyId={recBusyId}
+          onRefresh={handleRefreshRecs}
+          onAccept={(id) => actOnRec(id, { action: "accept" })}
+          onIgnore={(id) => actOnRec(id, { action: "ignore" })}
+          onSnooze={(id, value) => actOnRec(id, { action: "snooze", snooze: value })}
+        />
 
         {/* Stat strip */}
         {!loading && tasks.length > 0 && (

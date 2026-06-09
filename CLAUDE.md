@@ -1416,3 +1416,36 @@ A project-level tool for completing permit application PDFs. The user uploads a 
 - Storage: completed PDFs live in the existing `project-drawings` bucket under `{projectId}/_permit-completed/...`.
 - Database: `project_permit_applications` (migration `140_permit_applications.sql`) — `title`, `source_filename`, `final_filename`, `final_storage_path`, `fields` JSONB, `created_by`, `created_at`.
 - UI: `app/projects/[id]/permit-applications/PermitApplicationsClient.tsx` (page shell, upload, completed list) and `PdfFieldEditor.tsx` (in-PDF rendering + yellow editable overlays).
+
+## Tasks – AI "To Do" Recommendations
+
+### Overview
+The Tasks page has a **To Do** section above the tasks table that surfaces AI-recommended action items. A daily cron at ~4am ET generates recommendations per project so the team sees a fresh list when they log on. Recommendations are grounded in the project's recent signals — linked **emails**, where the project sits in its **schedule** (with typical/known construction lead times), open RFIs/submittals, change events, meetings, daily logs, and punch list — and surface time-sensitive work (long-lead procurement, submittals needing approval before fabrication, inspections to book ahead, email action items, etc.).
+
+### User Actions (per recommendation)
+- **Accept** — spawns a real task (status `initiated`, title/category/due date carried over, rationale becomes the description) and removes the card.
+- **Ignore** — dismisses permanently (never resurfaces; deduped against on future runs).
+- **Later** (snooze) — resurfaces after **1 day**, **1 week**, or **2 weeks**.
+- **Refresh** — manually triggers a generation pass (same logic as the cron) instead of waiting for the morning.
+
+### Tool-Level Permissions
+- Any user who can access the project (`canAccessProject`) can view and act on recommendations, matching the existing Tasks tool (which gates on project access, not a per-tool level).
+
+### Generation & Dedupe
+- Shared generator: `lib/todo-recommendations.ts` → `generateTodoRecommendations(supabase, projectId)`. Builds a lean project context (generic row serialization for RFIs, submittals, meetings, daily logs, schedules, change events/orders, commitments, punch list, transmittals + a dedicated fuller email block) and calls Gemini `gemini-2.5-flash` with a structured-output schema (`{ items: [{ title, rationale, source, category, priority, suggestedDueDate }] }`).
+- **Dedupe**: each title is normalized into a `dedupe_key` (lowercase, alphanumeric, collapsed whitespace); `UNIQUE(project_id, dedupe_key)` plus an in-generator check against ALL existing rows (any status) means a recommendation already seen/accepted/ignored is never re-suggested.
+- **Caps**: stops generating once a project has `MAX_ACTIVE_RECOMMENDATIONS` (12) actionable items; inserts at most `MAX_NEW_PER_RUN` (6) per pass. Existing open tasks and prior recommendations are passed to the model so it won't duplicate them.
+
+### Schedule (Cron)
+- `vercel.json` cron `/api/cron/todo-recommendations` at `0 8 * * *` (~4am ET / before the workday). Secured with `CRON_SECRET`. Iterates `projects` where `status = 'active'` and calls the shared generator; resilient to per-project failures. Requires `GEMINI_API_KEY`.
+
+### API
+- `GET /api/projects/[id]/todo-recommendations` — active list (`status = 'pending'` AND not currently snoozed: `snoozed_until` null or ≤ now), sorted high→medium→low then newest first.
+- `POST /api/projects/[id]/todo-recommendations` — manual generation pass, returns the refreshed active list (`maxDuration = 120`).
+- `PATCH /api/projects/[id]/todo-recommendations/[recId]` — body `{ action: "accept" | "ignore" | "snooze", snooze?: "1d" | "1w" | "2w" }`. Accept creates the task and links `accepted_task_id`; rejects if the recommendation is no longer `pending` (409).
+
+### Schema
+- `project_todo_recommendations` (migration `152_project_todo_recommendations.sql`): `title`, `rationale`, `source`, `category`, `priority` (high/medium/low), `suggested_due_date`, `status` (pending/accepted/ignored), `snoozed_until` (future = hidden until then), `dedupe_key` (UNIQUE per project), `accepted_task_id`, `acted_by`/`acted_at`, `generated_at`.
+
+### UI (SiteCommand)
+- `TasksClient.tsx`: `TodoSection` + `TodoCard` render above the stat strip. Each card shows priority badge, title, category, rationale, source label, and suggested due date, with Accept / Later (snooze dropdown) / Ignore controls. State: `recommendations`, `recsLoading`, `recsRefreshing`, `recBusyId`; handlers `handleRefreshRecs` and `actOnRec`. The section hides while the first load is in flight and renders an empty hint (with Refresh) when there are no items.
