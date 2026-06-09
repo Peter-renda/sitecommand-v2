@@ -4403,15 +4403,21 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
     const data = await res.json();
     const drawings: Row[] = Array.isArray(data?.drawings) ? data.drawings : Array.isArray(data) ? data : [];
     return drawings.map((d) => ({
+      ...((d.report_fields as Row) ?? {}),
       drawing_no: d.drawing_no,
+      number: d.drawing_no,
       title: d.title,
       revision: d.revision,
-      discipline: d.discipline,
+      current_revision: d.revision,
+      discipline: d.discipline ?? d.category,
       drawing_set: d.drawing_set ?? d.set_name,
+      set: d.drawing_set ?? d.set_name,
       drawing_date: d.drawing_date,
       received_date: d.received_date,
       page_number: d.page_number,
+      position: d.page_number,
       updated_at: d.updated_at,
+      date_updated: d.updated_at,
     }));
   }
 
