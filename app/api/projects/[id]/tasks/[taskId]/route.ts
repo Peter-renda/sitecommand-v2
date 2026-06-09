@@ -44,6 +44,7 @@ export async function PATCH(
   if (body.distribution_list !== undefined) update.distribution_list = body.distribution_list;
   if (body.assignees !== undefined) update.assignees = body.assignees;
   if (body.is_private !== undefined) update.is_private = Boolean(body.is_private);
+  if (body.report_fields !== undefined) update.report_fields = body.report_fields;
 
   const supabase = getSupabase();
   const { data, error } = await supabase

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { CHANGE_ORDER_REPORT_FIELDS } from "@/lib/report-fields";
 
 const CHANGE_REASONS = [
   "Allowance",
@@ -186,6 +188,7 @@ export default function ChangeOrderDetailClient({
   const [referenceText, setReferenceText] = useState("");
   const [fieldChange, setFieldChange] = useState(false);
   const [paidInFull, setPaidInFull] = useState(false);
+  const [reportFields, setReportFields] = useState<ReportFieldValues>({});
   const [includedPotentialRows, setIncludedPotentialRows] = useState<IncludedPotentialRow[]>([]);
   const [activeTab, setActiveTab] = useState<"general" | "related_items" | "emails">("general");
   const [relatedItems, setRelatedItems] = useState<RelatedItem[]>([]);
@@ -228,6 +231,7 @@ export default function ChangeOrderDetailClient({
         setReferenceText(data.reference ?? "");
         setFieldChange(!!data.field_change);
         setPaidInFull(!!data.paid_in_full);
+        setReportFields((data as { report_fields?: ReportFieldValues }).report_fields ?? {});
         setIsEditing(data.type === "commitment" ? false : true);
         setLoading(false);
       })
@@ -388,6 +392,7 @@ export default function ChangeOrderDetailClient({
           reference: referenceText,
           field_change: fieldChange,
           paid_in_full: paidInFull,
+          report_fields: reportFields,
         }),
       });
       if (!res.ok) {
@@ -1300,6 +1305,17 @@ export default function ChangeOrderDetailClient({
                 </div>
               </>
             )}
+
+            <div className="mt-6">
+              <ReportFieldsSection
+                title="Report Fields"
+                description="Extra change order attributes surfaced as columns in 360 Reports."
+                fields={CHANGE_ORDER_REPORT_FIELDS}
+                values={reportFields}
+                onChange={(key, value) => setReportFields((prev) => ({ ...prev, [key]: value }))}
+                columns={3}
+              />
+            </div>
           </div>
         </div>}
 

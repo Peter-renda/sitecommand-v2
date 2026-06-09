@@ -5,6 +5,8 @@ import ProjectNav from "@/components/ProjectNav";
 import EmptyState from "@/app/components/EmptyState";
 import { SkeletonTable } from "@/app/components/Skeleton";
 import { Brand } from "@/components/design-system/Primitives";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { TASK_REPORT_FIELDS } from "@/lib/report-fields";
 
 type DistributionContact = { id: string; name: string; email: string | null };
 
@@ -21,6 +23,7 @@ type Task = {
   due_date: string | null;
   is_private: boolean;
   created_at: string;
+  report_fields?: ReportFieldValues | null;
 };
 
 type DirectoryContact = {
@@ -604,6 +607,7 @@ function TaskDetailModal({
   onClose: () => void;
 }) {
   const [status, setStatus] = useState(task.status);
+  const [reportFields, setReportFields] = useState<ReportFieldValues>(task.report_fields ?? {});
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -611,11 +615,11 @@ function TaskDetailModal({
     const res = await fetch(`/api/projects/${projectId}/tasks/${task.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, report_fields: reportFields }),
     });
     if (res.ok) {
       const updated = await res.json();
-      onUpdate({ ...task, status: updated.status });
+      onUpdate({ ...task, status: updated.status, report_fields: reportFields });
     }
     setSaving(false);
     onClose();
@@ -686,6 +690,15 @@ function TaskDetailModal({
               ))}
             </select>
           </div>
+
+          <ReportFieldsSection
+            title="Report Fields"
+            description="Extra task attributes surfaced as columns in 360 Reports."
+            fields={TASK_REPORT_FIELDS}
+            values={reportFields}
+            onChange={(key, value) => setReportFields((prev) => ({ ...prev, [key]: value }))}
+            columns={2}
+          />
 
           <div className="flex gap-3 justify-end pt-1">
             <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">

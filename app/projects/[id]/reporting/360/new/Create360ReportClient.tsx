@@ -4403,15 +4403,21 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
     const data = await res.json();
     const drawings: Row[] = Array.isArray(data?.drawings) ? data.drawings : Array.isArray(data) ? data : [];
     return drawings.map((d) => ({
+      ...((d.report_fields as Row) ?? {}),
       drawing_no: d.drawing_no,
+      number: d.drawing_no,
       title: d.title,
       revision: d.revision,
-      discipline: d.discipline,
+      current_revision: d.revision,
+      discipline: d.discipline ?? d.category,
       drawing_set: d.drawing_set ?? d.set_name,
+      set: d.drawing_set ?? d.set_name,
       drawing_date: d.drawing_date,
       received_date: d.received_date,
       page_number: d.page_number,
+      position: d.page_number,
       updated_at: d.updated_at,
+      date_updated: d.updated_at,
     }));
   }
 
@@ -4421,13 +4427,20 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
     if (!res.ok) return [];
     const data: Row[] = await res.json();
     return (data ?? []).map((d) => ({
+      ...((d.report_fields as Row) ?? {}),
       name: d.name,
       type: d.type,
+      is_folder: d.type === "folder",
       mime_type: d.mime_type,
       size: d.size,
+      file_size_bytes: d.size,
       parent_name: d.parent_name ?? d.parent_id,
+      name_with_path: d.name_with_path ?? d.name,
+      private: d.is_private,
       created_by: d.created_by_name ?? d.created_by,
       created_at: d.created_at,
+      date_created: d.created_at,
+      date_updated: d.updated_at,
     }));
   }
 

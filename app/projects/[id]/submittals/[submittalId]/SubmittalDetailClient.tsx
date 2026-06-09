@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, ChangeEvent } from "react";
 import ProjectNav from "@/components/ProjectNav";
 import { useRouter } from "next/navigation";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { SUBMITTAL_REPORT_FIELDS } from "@/lib/report-fields";
 
 type DirContact = { id: string; name: string; email: string | null };
 type DirectoryContact = {
@@ -254,9 +256,11 @@ export default function SubmittalDetailClient({
   const [isEditing, setIsEditing] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editValues, setEditValues] = useState<EditableSubmittalFields | null>(null);
+  const [editReportFields, setEditReportFields] = useState<ReportFieldValues>({});
 
   function startEdit() {
     if (!submittal) return;
+    setEditReportFields((submittal as { report_fields?: ReportFieldValues }).report_fields ?? {});
     setEditValues({
       title: submittal.title,
       revision: submittal.revision,
@@ -278,7 +282,7 @@ export default function SubmittalDetailClient({
     const res = await fetch(`/api/projects/${projectId}/submittals/${submittalId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editValues),
+      body: JSON.stringify({ ...editValues, report_fields: editReportFields }),
     });
     const data = await res.json().catch(() => ({}));
     setEditSaving(false);
@@ -1051,6 +1055,19 @@ export default function SubmittalDetailClient({
                   <p className="text-sm text-gray-400">--</p>
                 </div>
               </div>
+
+              {isEditing && (
+                <div className="border-t border-gray-100 pt-4">
+                  <ReportFieldsSection
+                    title="Report Fields"
+                    description="Extra submittal attributes surfaced as columns in 360 Reports."
+                    fields={SUBMITTAL_REPORT_FIELDS}
+                    values={editReportFields}
+                    onChange={(key, value) => setEditReportFields((prev) => ({ ...prev, [key]: value }))}
+                    columns={3}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

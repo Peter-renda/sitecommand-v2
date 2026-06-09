@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { MEETING_REPORT_FIELDS } from "@/lib/report-fields";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -309,6 +311,7 @@ export default function MeetingDetailClient({
 
   // Notes
   const [notes, setNotes] = useState("");
+  const [reportFields, setReportFields] = useState<ReportFieldValues>({});
   const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   // Load meeting + directory
@@ -320,6 +323,7 @@ export default function MeetingDetailClient({
       if (m && !m.error) {
         setMeeting(m);
         setNotes(m.notes ?? "");
+        setReportFields((m as { report_fields?: ReportFieldValues }).report_fields ?? {});
         // Ensure default "Uncategorized Items" category exists
         const ag: AgendaCategory[] = Array.isArray(m.agenda) && m.agenda.length > 0
           ? m.agenda
@@ -1028,6 +1032,21 @@ export default function MeetingDetailClient({
                 />
               </div>
             )}
+          </div>
+
+          <div className="mt-5">
+            <ReportFieldsSection
+              title="Report Fields"
+              description="Extra meeting attributes surfaced as columns in 360 Reports. Saved automatically."
+              fields={MEETING_REPORT_FIELDS}
+              values={reportFields}
+              onChange={(key, value) => {
+                const next = { ...reportFields, [key]: value };
+                setReportFields(next);
+                autosave({ report_fields: next });
+              }}
+              columns={2}
+            />
           </div>
         </div>}
       </main>

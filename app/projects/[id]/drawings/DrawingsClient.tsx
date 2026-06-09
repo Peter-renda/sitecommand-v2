@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo, DragEvent } from "react";
 import { Hand } from "lucide-react";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { DRAWING_REPORT_FIELDS } from "@/lib/report-fields";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ type DrawingPage = {
   received_date: string | null;
   category: string | null;
   updated_at: string;
+  report_fields?: ReportFieldValues | null;
   // resolved by API: per-page extracted PDF path (new) or shared upload path (legacy)
   storage_path: string;
   // which page of storage_path to show: 1 for extracted pages, page_number for legacy
@@ -2588,6 +2591,7 @@ export default function DrawingsClient({
   const [editRevision, setEditRevision] = useState("");
   const [editDrawingDate, setEditDrawingDate] = useState("");
   const [editReceivedDate, setEditReceivedDate] = useState("");
+  const [editReportFields, setEditReportFields] = useState<ReportFieldValues>({});
   const [editCategory, setEditCategory] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -2724,6 +2728,7 @@ export default function DrawingsClient({
       setEditDrawingDate(selected.drawing_date ?? "");
       setEditReceivedDate(selected.received_date ?? "");
       setEditCategory(selected.category ?? "");
+      setEditReportFields(selected.report_fields ?? {});
       setDeleteConfirm(false);
     }
   }, [selected]);
@@ -2928,6 +2933,7 @@ export default function DrawingsClient({
         drawing_date: editDrawingDate || null,
         received_date: editReceivedDate || null,
         category: editCategory || null,
+        report_fields: editReportFields,
       }),
     });
     if (res.ok) {
@@ -3788,6 +3794,15 @@ export default function DrawingsClient({
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
+
+              <ReportFieldsSection
+                title="Report Fields"
+                description="Extra drawing attributes surfaced as columns in 360 Reports."
+                fields={DRAWING_REPORT_FIELDS}
+                values={editReportFields}
+                onChange={(key, value) => setEditReportFields((prev) => ({ ...prev, [key]: value }))}
+                columns={2}
+              />
 
               <div className="space-y-2 pt-1">
                 <button
