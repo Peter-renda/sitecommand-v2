@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
-import { parseScheduleTasks, type ScheduleTask } from "@/lib/schedule-parser";
+import { parseScheduleTasks, applyExpectedProgress, type ScheduleTask } from "@/lib/schedule-parser";
 
 // Large MS Project XML exports take a moment to download + parse on GET; give
 // the function headroom beyond the platform default (works on Hobby and Pro).
@@ -60,6 +60,10 @@ export async function GET(
       }
     }
   }
+
+  // When the file carries no actual progress, derive expected % from the
+  // timeline. Done after overrides so edited dates drive the calculation.
+  tasks = applyExpectedProgress(tasks);
 
   return NextResponse.json({
     schedule: {

@@ -269,3 +269,39 @@ export function parseScheduleTasks(xmlText: string): ScheduleTask[] {
 
   return mapped;
 }
+
+// ── Expected (time-based) progress ──────────────────────────────────────────
+// How far "now" sits between a task's start and finish: before start → 0,
+// after finish → 100, in between → proportional. Start is taken at the
+// beginning of its day and finish at the end of its day so a task finishing
+// today reads 100% and a single-day/milestone reads 0 until its day passes.
+export function expectedPercent(
+  start: string,
+  finish: string,
+  now: number = Date.now()
+): number {
+  if (!start) return 0;
+  const startMs = Date.parse(`${start}T00:00:00`);
+  const finishMs = Date.parse(`${finish || start}T23:59:59`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(finishMs)) return 0;
+  if (now >= finishMs) return 100;
+  if (now <= startMs) return 0;
+  const pct = ((now - startMs) / (finishMs - startMs)) * 100;
+  return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+// Many schedules (CPM baselines) ship with no actual progress entered — every
+// task reads 0%. In that case, fill in expected progress from the timeline so
+// the % Complete column and rollup tiles are meaningful. Schedules that DO
+// carry actual progress (any task > 0%) are returned unchanged.
+export function applyExpectedProgress(
+  tasks: ScheduleTask[],
+  now: number = Date.now()
+): ScheduleTask[] {
+  const hasActuals = tasks.some((t) => t.percentComplete > 0);
+  if (hasActuals) return tasks;
+  return tasks.map((t) => ({
+    ...t,
+    percentComplete: expectedPercent(t.start, t.finish, now),
+  }));
+}
