@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { PRIME_CONTRACT_REPORT_FIELDS } from "@/lib/report-fields";
 import {
   Bold, Italic, Underline, Strikethrough,
   AlignLeft, AlignCenter, AlignRight,
@@ -150,6 +152,7 @@ export default function EditPrimeContractClient({
     is_private: true,
     sov_view_allowed: false,
   });
+  const [reportFields, setReportFields] = useState<ReportFieldValues>({});
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}/prime-contracts/${contractId}`)
@@ -178,6 +181,7 @@ export default function EditPrimeContractClient({
             is_private: data.is_private ?? true,
             sov_view_allowed: data.sov_view_allowed ?? false,
           });
+          setReportFields(data.report_fields ?? {});
           setSovItems(
             (data.sov_items ?? []).map((item: any) => ({
               budget_code: item.budget_code ?? "",
@@ -234,6 +238,7 @@ export default function EditPrimeContractClient({
       ...formData,
       default_retainage: formData.default_retainage !== "" ? Number(formData.default_retainage) : 0,
       sov_items: sovItems,
+      report_fields: reportFields,
     };
     for (const field of DATE_FIELDS) {
       if (!payload[field]) payload[field] = null;
@@ -625,6 +630,18 @@ export default function EditPrimeContractClient({
               />
               <label htmlFor="allow_sov" className="text-sm text-gray-600">Allow non-admin users to view the SOV items.</label>
             </div>
+          </SectionBlock>
+
+          <SectionBlock>
+            <SectionTitle>Report Fields</SectionTitle>
+            <ReportFieldsSection
+              title="Report Fields"
+              description="Extra prime contract attributes surfaced as columns in 360 Reports."
+              fields={PRIME_CONTRACT_REPORT_FIELDS}
+              values={reportFields}
+              onChange={(key, value) => setReportFields((prev) => ({ ...prev, [key]: value }))}
+              columns={3}
+            />
           </SectionBlock>
 
         </div>

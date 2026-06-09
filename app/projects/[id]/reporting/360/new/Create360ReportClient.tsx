@@ -3941,11 +3941,77 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
     return rows;
   }
 
-  if (source === "commitment-change-orders") {
-    const res = await fetch(`/api/projects/${projectId}/change-orders?type=commitment`);
+  if (source === "commitment-change-orders" || source === "prime-contract-change-orders") {
+    const type = source === "prime-contract-change-orders" ? "prime" : "commitment";
+    const res = await fetch(`/api/projects/${projectId}/change-orders?type=${type}`);
     if (!res.ok) return [];
     const data = await res.json();
-    return Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+    const items: Row[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+    return items.map((co: Row) => ({
+      // report_fields-backed columns first, then explicit/aliased keys.
+      ...((co.report_fields as Row) ?? {}),
+      ...co,
+      number: co.number,
+      title: co.title,
+      status: co.status,
+      amount: co.amount,
+      change_reason: co.change_reason,
+      contract_company: co.contract_company,
+      contract_name: co.contract_name,
+      due_date: co.due_date,
+      description: co.description,
+      designated_reviewer: co.designated_reviewer,
+      reviewer: co.reviewer,
+      review_date: co.review_date,
+      revision: co.revision,
+      executed: co.executed,
+      private: co.is_private,
+      date_created: co.created_at,
+      date_updated: co.updated_at,
+      approved_date: co.approved_at,
+      invoiced_date: co.invoiced_date,
+      paid_date: co.paid_date,
+      schedule_impact_days: co.schedule_impact,
+      signed_change_order_received_date: co.signed_change_order_received_date,
+    }));
+  }
+
+  if (source === "prime-contracts") {
+    const res = await fetch(`/api/projects/${projectId}/prime-contracts`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const items: Row[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+    return items.map((pc: Row) => ({
+      ...((pc.report_fields as Row) ?? {}),
+      number: pc.contract_number,
+      title: pc.title,
+      status: pc.status,
+      owner_client: pc.owner_client,
+      contractor: pc.contractor,
+      architect_engineer: pc.architect_engineer,
+      description: pc.description,
+      inclusions: pc.inclusions,
+      exclusions: pc.exclusions,
+      executed: pc.executed,
+      private: pc.is_private,
+      default_retainage: pc.default_retainage,
+      original_contract_amount: pc.original_contract_amount,
+      approved_change_orders: pc.approved_change_orders,
+      pending_change_orders: pc.pending_change_orders,
+      draft_change_orders: pc.draft_change_orders,
+      revised_contract_amount:
+        Number(pc.original_contract_amount ?? 0) + Number(pc.approved_change_orders ?? 0),
+      invoiced: pc.invoiced,
+      payments_received: pc.payments_received,
+      start_date: pc.start_date,
+      estimated_completion_date: pc.estimated_completion_date,
+      actual_completion_date: pc.actual_completion_date,
+      signed_contract_received_date: pc.signed_contract_received_date,
+      contract_termination_date: pc.contract_termination_date,
+      date_created: pc.created_at,
+      date_updated: pc.updated_at,
+      erp_latest_status: pc.erp_status,
+    }));
   }
 
   // ── Directory & Portfolio ────────────────────────────────────────────────

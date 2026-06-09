@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { RFI_REPORT_FIELDS } from "@/lib/report-fields";
 
 type DirContact = { id: string; name: string; email: string | null };
 type DirectoryContact = {
@@ -175,6 +177,7 @@ export default function EditRFIClient({ projectId, rfiId, userId, role, toolLeve
   const [responsibleContractorId, setResponsibleContractorId] = useState<string | null>(null);
   const [specificationId, setSpecificationId] = useState<string | null>(null);
   const [drawingNumber, setDrawingNumber] = useState("");
+  const [reportFields, setReportFields] = useState<ReportFieldValues>({});
 
   useEffect(() => {
     Promise.all([
@@ -200,6 +203,7 @@ export default function EditRFIClient({ projectId, rfiId, userId, role, toolLeve
         setResponsibleContractorId(rfiData.responsible_contractor_id ?? null);
         setSpecificationId(rfiData.specification_id ?? null);
         setDrawingNumber(rfiData.drawing_number ?? "");
+        setReportFields(rfiData.report_fields ?? {});
       })
       .catch(() => setError("Failed to load RFI for editing."))
       .finally(() => setLoading(false));
@@ -233,6 +237,7 @@ export default function EditRFIClient({ projectId, rfiId, userId, role, toolLeve
         responsible_contractor_id: responsibleContractorId,
         specification_id: specificationId,
         drawing_number: drawingNumber,
+        report_fields: reportFields,
       }),
     });
 
@@ -364,6 +369,15 @@ export default function EditRFIClient({ projectId, rfiId, userId, role, toolLeve
               </select>
             </div>
           </div>
+
+          <ReportFieldsSection
+            title="Report Fields"
+            description="Extra RFI attributes surfaced as columns in 360 Reports."
+            fields={RFI_REPORT_FIELDS}
+            values={reportFields}
+            onChange={(key, value) => setReportFields((prev) => ({ ...prev, [key]: value }))}
+            columns={2}
+          />
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 
