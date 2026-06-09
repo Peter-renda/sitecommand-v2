@@ -1483,4 +1483,20 @@ These are **facts to commit to memory, not action items** (actionable to-dos liv
 - `project_looking_ahead_notes` (migration `153_project_looking_ahead_notes.sql`): `headline`, `detail`, `source`, `category`, `priority` (high/medium/low), `status` (pending/dismissed), `pinned` (bool), `snoozed_until` (future = hidden until then), `dedupe_key` (UNIQUE per project), `acted_by`/`acted_at`, `generated_at`.
 
 ### UI (SiteCommand)
-- `AssistClient.tsx`: a `LookingAheadCard` component plus an inline **Looking Ahead** `<section>` rendered between the page header and the chat box. Each card shows priority badge, headline, category, detail, source label, and a Pinned marker, with Pin/Unpin · Later (snooze dropdown) · Dismiss controls. State: `notes`, `notesLoading`, `notesRefreshing`, `noteBusyId`; handlers `refreshNotes` and `actOnNote`. The section hides while the first load is in flight and renders an empty hint (with Refresh) when there are no notes. Pin/unpin updates in place; dismiss/snooze optimistically removes the card and reverts on failure.
+- `AssistClient.tsx`: a `LookingAheadCard` component plus a **Looking Ahead** `<section>`. Each card shows priority badge, headline, category, detail, source label, and a Pinned marker, with Pin/Unpin · Later (snooze dropdown) · Dismiss controls. State: `notes`, `notesLoading`, `notesRefreshing`, `noteBusyId`; handlers `refreshNotes` and `actOnNote`. The section renders an empty hint (with Refresh) when there are no notes. Pin/unpin updates in place; dismiss/snooze optimistically removes the card and reverts on failure.
+
+## Assist – Page Layout (Navigation Tree)
+
+### Overview
+The Assist page uses a left **navigation tree** (same sticky `border-l-2` active-item style as the Project Admin settings page) to jump between three stacked sections. `ASSIST_SECTIONS` in `AssistClient.tsx` defines the order, and an `IntersectionObserver` (matching the AdminClient pattern) highlights the section currently in view; `jumpToSection` smooth-scrolls on click.
+
+### Sections (top → bottom)
+1. **Discover** (`id="discover"`) — the "What would you like to know about this project?" ask box **and** the question History live together **in the same tile** (one `card`): the chat scroll area + input on top, a `History` sub-panel beneath a divider in the same card.
+2. **Recurring Workflows** (`id="recurring-workflows"`) — the create form + saved workflow list.
+3. **Looking Ahead** (`id="looking-ahead"`) — the daily-briefing notes (see section above).
+
+### Recurring Workflows – Output Document Type
+- Each recurring workflow chooses an output **Document type**: **PDF** (default) or **Word**, selected in the create form (`wfDocumentType` state) and shown as a pill on each workflow row.
+- Persisted in `assist_recurring_workflows.document_type` (migration `156_assist_recurring_workflow_document_type.sql`, `CHECK IN ('pdf','word')`, default `'pdf'`). The reports `file_type` CHECK is widened to also allow `'word'`.
+- API: `POST /api/projects/[id]/assist/recurring-workflows` validates `documentType` against `ALLOWED_DOCUMENT_TYPES` and stores it; `GET` returns it as `documentType`.
+- Cron (`/api/cron/assist-recurring-workflows`) reads `document_type` and writes the report artifact accordingly: a `.doc` (msword-MIME HTML data URL, `file_type='word'`) for Word, or the existing markdown data URL (`file_type='pdf'`) for PDF.
