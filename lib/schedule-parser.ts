@@ -222,16 +222,19 @@ export function parseScheduleTasks(xmlText: string): ScheduleTask[] {
       return true;
     })
     .map((t, idx): ScheduleTask => {
-      const rawStart = toStr(firstValue(t, START_KEYS));
-      const rawFinish = toStr(firstValue(t, FINISH_KEYS));
+      const start = parseDate(firstValue(t, START_KEYS));
+      const finish = parseDate(firstValue(t, FINISH_KEYS));
       const typeStr = toStr(firstValue(t, TYPE_KEYS));
 
       const explicitSummary = toBool(firstValue(t, SUMMARY_KEYS)) || typeIsSummary(typeStr);
       const explicitMilestone =
         toBool(firstValue(t, MILESTONE_KEYS)) || typeIsMilestone(typeStr);
-      // Zero-duration (identical start/finish timestamps) is a reliable milestone
-      // signal when the flag is missing; a 1-day task has differing times.
-      const zeroDuration = !!rawStart && rawStart === rawFinish;
+      // A zero-duration activity (same start and finish day) is a milestone when
+      // no explicit flag is set — matches how MS Project treats 0-day tasks.
+      // Compare the date portion, not the raw timestamp: MS Project frequently
+      // stamps a milestone with the same day but different times (08:00/17:00).
+      // A multi-day task has different dates, so normal work isn't misflagged.
+      const zeroDuration = !!start && start === finish;
 
       return {
         uid: toNum(firstValue(t, UID_KEYS)) ?? idx + 1,
@@ -240,8 +243,8 @@ export function parseScheduleTasks(xmlText: string): ScheduleTask[] {
         outlineLevel: toNum(firstValue(t, OUTLINE_KEYS)) ?? 0,
         isSummary: explicitSummary,
         isMilestone: explicitMilestone || (zeroDuration && !explicitSummary),
-        start: parseDate(rawStart),
-        finish: parseDate(rawFinish),
+        start,
+        finish,
         percentComplete: detectPercent(t),
         predecessorUids: getPredecessors(t),
       };
