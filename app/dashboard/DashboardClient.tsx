@@ -953,6 +953,18 @@ export default function DashboardClient({ username, email, role, companyRole, us
             <div className="absolute right-0 top-full hidden group-hover:block z-40">
               <div className="w-44 rounded-md border border-gray-200 bg-white py-1 shadow-lg">
                 <a
+                  href="/support"
+                  className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                >
+                  Support
+                </a>
+                <a
+                  href="/training"
+                  className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                >
+                  Training
+                </a>
+                <a
                   href="/settings/account"
                   className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
                 >
