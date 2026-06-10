@@ -1545,6 +1545,8 @@ Per-company OAuth connection to QuickBooks Online (and Intuit Enterprise Suite t
 - Cron: `GET /api/cron/quickbooks-sync` daily 17:00 UTC (vercel.json), `CRON_SECRET`-gated; pushes dirty rows (updated_at > last_synced_at), capped 25/type/company.
 - Idempotency: `qbo_id`/`qbo_sync_token`/`last_synced_at` (+ `qbo_ap_invoice_*`, `qbo_ar_invoice_*`) from migration `113_qbo_idempotency_columns.sql`; updates re-fetch the live SyncToken and POST `?operation=update` with `sparse: true`; deleted-on-QBO records are recreated.
 - Posting config (per-company keys or env): `QBO_AP_EXPENSE_ACCOUNT`, `QBO_DEFAULT_ITEM`, `QBO_BUDGET_CODE_MAP` (JSON code → account/class/item), `QBO_RETAINAGE_RECEIVABLE_ACCOUNT`, `QBO_RETAINAGE_PAYABLE_ACCOUNT`. All refs post by **Id**, never name; sync fails fast when no valid account/item resolves.
+- Required record fields: commitments need **Contract Company** (QBO vendor), prime contracts need **Owner/Client** (QBO customer). Blank values fail fast with `validation: true` on the QBOResult → the sync route returns **422** with an actionable message (vs 502 for QBO-side errors). Vendor/customer resolution failures (`findOrCreateVendorId`/`findOrCreateCustomerId` return `QBORefLookup`) include QBO's underlying fault in the error string.
+- Record-fetch failures in the sync route are no longer masked as 404: PGRST116 (zero rows) → 404, any other DB error → 500 with the message (e.g. missing migration-113 columns).
 - Logs: every attempt → `erp_sync_logs` (`integration='quickbooks'`); per-record via `GET /api/integrations/quickbooks/logs`.
 
 ### Verification

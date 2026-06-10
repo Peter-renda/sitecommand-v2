@@ -244,6 +244,19 @@ async function main() {
   assert.equal(billPayload.Id, undefined, "create payload must not carry Id");
   pass("creates Vendor on demand and posts Bill with per-SOV-line detail and real dates");
 
+  // ── 3b. Missing Contract Company → actionable validation error ─────────────
+  calls.length = 0;
+  const noVendor = await syncCommitmentToQBO("co-1", appCreds, prodCreds, {
+    id: "c-2", type: "subcontract", number: 15, title: "No company set",
+    contract_company: "", original_contract_amount: 100,
+    status: "draft", project_id: "p-1",
+  });
+  assert.equal(noVendor.ok, false, "blank contract company must fail");
+  assert.ok(!noVendor.ok && noVendor.validation === true, "must be flagged as a validation failure (422)");
+  assert.match(!noVendor.ok ? noVendor.error : "", /Contract Company/, "error must name the missing field");
+  assert.equal(qboCalls().length, 0, "validation failure must not call QBO");
+  pass("blank Contract Company fails fast with an actionable validation message");
+
   // ── 4. Idempotent update with fresh SyncToken ───────────────────────────────
   console.log("\n[4] Idempotent update");
   calls.length = 0;

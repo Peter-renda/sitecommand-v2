@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
       writeLog(supabase, "commitments", recordId, result),
     ]);
 
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
     return NextResponse.json({ ok: true, qboId: result.id, erp_status: "synced" });
   }
 
@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
       writeLog(supabase, "prime_contracts", recordId, result),
     ]);
 
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
     return NextResponse.json({ ok: true, qboId: result.id, erp_status: "synced" });
   }
 
@@ -259,7 +259,7 @@ export async function POST(req: NextRequest) {
     }
 
     await writeLog(supabase, "ap_invoice", recordId, result);
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
     return NextResponse.json({ ok: true, qboId: result.id });
   }
 
@@ -323,7 +323,7 @@ export async function POST(req: NextRequest) {
     }
 
     await writeLog(supabase, "ar_invoice", recordId, result);
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
     return NextResponse.json({ ok: true, qboId: result.id });
   }
 

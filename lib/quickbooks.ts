@@ -288,7 +288,7 @@ export async function revokeQBOToken(
 
 export type QBOResult =
   | { ok: true; id: string; syncToken?: string; rawResponse: string }
-  | { ok: false; error: string; rawResponse: string };
+  | { ok: false; error: string; rawResponse: string; validation?: boolean };
 
 /**
  * Makes an authenticated JSON request to the QBO REST API. Automatically
@@ -525,40 +525,47 @@ export async function getQBOPostingConfig(companyId: string): Promise<QBOPosting
   }
 }
 
+/** Lookup result for master-record resolution: an Id, or the reason it failed. */
+export type QBORefLookup = { id: string; error?: undefined } | { id: null; error: string };
+
 /** Resolves a Vendor by exact DisplayName → Id, creating a minimal one if absent. */
 export async function findOrCreateVendorId(
   companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, displayName: string
-): Promise<string | null> {
+): Promise<QBORefLookup> {
   const name = (displayName ?? "").trim();
-  if (!name) return null;
+  if (!name) return { id: null, error: "no vendor name provided" };
   const found = await queryQBO(
     companyId, appCreds, companyCreds,
     `SELECT Id FROM Vendor WHERE DisplayName = '${escapeQBOString(name)}'`, "Vendor"
   );
-  if (found && found.length > 0) return String(found[0].Id);
-  const { status, json } = await callQBO(
+  if (found && found.length > 0) return { id: String(found[0].Id) };
+  const { status, json, rawText } = await callQBO(
     companyId, appCreds, companyCreds, "POST", "vendor", { DisplayName: name }
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return status === 200 ? (String((json as any)?.Vendor?.Id ?? "") || null) : null;
+  const id = status === 200 ? String((json as any)?.Vendor?.Id ?? "") : "";
+  if (id) return { id };
+  return { id: null, error: extractQBOError(json, rawText) };
 }
 
 /** Resolves a Customer by exact DisplayName → Id, creating a minimal one if absent. */
 export async function findOrCreateCustomerId(
   companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, displayName: string
-): Promise<string | null> {
+): Promise<QBORefLookup> {
   const name = (displayName ?? "").trim();
-  if (!name) return null;
+  if (!name) return { id: null, error: "no customer name provided" };
   const found = await queryQBO(
     companyId, appCreds, companyCreds,
     `SELECT Id FROM Customer WHERE DisplayName = '${escapeQBOString(name)}'`, "Customer"
   );
-  if (found && found.length > 0) return String(found[0].Id);
-  const { status, json } = await callQBO(
+  if (found && found.length > 0) return { id: String(found[0].Id) };
+  const { status, json, rawText } = await callQBO(
     companyId, appCreds, companyCreds, "POST", "customer", { DisplayName: name }
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return status === 200 ? (String((json as any)?.Customer?.Id ?? "") || null) : null;
+  const id = status === 200 ? String((json as any)?.Customer?.Id ?? "") : "";
+  if (id) return { id };
+  return { id: null, error: extractQBOError(json, rawText) };
 }
 
 /**
@@ -815,12 +822,24 @@ export async function syncCommitmentToQBO(
   const today = new Date().toISOString().slice(0, 10);
   const amount = Number(commitment.original_contract_amount.toFixed(2));
   const entity = commitment.type === "subcontract" ? "bill" : "purchaseorder";
+  const docLabel = commitment.type === "subcontract" ? "Bill" : "Purchase Order";
+
+  // QBO requires a vendor on every Bill / Purchase Order.
+  const vendorName = (commitment.contract_company ?? "").trim();
+  if (!vendorName) {
+    return {
+      ok: false, validation: true,
+      error: `This commitment has no Contract Company, and QuickBooks requires a vendor on every ${docLabel}. Edit the commitment, set the Contract Company, then sync again.`,
+      rawResponse: "",
+    };
+  }
 
   // Resolve references to QBO Ids (post by value, not name).
-  const vendorId = await findOrCreateVendorId(companyId, appCreds, companyCreds, commitment.contract_company);
-  if (!vendorId) {
-    return { ok: false, error: `Could not resolve or create QBO vendor "${commitment.contract_company}".`, rawResponse: "" };
+  const vendor = await findOrCreateVendorId(companyId, appCreds, companyCreds, vendorName);
+  if (!vendor.id) {
+    return { ok: false, error: `Could not resolve or create QBO vendor "${vendorName}": ${vendor.error}`, rawResponse: "" };
   }
+  const vendorId = vendor.id;
   const config = await getQBOPostingConfig(companyId);
 
   // Resolve per-line cost-code refs (Account/Class/Item) for any mapped codes.
@@ -959,11 +978,22 @@ export async function syncPrimeContractToQBO(
     `Status: ${contract.status}`,
   ].filter(Boolean).join("\n");
 
-  // Resolve references to QBO Ids (post by value, not name).
-  const customerId = await findOrCreateCustomerId(companyId, appCreds, companyCreds, contract.owner_client);
-  if (!customerId) {
-    return { ok: false, error: `Could not resolve or create QBO customer "${contract.owner_client}".`, rawResponse: "" };
+  // QBO requires a customer on every Invoice.
+  const customerName = (contract.owner_client ?? "").trim();
+  if (!customerName) {
+    return {
+      ok: false, validation: true,
+      error: "This prime contract has no Owner/Client, and QuickBooks requires a customer on every Invoice. Edit the contract, set the Owner/Client, then sync again.",
+      rawResponse: "",
+    };
   }
+
+  // Resolve references to QBO Ids (post by value, not name).
+  const customer = await findOrCreateCustomerId(companyId, appCreds, companyCreds, customerName);
+  if (!customer.id) {
+    return { ok: false, error: `Could not resolve or create QBO customer "${customerName}": ${customer.error}`, rawResponse: "" };
+  }
+  const customerId = customer.id;
   const config = await getQBOPostingConfig(companyId);
   const itemId = await findOrCreateItemId(companyId, appCreds, companyCreds, config.itemName);
   if (!itemId) {
@@ -1043,11 +1073,22 @@ export async function syncAPInvoiceToQBO(
 ): Promise<QBOResult> {
   const today = new Date().toISOString().slice(0, 10);
 
-  // Resolve references to QBO Ids (post by value, not name).
-  const vendorId = await findOrCreateVendorId(companyId, appCreds, companyCreds, invoice.vendorName);
-  if (!vendorId) {
-    return { ok: false, error: `Could not resolve or create QBO vendor "${invoice.vendorName}".`, rawResponse: "" };
+  // QBO requires a vendor on every Bill.
+  const vendorName = (invoice.vendorName ?? "").trim();
+  if (!vendorName) {
+    return {
+      ok: false, validation: true,
+      error: "This commitment has no Contract Company, and QuickBooks requires a vendor on every Bill. Edit the commitment, set the Contract Company, then sync again.",
+      rawResponse: "",
+    };
   }
+
+  // Resolve references to QBO Ids (post by value, not name).
+  const vendor = await findOrCreateVendorId(companyId, appCreds, companyCreds, vendorName);
+  if (!vendor.id) {
+    return { ok: false, error: `Could not resolve or create QBO vendor "${vendorName}": ${vendor.error}`, rawResponse: "" };
+  }
+  const vendorId = vendor.id;
   const config = await getQBOPostingConfig(companyId);
   const expenseAccountId = await findExpenseAccountId(companyId, appCreds, companyCreds, config.expenseAccountName);
   if (!expenseAccountId) {
@@ -1129,11 +1170,22 @@ export async function syncARInvoiceToQBO(
 ): Promise<QBOResult> {
   const today = new Date().toISOString().slice(0, 10);
 
-  // Resolve references to QBO Ids (post by value, not name).
-  const customerId = await findOrCreateCustomerId(companyId, appCreds, companyCreds, invoice.customerName);
-  if (!customerId) {
-    return { ok: false, error: `Could not resolve or create QBO customer "${invoice.customerName}".`, rawResponse: "" };
+  // QBO requires a customer on every Invoice.
+  const customerName = (invoice.customerName ?? "").trim();
+  if (!customerName) {
+    return {
+      ok: false, validation: true,
+      error: "This prime contract has no Owner/Client, and QuickBooks requires a customer on every Invoice. Edit the contract, set the Owner/Client, then sync again.",
+      rawResponse: "",
+    };
   }
+
+  // Resolve references to QBO Ids (post by value, not name).
+  const customer = await findOrCreateCustomerId(companyId, appCreds, companyCreds, customerName);
+  if (!customer.id) {
+    return { ok: false, error: `Could not resolve or create QBO customer "${customerName}": ${customer.error}`, rawResponse: "" };
+  }
+  const customerId = customer.id;
   const config = await getQBOPostingConfig(companyId);
   const itemId = await findOrCreateItemId(companyId, appCreds, companyCreds, config.itemName);
   if (!itemId) {
