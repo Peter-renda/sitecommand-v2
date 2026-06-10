@@ -24,6 +24,7 @@ function contactName(c: DirectoryContact): string {
 type ScheduleTask = {
   uid: number;
   name: string;
+  outlineLevel: number;
   isSummary: boolean;
   isMilestone: boolean;
   start: string;
@@ -71,6 +72,13 @@ type WeatherDay = {
   precip: number; // inches, rounded to nearest 0.1
 };
 
+
+// Local-timezone YYYY-MM-DD (toISOString shifts to UTC and can be a day off)
+function localISODate(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
 
 function timeAgo(timestamp: string): string {
   const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
@@ -406,7 +414,7 @@ export default function ProjectClient({
   const [openTaskAlerts, setOpenTaskAlerts] = useState<{ id: string; title: string }[]>([]);
   const [scheduleTasks, setScheduleTasks] = useState<ScheduleTask[]>([]);
   const [workTab, setWorkTab] = useState<"ongoing" | "upcoming">("ongoing");
-  const [workExpanded, setWorkExpanded] = useState(false);
+  const [collapsedWorkUids, setCollapsedWorkUids] = useState<Set<number>>(new Set());
   const [recentActivityExpanded, setRecentActivityExpanded] = useState(false);
   const [lastLoginAt] = useState<number | null>(() => {
     if (typeof window === "undefined") return null;
@@ -780,18 +788,30 @@ export default function ProjectClient({
         ) : project ? (
           <>
             {(() => {
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              const todayStr = today.toISOString().slice(0, 10);
-
-              const workTasks = scheduleTasks.filter((t) => !t.isMilestone && t.start && t.finish);
+              const workTasks = scheduleTasks.filter((t) => !t.isSummary && !t.isMilestone && t.start && t.finish);
               const completedTasks = workTasks.filter((t) => t.percentComplete >= 100).length;
-              const pctComplete = workTasks.length > 0
-                ? Math.round((completedTasks / workTasks.length) * 100)
-                : 0;
+
+              // Duration-weighted schedule percent complete
+              let weightedPct = 0;
+              let totalDuration = 0;
+              for (const t of workTasks) {
+                const start = new Date(t.start.slice(0, 10) + "T12:00:00").getTime();
+                const finish = new Date(t.finish.slice(0, 10) + "T12:00:00").getTime();
+                const days = Math.max(1, Math.round((finish - start) / 86400000) + 1);
+                weightedPct += days * t.percentComplete;
+                totalDuration += days;
+              }
+              const schedulePct = totalDuration > 0 ? Math.round(weightedPct / totalDuration) : null;
+
+              // Start date: project dates first, then the earliest scheduled task
+              const earliestTaskStart = workTasks.reduce<string | null>(
+                (min, t) => (!min || t.start < min ? t.start : min),
+                null,
+              );
+              const startDateValue = project.actual_start_date || project.start_date || earliestTaskStart;
 
               const fmtDate = (d: string) =>
-                new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                new Date(d.slice(0, 10) + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
               const cityStateZip = [
                 [project.city, project.state].filter(Boolean).join(", "),
@@ -825,11 +845,11 @@ export default function ProjectClient({
                     <span style={{ fontFamily: "JetBrains Mono, monospace", textTransform: "capitalize" }}>
                       {project.status || "active"}
                     </span>
-                    {(project.actual_start_date || project.start_date) && (
+                    {startDateValue && (
                       <>
                         <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
                         <span style={{ fontFamily: "JetBrains Mono, monospace" }}>
-                          Start: {fmtDate((project.actual_start_date || project.start_date)!)}
+                          Start: {fmtDate(startDateValue)}
                         </span>
                       </>
                     )}
@@ -841,11 +861,11 @@ export default function ProjectClient({
                     </div>
                     <div>
                       <div className="lbl">Schedule</div>
-                      <div className="val">{workTasks.length}</div>
+                      <div className="val">{schedulePct == null ? "—" : `${schedulePct}% complete`}</div>
                     </div>
                     <div>
-                      <div className="lbl">Complete</div>
-                      <div className="val">{workTasks.length > 0 ? `${pctComplete}%` : "—"}</div>
+                      <div className="lbl">Tasks complete</div>
+                      <div className="val">{workTasks.length > 0 ? `${completedTasks} of ${workTasks.length}` : "—"}</div>
                     </div>
                   </div>
                 </div>
@@ -891,77 +911,157 @@ export default function ProjectClient({
 
                 {/* Ongoing / Upcoming Work */}
                 {(() => {
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  const todayStr = today.toISOString().slice(0, 10);
-                  const twoWeeksOut = new Date(today);
-                  twoWeeksOut.setDate(today.getDate() + 14);
-                  const twoWeeksStr = twoWeeksOut.toISOString().slice(0, 10);
+                  const todayStr = localISODate(new Date());
+                  const twoWeeksOut = new Date();
+                  twoWeeksOut.setDate(twoWeeksOut.getDate() + 14);
+                  const twoWeeksStr = localISODate(twoWeeksOut);
 
-                  const workTasks = scheduleTasks.filter((t) => !t.isMilestone && t.start && t.finish);
+                  const dateOnly = (s: string) => s.slice(0, 10);
+                  const matchesTab = (t: ScheduleTask) =>
+                    workTab === "ongoing"
+                      ? dateOnly(t.start) <= todayStr && dateOnly(t.finish) >= todayStr
+                      : dateOnly(t.start) > todayStr && dateOnly(t.start) <= twoWeeksStr;
 
-                  const ongoing = workTasks.filter((t) => t.start <= todayStr && t.finish >= todayStr);
-                  const upcoming = workTasks.filter((t) => t.start > todayStr && t.start <= twoWeeksStr);
-                  const list = workTab === "ongoing" ? ongoing : upcoming;
+                  // Build the visible tree: matching leaf tasks plus the summary
+                  // tasks (hierarchy) they sit under, preserving schedule order.
+                  type WorkRow = {
+                    task: ScheduleTask;
+                    depth: number;
+                    isSummary: boolean;
+                    ancestorUids: number[];
+                  };
+                  const rows: WorkRow[] = [];
+                  const stack: ScheduleTask[] = []; // current summary ancestor chain
+                  const emittedSummaries = new Set<number>();
+                  let leafCount = 0;
+                  for (const t of scheduleTasks) {
+                    while (stack.length > 0 && stack[stack.length - 1].outlineLevel >= t.outlineLevel) {
+                      stack.pop();
+                    }
+                    if (t.isSummary) {
+                      stack.push(t);
+                      continue;
+                    }
+                    if (t.isMilestone || !t.start || !t.finish || !matchesTab(t)) continue;
+                    stack.forEach((s, i) => {
+                      if (!emittedSummaries.has(s.uid)) {
+                        emittedSummaries.add(s.uid);
+                        rows.push({
+                          task: s,
+                          depth: i,
+                          isSummary: true,
+                          ancestorUids: stack.slice(0, i).map((a) => a.uid),
+                        });
+                      }
+                    });
+                    rows.push({
+                      task: t,
+                      depth: stack.length,
+                      isSummary: false,
+                      ancestorUids: stack.map((a) => a.uid),
+                    });
+                    leafCount++;
+                  }
+
+                  const summaryUids = rows.filter((r) => r.isSummary).map((r) => r.task.uid);
+                  const allCollapsed = summaryUids.length > 0 && summaryUids.every((u) => collapsedWorkUids.has(u));
+                  const visibleRows = rows.filter((r) => !r.ancestorUids.some((u) => collapsedWorkUids.has(u)));
+
+                  function toggleCollapse(uidToToggle: number) {
+                    setCollapsedWorkUids((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(uidToToggle)) next.delete(uidToToggle);
+                      else next.add(uidToToggle);
+                      return next;
+                    });
+                  }
+
+                  const fmtShort = (d: string) =>
+                    new Date(dateOnly(d) + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
                   return (
                     <>
                       <div className="gap" />
                       <div className="sec-row">
                         <h3 className="h3-warm">Work summary</h3>
-                        <div className="seg">
-                          <button
-                            onClick={() => { setWorkTab("ongoing"); setWorkExpanded(false); }}
-                            className={workTab === "ongoing" ? "active" : ""}
-                          >
-                            Ongoing
-                          </button>
-                          <button
-                            onClick={() => { setWorkTab("upcoming"); setWorkExpanded(false); }}
-                            className={workTab === "upcoming" ? "active" : ""}
-                          >
-                            Upcoming
-                          </button>
+                        <div className="flex items-center gap-2">
+                          {summaryUids.length > 0 && (
+                            <button
+                              onClick={() =>
+                                setCollapsedWorkUids(allCollapsed ? new Set() : new Set(summaryUids))
+                              }
+                              className="btn-quiet"
+                            >
+                              {allCollapsed ? "Expand all" : "Collapse all"}
+                            </button>
+                          )}
+                          <div className="seg">
+                            <button
+                              onClick={() => { setWorkTab("ongoing"); setCollapsedWorkUids(new Set()); }}
+                              className={workTab === "ongoing" ? "active" : ""}
+                            >
+                              Ongoing
+                            </button>
+                            <button
+                              onClick={() => { setWorkTab("upcoming"); setCollapsedWorkUids(new Set()); }}
+                              className={workTab === "upcoming" ? "active" : ""}
+                            >
+                              Upcoming
+                            </button>
+                          </div>
                         </div>
                       </div>
                       <div className="card card-pad">
                         {scheduleTasks.length === 0 ? (
                           <p className="text-sm text-gray-400">No schedule uploaded for this project.</p>
-                        ) : list.length === 0 ? (
+                        ) : leafCount === 0 ? (
                           <p className="text-sm text-gray-400">
                             {workTab === "ongoing" ? "No tasks in progress today." : "No tasks starting in the next two weeks."}
                           </p>
                         ) : (
-                          <>
-                            <div className="space-y-2">
-                              {(workExpanded ? list : list.slice(0, 3)).map((t) => (
-                                <div key={t.uid} className="flex items-start justify-between gap-4 py-2.5">
+                          <div className="space-y-0.5">
+                            {visibleRows.map((row) =>
+                              row.isSummary ? (
+                                <button
+                                  key={row.task.uid}
+                                  onClick={() => toggleCollapse(row.task.uid)}
+                                  className="w-full flex items-center gap-1.5 py-1.5 text-left hover:bg-gray-50 rounded-md"
+                                  style={{ paddingLeft: `${row.depth * 16}px` }}
+                                >
+                                  <svg
+                                    className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform ${collapsedWorkUids.has(row.task.uid) ? "" : "rotate-90"}`}
+                                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                  </svg>
+                                  <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide truncate">
+                                    {row.task.name || "Untitled section"}
+                                  </span>
+                                </button>
+                              ) : (
+                                <div
+                                  key={row.task.uid}
+                                  className="flex items-start justify-between gap-4 py-2"
+                                  style={{ paddingLeft: `${row.depth * 16 + 20}px` }}
+                                >
                                   <div className="min-w-0">
-                                    <p className="text-sm font-medium text-gray-900 truncate">{t.name}</p>
+                                    <p className="text-sm font-medium text-gray-900 truncate">{row.task.name}</p>
                                     <p className="text-xs text-gray-400 mt-0.5 font-mono">
-                                      {new Date(t.start + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                      {fmtShort(row.task.start)}
                                       {" — "}
-                                      {new Date(t.finish + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                      {fmtShort(row.task.finish)}
                                     </p>
                                   </div>
                                   <div className="shrink-0 text-right">
-                                    <span className="text-xs font-semibold text-gray-700 tabular-nums">{t.percentComplete}%</span>
+                                    <span className="text-xs font-semibold text-gray-700 tabular-nums">{row.task.percentComplete}%</span>
                                     <div className="w-16 h-1.5 bg-gray-200 rounded-full mt-1 overflow-hidden">
-                                      <div className="h-full bg-[color:var(--brand-500)] rounded-full" style={{ width: `${t.percentComplete}%` }} />
+                                      <div className="h-full bg-[color:var(--brand-500)] rounded-full" style={{ width: `${row.task.percentComplete}%` }} />
                                     </div>
                                   </div>
                                 </div>
-                              ))}
-                            </div>
-                            {list.length > 3 && (
-                              <button
-                                onClick={() => setWorkExpanded((x) => !x)}
-                                className="btn-secondary mt-4 w-full"
-                              >
-                                {workExpanded ? "Show less" : `Show ${list.length - 3} more`}
-                              </button>
+                              )
                             )}
-                          </>
+                          </div>
                         )}
                       </div>
                     </>

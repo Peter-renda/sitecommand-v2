@@ -331,7 +331,7 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
                         disabled={transcribing}
                         className="btn-secondary disabled:opacity-50"
                       >
-                        {recording ? "Stop recording" : "Record with ElevenLabs"}
+                        {recording ? "Stop recording" : "Record"}
                       </button>
 
                       <button

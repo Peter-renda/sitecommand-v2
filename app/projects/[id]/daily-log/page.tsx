@@ -7,5 +7,12 @@ export default async function DailyLogPage({ params }: { params: Promise<{ id: s
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <DailyLogClient projectId={id} role={session.role} username={session.username} />;
+  return (
+    <DailyLogClient
+      projectId={id}
+      role={session.role}
+      username={session.username}
+      companyRole={session.company_role ?? ""}
+    />
+  );
 }

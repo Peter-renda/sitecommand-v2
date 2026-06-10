@@ -134,9 +134,20 @@ export async function POST(req: NextRequest) {
         invited_by: session.id,
       }))
     );
-    await Promise.all(
+    const contactIds = await Promise.all(
       memberIds.map((uid: string) => addUserToDirectory(supabase, project.id, uid))
     );
+
+    // Auto-fill the Project leads tile from the members added at creation so
+    // the new project doesn't start with an empty team panel. Admins can
+    // re-assign roles afterwards from the project home page.
+    const leadContactIds = contactIds.filter((id): id is string => !!id);
+    if (leadContactIds.length > 0) {
+      await supabase
+        .from("projects")
+        .update({ project_roles: { "Project Manager": leadContactIds } })
+        .eq("id", project.id);
+    }
 
     const [{ data: invitedUsers }, { data: companyData }] = await Promise.all([
       supabase
