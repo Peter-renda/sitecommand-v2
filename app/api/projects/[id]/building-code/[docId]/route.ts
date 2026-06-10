@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
 
-function isAdmin(session: { company_role?: string | null }): boolean {
-  return session.company_role === "admin" || session.company_role === "super_admin";
+function isSuperAdmin(session: { company_role?: string | null }): boolean {
+  return session.company_role === "super_admin";
 }
 
 // PATCH — rename a document, edit its link/jurisdiction, or act on an AI
@@ -13,7 +13,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; docId: string }> },
 ) {
   const session = await getSession();
-  if (!session || !isAdmin(session)) {
+  if (!session || !isSuperAdmin(session)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -57,7 +57,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; docId: string }> },
 ) {
   const session = await getSession();
-  if (!session || !isAdmin(session)) {
+  if (!session || !isSuperAdmin(session)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

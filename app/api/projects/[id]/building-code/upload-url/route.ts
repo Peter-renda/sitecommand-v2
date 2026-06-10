@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
 
-function isAdmin(session: { company_role?: string | null }): boolean {
-  return session.company_role === "admin" || session.company_role === "super_admin";
+function isSuperAdmin(session: { company_role?: string | null }): boolean {
+  return session.company_role === "super_admin";
 }
 
 export async function GET(
@@ -11,7 +11,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
-  if (!session || !isAdmin(session)) {
+  if (!session || !isSuperAdmin(session)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -1500,3 +1500,22 @@ The Assist page uses a left **navigation tree** (same sticky `border-l-2` active
 - Persisted in `assist_recurring_workflows.document_type` (migration `156_assist_recurring_workflow_document_type.sql`, `CHECK IN ('pdf','word')`, default `'pdf'`). The reports `file_type` CHECK is widened to also allow `'word'`.
 - API: `POST /api/projects/[id]/assist/recurring-workflows` validates `documentType` against `ALLOWED_DOCUMENT_TYPES` and stores it; `GET` returns it as `documentType`.
 - Cron (`/api/cron/assist-recurring-workflows`) reads `document_type` and writes the report artifact accordingly: a `.doc` (msword-MIME HTML data URL, `file_type='word'`) for Word, or the existing markdown data URL (`file_type='pdf'`) for PDF.
+
+## Project Admin – Super-Admin-Only Settings
+
+### Permission Model
+- **Every** project setting on the Project Admin page is editable by **Company Super Admins only**. The single exception is **team member management** (add/remove), which remains available to any Company Admin (`super_admin` or `admin`) because both resolve to `project_admin` via `getProjectRole`.
+- In `AdminClient.tsx`: `isSuperAdmin = role === "super_admin"` gates all form fields (General Information, Project Location, Building Code, ERP Integration, Advanced, Dates, and the Report Fields block — wrapped in a `<fieldset disabled={!isSuperAdmin}>`). `isAdmin = admin || super_admin` is now used only for the Project Members add/remove controls. The **Save Changes** button + "Admin controls" pill render only for super admins; a regular admin sees a note that they may only manage team members.
+- Server enforcement: `PATCH /api/projects/[id]/admin` requires `company_role === "super_admin"` for all fields. The building-code mutation endpoints (`POST` documents, `PATCH`/`DELETE` a document, `POST suggest`, `GET upload-url`) were tightened from admin-or-super to **super-admin-only** to match the page (viewing via `GET` still uses `canAccessProject`).
+- The ERP Integration and Advanced sections each carry a permanent note under the title stating that only Company Super Admins can change those settings.
+
+### Labor Productivity Toggle
+- New **Labor Productivity for Budget, Change Events, and Change Orders** checkbox in the **Advanced** section — a project-financials capability flag (see "Enable Labor Productivity Cost Features").
+- Persisted in `projects.labor_productivity` (migration `159_project_labor_productivity.sql`, BOOLEAN default false). Added to the admin `GET` select, the `PATCH` allowed list, and the `laborProductivity` state in `AdminClient.tsx`.
+
+### Copy Directory From
+- The **Copy Directory From** control in the Advanced section is a real dropdown of **all other company projects, active and archived** (current project excluded), plus a **Copy Directory** button. Super-admin-only.
+- API `/api/projects/[id]/copy-directory`:
+  - `GET` — lists sibling company projects as `{ projects: [{ id, name, archived }] }` (archived flag from `projects.archived_at`).
+  - `POST` `{ sourceProjectId }` — copies `directory_contacts` from the source project into the current one, **deduping by email** (emailless contacts deduped by a type/group/name/company signature). Non-destructive: only inserts, never deletes, so it is safe to re-run. Returns `{ copied }`.
+  - Both endpoints require `super_admin` and verify both projects belong to the caller's company.

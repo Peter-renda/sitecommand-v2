@@ -19,8 +19,8 @@ type DocRow = {
   created_at: string;
 };
 
-function isAdmin(session: { company_role?: string | null }): boolean {
-  return session.company_role === "admin" || session.company_role === "super_admin";
+function isSuperAdmin(session: { company_role?: string | null }): boolean {
+  return session.company_role === "super_admin";
 }
 
 // Build the client-facing shape, resolving a fresh signed URL for file documents.
@@ -96,7 +96,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
-  if (!session || !isAdmin(session)) {
+  if (!session || !isSuperAdmin(session)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

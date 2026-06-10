@@ -5,8 +5,8 @@ import { GoogleGenAI } from "@google/genai";
 
 export const maxDuration = 120;
 
-function isAdmin(session: { company_role?: string | null }): boolean {
-  return session.company_role === "admin" || session.company_role === "super_admin";
+function isSuperAdmin(session: { company_role?: string | null }): boolean {
+  return session.company_role === "super_admin";
 }
 
 type Suggestion = { title?: string; jurisdiction?: string; url?: string; notes?: string };
@@ -33,7 +33,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
-  if (!session || !isAdmin(session)) {
+  if (!session || !isSuperAdmin(session)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

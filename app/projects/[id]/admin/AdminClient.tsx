@@ -32,9 +32,12 @@ type ProjectAdmin = {
   prevent_overbilling: boolean | null;
   non_commitment_costs: boolean | null;
   test_project: boolean | null;
+  labor_productivity: boolean | null;
   sage_300_id: string | null;
   report_fields: ReportFieldValues | null;
 };
+
+type CopyDirProject = { id: string; name: string; archived: boolean };
 
 type ProjectMember = {
   membership_id: string;
@@ -202,6 +205,9 @@ export default function AdminClient({
   role: string;
   username: string;
 }) {
+  // Company Admins and Super Admins are both "admins" on the project, but only
+  // Super Admins may change project settings. Regular Company Admins keep a
+  // single capability on this page: adding and removing team members.
   const isAdmin = role === "admin" || role === "super_admin";
   const isSuperAdmin = role === "super_admin";
 
@@ -236,8 +242,14 @@ export default function AdminClient({
   const [preventOverbilling, setPreventOverbilling] = useState(false);
   const [nonCommitmentCosts, setNonCommitmentCosts] = useState(false);
   const [testProject, setTestProject] = useState(false);
+  const [laborProductivity, setLaborProductivity] = useState(false);
   const [sage300Id, setSage300Id] = useState("");
   const [reportFields, setReportFields] = useState<ReportFieldValues>({});
+
+  const [copyDirProjects, setCopyDirProjects] = useState<CopyDirProject[]>([]);
+  const [copyDirSource, setCopyDirSource] = useState("");
+  const [copyingDir, setCopyingDir] = useState(false);
+  const [copyDirMsg, setCopyDirMsg] = useState("");
 
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
@@ -290,6 +302,7 @@ export default function AdminClient({
         setPreventOverbilling(d.prevent_overbilling ?? false);
         setNonCommitmentCosts(d.non_commitment_costs ?? false);
         setTestProject(d.test_project ?? false);
+        setLaborProductivity(d.labor_productivity ?? false);
         setSage300Id(d.sage_300_id ?? "");
         setReportFields(d.report_fields ?? {});
         setLoading(false);
@@ -309,6 +322,16 @@ export default function AdminClient({
       .then((d: CompanyUser[]) => setCompanyUsers(d))
       .catch(() => {});
   }, []);
+
+  // Other company projects (active + archived) for the "Copy Directory From"
+  // picker. Only Super Admins can use it, so only they fetch the list.
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    fetch(`/api/projects/${projectId}/copy-directory`)
+      .then((r) => (r.ok ? r.json() : { projects: [] }))
+      .then((d: { projects?: CopyDirProject[] }) => setCopyDirProjects(d.projects ?? []))
+      .catch(() => {});
+  }, [projectId, isSuperAdmin]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -401,6 +424,7 @@ export default function AdminClient({
         prevent_overbilling: preventOverbilling,
         non_commitment_costs: nonCommitmentCosts,
         test_project: testProject,
+        labor_productivity: laborProductivity,
         sage_300_id: sage300Id,
         report_fields: reportFields,
       }),
@@ -412,6 +436,39 @@ export default function AdminClient({
       setTimeout(() => setSaved(false), 3000);
     }
     setSaving(false);
+  }
+
+  async function handleCopyDirectory() {
+    if (!copyDirSource) return;
+    const src = copyDirProjects.find((p) => p.id === copyDirSource);
+    const srcName = src?.name ?? "the selected project";
+    if (
+      !confirm(
+        `Copy all directory contacts from "${srcName}" into this project? Existing contacts are kept; duplicates (matched by email) are skipped.`
+      )
+    ) {
+      return;
+    }
+    setCopyingDir(true);
+    setCopyDirMsg("");
+    const res = await fetch(`/api/projects/${projectId}/copy-directory`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceProjectId: copyDirSource }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const n = d.copied ?? 0;
+      setCopyDirMsg(
+        n === 0
+          ? "No new contacts to copy — everything already exists in this directory."
+          : `Copied ${n} contact${n === 1 ? "" : "s"} from ${srcName}.`
+      );
+      setCopyDirSource("");
+    } else {
+      setCopyDirMsg(d.error || "Failed to copy directory.");
+    }
+    setCopyingDir(false);
   }
 
   function jumpToSection(id: (typeof ADMIN_SECTIONS)[number]["id"]) {
@@ -442,9 +499,13 @@ export default function AdminClient({
                 </p>
                 {!isAdmin ? (
                   <p className="mt-1 text-xs text-gray-500">View only — contact a project administrator to make changes.</p>
+                ) : !isSuperAdmin ? (
+                  <p className="mt-1 text-xs text-gray-500">
+                    You can add or remove team members below. Only Company Super Admins can change other project settings.
+                  </p>
                 ) : null}
               </div>
-              {isAdmin ? (
+              {isSuperAdmin ? (
                 <div className="flex flex-col items-end gap-2">
                   <Pill className="pill-open">Admin controls</Pill>
                   <button onClick={handleSave} disabled={saving} className="btn-primary">
@@ -489,23 +550,23 @@ export default function AdminClient({
                       <Field label="Stage">
                         <SelectInput
                           value={stage}
-                          onChange={isAdmin ? setStage : undefined}
+                          onChange={isSuperAdmin ? setStage : undefined}
                           placeholder="Select stage"
                           options={STAGES}
-                          disabled={!isAdmin}
+                          disabled={!isSuperAdmin}
                         />
                       </Field>
                     </div>
 
                     <Field label="Project Name" required>
-                      <TextInput value={name} onChange={isAdmin ? setName : undefined} readOnly={!isAdmin} placeholder="Project name" />
+                      <TextInput value={name} onChange={isSuperAdmin ? setName : undefined} readOnly={!isSuperAdmin} placeholder="Project name" />
                     </Field>
 
                     <Field label="Project Number">
                       <TextInput
                         value={projectNumber}
-                        onChange={isAdmin ? setProjectNumber : undefined}
-                        readOnly={!isAdmin}
+                        onChange={isSuperAdmin ? setProjectNumber : undefined}
+                        readOnly={!isSuperAdmin}
                         placeholder="Project number"
                       />
                     </Field>
@@ -513,20 +574,20 @@ export default function AdminClient({
                     <Field label="Work Scope">
                       <SelectInput
                         value={workScope}
-                        onChange={isAdmin ? setWorkScope : undefined}
+                        onChange={isSuperAdmin ? setWorkScope : undefined}
                         placeholder="Select work scope"
                         options={workScope && !WORK_SCOPES.includes(workScope) ? [workScope, ...WORK_SCOPES] : WORK_SCOPES}
-                        disabled={!isAdmin}
+                        disabled={!isSuperAdmin}
                       />
                     </Field>
 
                     <Field label="Project Sector">
                       <SelectInput
                         value={sector}
-                        onChange={isAdmin ? setSector : undefined}
+                        onChange={isSuperAdmin ? setSector : undefined}
                         placeholder="Select a sector"
                         options={sector && !SECTORS.includes(sector) ? [sector, ...SECTORS] : SECTORS}
-                        disabled={!isAdmin}
+                        disabled={!isSuperAdmin}
                       />
                     </Field>
 
@@ -540,9 +601,9 @@ export default function AdminClient({
                       <Field label="Description">
                         <textarea
                           value={description}
-                          onChange={(e) => isAdmin && setDescription(e.target.value)}
+                          onChange={(e) => isSuperAdmin && setDescription(e.target.value)}
                           rows={4}
-                          readOnly={!isAdmin}
+                          readOnly={!isSuperAdmin}
                           placeholder="Enter description"
                           className="w-full rounded-md border border-black/10 bg-[color:var(--surface-sunken)] px-3 py-2 text-sm text-[color:var(--ink)] placeholder:text-gray-400 focus:border-[color:var(--ink)] focus:outline-none focus:ring-1 focus:ring-[color:var(--ink)]"
                         />
@@ -560,20 +621,20 @@ export default function AdminClient({
                     </div>
                     <div className="col-span-2">
                       <Field label="Street Address">
-                        <TextInput value={address} onChange={isAdmin ? setAddress : undefined} readOnly={!isAdmin} placeholder="Street address" />
+                        <TextInput value={address} onChange={isSuperAdmin ? setAddress : undefined} readOnly={!isSuperAdmin} placeholder="Street address" />
                       </Field>
                     </div>
                     <Field label="City">
-                      <TextInput value={city} onChange={isAdmin ? setCity : undefined} readOnly={!isAdmin} placeholder="City" />
+                      <TextInput value={city} onChange={isSuperAdmin ? setCity : undefined} readOnly={!isSuperAdmin} placeholder="City" />
                     </Field>
                     <Field label="State">
-                      <TextInput value={stateVal} onChange={isAdmin ? setStateVal : undefined} readOnly={!isAdmin} placeholder="State" />
+                      <TextInput value={stateVal} onChange={isSuperAdmin ? setStateVal : undefined} readOnly={!isSuperAdmin} placeholder="State" />
                     </Field>
                     <Field label="Zip Code">
-                      <TextInput value={zipCode} onChange={isAdmin ? setZipCode : undefined} readOnly={!isAdmin} placeholder="Zip code" />
+                      <TextInput value={zipCode} onChange={isSuperAdmin ? setZipCode : undefined} readOnly={!isSuperAdmin} placeholder="Zip code" />
                     </Field>
                     <Field label="County">
-                      <TextInput value={county} onChange={isAdmin ? setCounty : undefined} readOnly={!isAdmin} placeholder="County" />
+                      <TextInput value={county} onChange={isSuperAdmin ? setCounty : undefined} readOnly={!isSuperAdmin} placeholder="County" />
                     </Field>
                     <div className="col-span-2">
                       <Field label="Timezone" required>
@@ -596,14 +657,14 @@ export default function AdminClient({
                 </SectionCard>
 
                 <SectionCard id="building-code" title="Building Code">
-                  <BuildingCodeSection projectId={projectId} isAdmin={isAdmin} />
+                  <BuildingCodeSection projectId={projectId} isAdmin={isSuperAdmin} />
                 </SectionCard>
 
                 <SectionCard id="erp-integration" title="ERP Integration">
                   <div className="space-y-4">
-                    {isAdmin && !isSuperAdmin ? (
-                      <p className="text-xs text-gray-500">Only Company Super Admins can change ERP integration settings.</p>
-                    ) : null}
+                    <p className="text-xs text-gray-500">
+                      Only Company Super Admins can change ERP integration settings.
+                    </p>
                     <label className="flex items-center gap-3 text-sm text-[color:var(--ink)]">
                       <input
                         type="checkbox"
@@ -639,6 +700,9 @@ export default function AdminClient({
 
                 <SectionCard id="advanced" title="Advanced">
                   <div className="grid grid-cols-2 gap-4">
+                    <p className="col-span-2 text-xs text-gray-500">
+                      Only Company Super Admins can change these settings.
+                    </p>
                     <div className="col-span-2">
                       <Field label="Department">
                         <SelectInput value="" placeholder="Select department" options={["Operations", "Preconstruction"]} disabled />
@@ -646,13 +710,36 @@ export default function AdminClient({
                     </div>
                     <div className="col-span-2">
                       <Field label="Copy Directory From">
-                        <SelectInput value="" placeholder="Select project" options={["Project Alpha", "Project Bravo"]} disabled />
+                        <div className="flex gap-2">
+                          <select
+                            value={copyDirSource}
+                            onChange={(e) => {
+                              setCopyDirSource(e.target.value);
+                              setCopyDirMsg("");
+                            }}
+                            disabled={!isSuperAdmin}
+                            className={`${INPUT_CLASS} flex-1`}
+                          >
+                            <option value="">Select project</option>
+                            {copyDirProjects.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                                {p.archived ? " (Archived)" : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={handleCopyDirectory}
+                            disabled={!isSuperAdmin || !copyDirSource || copyingDir}
+                            className="btn-secondary whitespace-nowrap"
+                          >
+                            {copyingDir ? "Copying…" : "Copy Directory"}
+                          </button>
+                        </div>
+                        {copyDirMsg ? <p className="mt-1.5 text-xs text-gray-500">{copyDirMsg}</p> : null}
                       </Field>
                     </div>
-
-                    {isAdmin && !isSuperAdmin ? (
-                      <p className="col-span-2 text-xs text-gray-500">Only Company Super Admins can change the settings below.</p>
-                    ) : null}
 
                     <label className="flex items-center gap-3 text-base text-gray-900">
                       <input
@@ -679,6 +766,17 @@ export default function AdminClient({
                       <input
                         type="checkbox"
                         className="h-5 w-5"
+                        checked={laborProductivity}
+                        onChange={(e) => isSuperAdmin && setLaborProductivity(e.target.checked)}
+                        disabled={!isSuperAdmin}
+                      />{" "}
+                      Labor Productivity for Budget, Change Events, and Change Orders
+                    </label>
+
+                    <label className="col-span-2 flex items-center gap-3 text-base text-gray-900">
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5"
                         checked={testProject}
                         onChange={(e) => isSuperAdmin && setTestProject(e.target.checked)}
                         disabled={!isSuperAdmin}
@@ -691,38 +789,38 @@ export default function AdminClient({
                 <SectionCard id="dates" title="Dates">
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="Start Date" required>
-                      {isAdmin ? <DateInput value={startDate} onChange={setStartDate} /> : <TextInput value={formatDate(data?.start_date ?? null)} readOnly />}
+                      {isSuperAdmin ? <DateInput value={startDate} onChange={setStartDate} /> : <TextInput value={formatDate(data?.start_date ?? null)} readOnly />}
                     </Field>
                     <Field label="Actual Start Date">
-                      {isAdmin ? (
+                      {isSuperAdmin ? (
                         <DateInput value={actualStartDate} onChange={setActualStartDate} />
                       ) : (
                         <TextInput value={formatDate(data?.actual_start_date ?? null)} readOnly />
                       )}
                     </Field>
                     <Field label="Completion Date" required>
-                      {isAdmin ? (
+                      {isSuperAdmin ? (
                         <DateInput value={completionDate} onChange={setCompletionDate} />
                       ) : (
                         <TextInput value={formatDate(data?.completion_date ?? null)} readOnly />
                       )}
                     </Field>
                     <Field label="Projected Finish Date">
-                      {isAdmin ? (
+                      {isSuperAdmin ? (
                         <DateInput value={projectedFinishDate} onChange={setProjectedFinishDate} />
                       ) : (
                         <TextInput value={formatDate(data?.projected_finish_date ?? null)} readOnly />
                       )}
                     </Field>
                     <Field label="Warranty Start Date">
-                      {isAdmin ? (
+                      {isSuperAdmin ? (
                         <DateInput value={warrantyStartDate} onChange={setWarrantyStartDate} />
                       ) : (
                         <TextInput value={formatDate(data?.warranty_start_date ?? null)} readOnly />
                       )}
                     </Field>
                     <Field label="Warranty End Date">
-                      {isAdmin ? (
+                      {isSuperAdmin ? (
                         <DateInput value={warrantyEndDate} onChange={setWarrantyEndDate} />
                       ) : (
                         <TextInput value={formatDate(data?.warranty_end_date ?? null)} readOnly />
@@ -752,16 +850,18 @@ export default function AdminClient({
                       <SelectInput value="" placeholder="Select parent project" options={["Corporate Program"]} disabled />
                     </Field>
                     <div className="col-span-2">
-                      <ReportFieldsSection
-                        title="Report Fields"
-                        description="Extra project attributes surfaced as columns in 360 Reports. Saved with the project."
-                        fields={PROJECT_REPORT_FIELDS}
-                        values={reportFields}
-                        onChange={(key, value) =>
-                          setReportFields((prev) => ({ ...prev, [key]: value }))
-                        }
-                        columns={3}
-                      />
+                      <fieldset disabled={!isSuperAdmin} className="m-0 min-w-0 border-0 p-0 disabled:opacity-60">
+                        <ReportFieldsSection
+                          title="Report Fields"
+                          description="Extra project attributes surfaced as columns in 360 Reports. Saved with the project."
+                          fields={PROJECT_REPORT_FIELDS}
+                          values={reportFields}
+                          onChange={(key, value) =>
+                            isSuperAdmin && setReportFields((prev) => ({ ...prev, [key]: value }))
+                          }
+                          columns={3}
+                        />
+                      </fieldset>
                     </div>
                     <div className="col-span-2 border-t border-gray-200 pt-3">
                       <h3 className="mb-2 text-xl font-semibold text-gray-900">Project Members</h3>

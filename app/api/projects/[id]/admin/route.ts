@@ -11,7 +11,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data, error } = await supabase
     .from("projects")
-    .select("id, name, description, address, zip_code, status, project_number, sector, work_scope, city, state, county, start_date, actual_start_date, completion_date, projected_finish_date, warranty_start_date, warranty_end_date, erp_sync, erp_job_cost_sync, prevent_overbilling, non_commitment_costs, test_project, sage_300_id")
+    .select("id, name, description, address, zip_code, status, project_number, sector, work_scope, city, state, county, start_date, actual_start_date, completion_date, projected_finish_date, warranty_start_date, warranty_end_date, erp_sync, erp_job_cost_sync, prevent_overbilling, non_commitment_costs, test_project, labor_productivity, sage_300_id")
     .eq("id", id)
     .single();
 
@@ -21,14 +21,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
-  const canEdit = session?.company_role === "admin" || session?.company_role === "super_admin";
-  if (!session || !canEdit) {
+  // Every project setting is editable by Company Super Admins only. Regular
+  // Company Admins manage team members through /api/projects/[id]/members.
+  if (!session || session.company_role !== "super_admin") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const body = await req.json();
-  const isSuperAdmin = session.company_role === "super_admin";
 
   const allowed = [
     "name", "description", "project_number", "status", "sector", "work_scope",
@@ -36,20 +36,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     "start_date", "actual_start_date", "completion_date",
     "projected_finish_date", "warranty_start_date", "warranty_end_date",
     "erp_sync", "erp_job_cost_sync", "prevent_overbilling",
-    "non_commitment_costs", "test_project", "sage_300_id",
+    "non_commitment_costs", "test_project", "labor_productivity", "sage_300_id",
     "report_fields",
   ];
-
-  // ERP integration + advanced project flags are editable by Company Super Admins only.
-  const superAdminOnly = new Set([
-    "erp_sync", "erp_job_cost_sync", "prevent_overbilling",
-    "non_commitment_costs", "test_project", "sage_300_id",
-  ]);
 
   const update: Record<string, unknown> = {};
   for (const key of allowed) {
     if (!(key in body)) continue;
-    if (superAdminOnly.has(key) && !isSuperAdmin) continue;
     const value = body[key];
     // Preserve boolean false; for other fields normalize empty strings to null.
     update[key] = typeof value === "boolean" ? value : value || null;
