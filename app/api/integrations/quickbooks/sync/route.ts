@@ -33,6 +33,28 @@ import {
 const VALID_TYPES = ["commitments", "prime_contracts", "ap_invoice", "ar_invoice"] as const;
 type RecordType = (typeof VALID_TYPES)[number];
 
+/**
+ * Distinguishes "row genuinely absent" (PGRST116: zero rows for .single()) from
+ * a failed query (e.g. a column missing because a migration wasn't applied).
+ * Masking DB errors as 404 "not found" makes schema drift undiagnosable.
+ */
+function fetchFailure(
+  label: string,
+  fetchErr: { code?: string; message?: string } | null,
+  row: unknown
+): NextResponse | null {
+  if (fetchErr && fetchErr.code !== "PGRST116") {
+    return NextResponse.json(
+      { error: `Failed to load ${label}: ${fetchErr.message ?? "database error"}. If this mentions a missing column, apply supabase/migrations/113_qbo_idempotency_columns.sql.` },
+      { status: 500 }
+    );
+  }
+  if (!row) {
+    return NextResponse.json({ error: `${label[0].toUpperCase()}${label.slice(1)} not found` }, { status: 404 });
+  }
+  return null;
+}
+
 async function writeLog(
   supabase: ReturnType<typeof getSupabase>,
   recordType: string,
@@ -93,9 +115,8 @@ export async function POST(req: NextRequest) {
       .is("deleted_at", null)
       .single();
 
-    if (fetchErr || !commitment) {
-      return NextResponse.json({ error: "Commitment not found" }, { status: 404 });
-    }
+    const failure = fetchFailure("commitment", fetchErr, commitment);
+    if (failure) return failure;
 
     const { data: sovRows } = await supabase
       .from("commitment_sov_items")
@@ -142,9 +163,8 @@ export async function POST(req: NextRequest) {
       .eq("id", recordId)
       .single();
 
-    if (fetchErr || !contract) {
-      return NextResponse.json({ error: "Prime contract not found" }, { status: 404 });
-    }
+    const failure = fetchFailure("prime contract", fetchErr, contract);
+    if (failure) return failure;
 
     const { data: psovRows } = await supabase
       .from("prime_contract_sov_items")
@@ -192,9 +212,8 @@ export async function POST(req: NextRequest) {
       .is("deleted_at", null)
       .single();
 
-    if (fetchErr || !commitment) {
-      return NextResponse.json({ error: "Commitment not found" }, { status: 404 });
-    }
+    const failure = fetchFailure("commitment", fetchErr, commitment);
+    if (failure) return failure;
 
     const { data: sovItems } = await supabase
       .from("commitment_sov_items")
@@ -253,9 +272,8 @@ export async function POST(req: NextRequest) {
       .is("deleted_at", null)
       .single();
 
-    if (fetchErr || !contract) {
-      return NextResponse.json({ error: "Prime contract not found" }, { status: 404 });
-    }
+    const failure = fetchFailure("prime contract", fetchErr, contract);
+    if (failure) return failure;
 
     const { data: sovItems } = await supabase
       .from("prime_contract_sov_items")

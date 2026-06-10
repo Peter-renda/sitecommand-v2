@@ -69,6 +69,16 @@ QBO are not imported into SiteCommand).
      the other depending on the environment you're connecting.
 3. **SiteCommand role** — you must be a **Company Super Admin** (or Site Admin) to open
    **Settings → Integrations** and connect QuickBooks.
+4. **Database migrations applied** — the QBO sync depends on two migrations beyond the
+   base financial tables; make sure both have been run against the deployment's Supabase
+   database (both are idempotent — safe to re-run in the SQL editor):
+   - `supabase/migrations/065_quickbooks_xero_integrations.sql` — adds the `integration`
+     column to `erp_sync_logs`.
+   - `supabase/migrations/113_qbo_idempotency_columns.sql` — adds `qbo_id`,
+     `qbo_sync_token`, `last_synced_at` (+ AP/AR invoice variants) to `commitments` and
+     `prime_contracts`. **Without this, "Sync to QuickBooks" fails on every record**
+   (the record query references these columns), and even if it posted, re-syncs would
+   duplicate transactions instead of updating them.
 
 ### The redirect URI (read this — it's the #1 cause of failures)
 
@@ -240,6 +250,7 @@ grant expires and a super admin must click **Reconnect**.
 | *"The authorization request could not be verified"* | The connect flow's state cookie expired (>10 min on the consent screen) or the callback was forged/replayed | Click Connect again and complete the consent promptly |
 | Sync error *"AuthenticationFailed"* / repeated 401 after working previously | Refresh token expired (100 days idle) or access was revoked inside Intuit | **Reconnect QuickBooks** from Settings → Integrations |
 | Sync error *"No QBO expense account found"* | Brand-new QBO file with no expense/COGS accounts, or `QBO_AP_EXPENSE_ACCOUNT` names a non-existent account | Create the account in QBO or fix the configured name |
+| Sync fails with *"Commitment not found"* on a record that clearly exists, or *"Failed to load commitment: column … does not exist"* | Migration `113_qbo_idempotency_columns.sql` not applied to the database | Run that migration in the Supabase SQL editor (idempotent), then retry |
 | Sandbox connects but API calls fail with 403 | Environment mismatch: Production selected with Development keys (or vice versa) | Make the Environment selector match the key set, then Disconnect + reconnect |
 | Vendor/customer appears duplicated in QBO | Contract Company / Owner name spelled differently than the existing QBO record | Match the QBO display name exactly in SiteCommand (resolution is by exact DisplayName) |
 | Nothing syncs automatically | Company never finished OAuth, or no records changed since last sync | Check the card shows **Connected**; edit + manually sync one record to verify |
