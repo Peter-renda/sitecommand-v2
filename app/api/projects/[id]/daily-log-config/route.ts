@@ -5,9 +5,11 @@ import { canAccessProject } from "@/lib/project-access";
 
 type Params = { params: Promise<{ id: string }> };
 
+type CustomField = { key: string; label: string; type?: string };
 type SectionConfig = {
   hidden?: string[];
-  custom?: { key: string; label: string }[];
+  custom?: CustomField[];
+  order?: string[];
 };
 
 const SECTION_KEYS = new Set([
@@ -22,28 +24,39 @@ const SECTION_KEYS = new Set([
   "weather_observations",
 ]);
 
+const FIELD_TYPES = new Set(["text", "number", "time", "date", "checkbox"]);
+
 function sanitizeConfig(raw: unknown): Record<string, SectionConfig> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out: Record<string, SectionConfig> = {};
   for (const [section, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!SECTION_KEYS.has(section) || !value || typeof value !== "object") continue;
-    const v = value as { hidden?: unknown; custom?: unknown };
+    const v = value as { hidden?: unknown; custom?: unknown; order?: unknown };
     const hidden = Array.isArray(v.hidden)
       ? v.hidden.filter((h): h is string => typeof h === "string").slice(0, 50)
       : [];
     const custom = Array.isArray(v.custom)
       ? v.custom
           .filter(
-            (c): c is { key: string; label: string } =>
+            (c): c is CustomField =>
               !!c && typeof c === "object" &&
               typeof (c as { key?: unknown }).key === "string" &&
               typeof (c as { label?: unknown }).label === "string" &&
               !!(c as { label: string }).label.trim()
           )
-          .map((c) => ({ key: c.key, label: c.label.trim().slice(0, 80) }))
+          .map((c) => ({
+            key: c.key,
+            label: c.label.trim().slice(0, 80),
+            type: typeof c.type === "string" && FIELD_TYPES.has(c.type) ? c.type : "text",
+          }))
           .slice(0, 20)
       : [];
-    if (hidden.length > 0 || custom.length > 0) out[section] = { hidden, custom };
+    const order = Array.isArray(v.order)
+      ? v.order.filter((k): k is string => typeof k === "string").slice(0, 100)
+      : [];
+    if (hidden.length > 0 || custom.length > 0 || order.length > 0) {
+      out[section] = { hidden, custom, order };
+    }
   }
   return out;
 }
