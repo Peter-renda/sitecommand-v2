@@ -3197,6 +3197,12 @@ export default function ReportingClient({
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={`/projects/${projectId}/report-records`}
+              className="btn-secondary"
+            >
+              Report Records
+            </a>
             <button
               onClick={() => setShowSettingsModal(true)}
               className="btn-secondary"

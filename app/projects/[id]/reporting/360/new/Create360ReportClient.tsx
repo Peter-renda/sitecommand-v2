@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import { REPORT_RECORD_SLUGS } from "@/lib/report-record-fields";
 import { loadSavedReports, saveReport, type StoredReport } from "../../saved-reports-store";
 import {
   FiltersPanel,
@@ -4648,6 +4649,19 @@ async function loadSource(projectId: string, source: string): Promise<Row[]> {
       }
     }
     return rows;
+  }
+
+  // Source-less report entities backed by the generic report_records table.
+  if (REPORT_RECORD_SLUGS.includes(source)) {
+    const res = await fetch(`/api/projects/${projectId}/report-records?entity=${encodeURIComponent(source)}`);
+    if (!res.ok) return [];
+    const records: Row[] = await res.json();
+    return (records ?? []).map((r) => ({
+      ...((r.report_fields as Row) ?? {}),
+      id: r.id,
+      date_created: r.created_at,
+      date_updated: r.updated_at,
+    }));
   }
 
   // Unknown / not-yet-backed source — render an empty table.

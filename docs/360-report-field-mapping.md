@@ -32,15 +32,42 @@ surfaced on the relevant edit page in a **violet "Report Fields" section**
 | Change Event Line Item | (change-event grid) | 0 | 14 | 14 | DB-only storage |
 | **TOTAL** | | **160** | **103** | **263** | |
 
+## Source-less entities — Report Records (migration 158)
+
+The 360-report categories that had **no underlying table at all** are now backed
+by a single generic `report_records` table (one row per record, discriminated by
+`entity` slug, all fields in `report_fields` JSONB). They are managed on a new
+**Report Records** page (`/projects/[id]/report-records`, linked from the
+Reporting page) and resolved into 360-report columns by `loadSource()`.
+
+| Entity (slug) | Fields |
+|---|--:|
+| Owner Invoice (`owner-invoices`) | 53 |
+| Owner Invoice Line Item (`owner-invoice-line-items`) | 54 |
+| Subcontractor Invoice (`subcontractor-invoices`) | 65 |
+| Subcontractor Invoice Line Item (`subcontractor-invoice-line-items`) | 48 |
+| Payment Issued (`payments-issued`) | 4 |
+| Payment Received (`payments-received`) | 4 |
+| Employee (`employees`) | 10 |
+| Labor Allocation (`labor-allocations`) | 5 |
+| Actual / Budgeted / Budget-Change / Change-Event / PCCO Production Quantity | 7/5/6/5/6 |
+| ERP Job Costs Summary (`erp-job-costs`) | 4 |
+| Invoice Compliance (`invoice-compliance`) | 3 |
+| Monitored Resource (`monitored-resources`) | 3 |
+| Commitment CO Line Item / Markup | 38 / 10 |
+| Prime Contract CO Line Item / Markup | 27 / 9 |
+| Prime Contract Line Item (`prime-contract-line-items`) | 12 |
+| Prime Contract Potential Change Order (`prime-contract-potential-change-orders`) | 28 |
+
+**Total: 22 entities.** Every field is editable in the violet field UI on the
+Report Records page and surfaces as a populated column in 360 Reports.
+
 ## Notes on coverage
 
 - The 263 fields above are the report columns that previously had **no backing
-  data** but map to an entity that exists in the database.
-- Report categories with **no underlying table at all** — Owner Invoice, Owner
-  Invoice Line Item, Subcontractor Invoice, Payments Issued/Received, Employee,
-  Labor Allocation, Production Quantities, ERP Job Costs, Invoice Compliance,
-  Monitored Resource — are **not** in this chart; they require new tables + pages,
-  not just a JSONB column.
+  data** but map to an entity that already existed in the database.
+- The 22 source-less entities (this section) are now fully backed via
+  `report_records` — no remaining 360-report category returns an empty table.
 - Where a report category's columns already resolved to real DB columns (e.g.
   Commitment number/status/amounts, Change Event title/status), those were
   already mapped and are untouched here.
