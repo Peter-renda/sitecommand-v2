@@ -12,7 +12,7 @@
  * Auth: Bearer token matching CRON_SECRET (set automatically by Vercel Cron
  * when the env var is configured).
  *
- * Schedule: every 5 minutes (configured in vercel.json).
+ * Schedule: once daily at 17:00 UTC (configured in vercel.json).
  *
  * Hard caps per run keep the function under Vercel's serverless timeout and
  * well below QBO's 500-req/min/realm rate limit.
@@ -31,9 +31,9 @@ import {
   type QBOResult,
 } from "@/lib/quickbooks";
 
-// Per-run safety caps. Tuned conservatively — if a backlog builds up, multiple
-// 5-minute runs will work it down. QBO's published limit is ~500 req/min per
-// realm; we stay well under that even if every record needs a GET+POST pair.
+// Per-run safety caps. Tuned conservatively — if a backlog builds up,
+// successive daily runs will work it down. QBO's published limit is ~500 req/min
+// per realm; we stay well under that even if every record needs a GET+POST pair.
 const MAX_COMMITMENTS_PER_COMPANY    = 25;
 const MAX_PRIME_CONTRACTS_PER_COMPANY = 25;
 const MAX_AP_INVOICES_PER_COMPANY     = 25;

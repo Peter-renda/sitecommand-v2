@@ -1519,3 +1519,33 @@ The Assist page uses a left **navigation tree** (same sticky `border-l-2` active
   - `GET` — lists sibling company projects as `{ projects: [{ id, name, archived }] }` (archived flag from `projects.archived_at`).
   - `POST` `{ sourceProjectId }` — copies `directory_contacts` from the source project into the current one, **deduping by email** (emailless contacts deduped by a type/group/name/company signature). Non-destructive: only inserts, never deletes, so it is safe to re-run. Returns `{ copied }`.
   - Both endpoints require `super_admin` and verify both projects belong to the caller's company.
+
+## QuickBooks Online (QBO) Integration
+
+### Overview
+Per-company OAuth connection to QuickBooks Online (and Intuit Enterprise Suite tenants). Push-sync of commitments (subcontract → **Bill**, purchase order → **PurchaseOrder**), prime contracts (→ AR **Invoice**), and AP/AR billing from SOV amounts, with vendor/customer auto-creation and idempotent updates. Read-only pulls: active Vendor/Customer lists. Docs: `docs/quickbooks-online-setup-guide.md` (user setup walkthrough), `docs/quickbooks-online-integration.md` (runtime reference), `docs/quickbooks-online-data-mapping.md` (field crosswalk).
+
+### Environments (Sandbox vs Production)
+- Per-company **Environment** selector on Settings → Integrations (stored as `QBO_ENVIRONMENT` row in `company_integrations`; values `sandbox` | `production`, validated in the PATCH route). Falls back to the `QBO_ENVIRONMENT` env var, default production. `QBO_API_BASE` env overrides both.
+- Sandbox requires Intuit **Development** keys; production requires **Production** keys. OAuth authorize/token URLs are identical across environments — only the REST base differs (`sandbox-quickbooks.api.intuit.com` vs `quickbooks.api.intuit.com`).
+- UI shows a blue **Sandbox** badge next to the Connected pill when sandbox is selected.
+
+### Connection Flow
+- `GET /api/integrations/quickbooks/connect` (super_admin/site_admin) → Intuit consent → `GET /api/integrations/quickbooks/callback` → tokens upserted to `company_integrations` (`QBO_REALM_ID`, `QBO_ACCESS_TOKEN`, `QBO_REFRESH_TOKEN`).
+- **CSRF**: connect sets a 10-min httpOnly `qbo_oauth_state` nonce cookie and embeds the nonce in OAuth `state`; callback rejects on mismatch (`qbo_invalid_state`) and always clears the cookie.
+- **Redirect URI**: `getIntuitRedirectUri()` precedence `INTUIT_REDIRECT_URI` > `NEXT_PUBLIC_APP_URL` + callback path > request-derived. Must byte-for-byte match the URI registered in the Intuit portal. The settings GET (`?integration=quickbooks`) returns the computed value as derived field `QBO_REDIRECT_URI` so the UI shows exactly what the server sends. Post-OAuth browser redirects use `getAppOrigin()` (prefers `NEXT_PUBLIC_APP_URL`) so users land on the canonical domain.
+- `POST /api/integrations/quickbooks/disconnect` (super_admin) — best-effort revokes the refresh token via Intuit's revoke endpoint (`revokeQBOToken` in `lib/quickbooks.ts`), then deletes the realm/token rows; keeps Client ID/Secret + environment. UI **Disconnect** button next to Reconnect.
+
+### Credential Resolution
+- App creds (`getQBOAppCredentials(companyId)`): `company_integrations` → `platform_settings` → env. All call sites (sync, cron, vendors, customers) pass `companyId` so token refresh uses the same app the tokens were issued by.
+- Tokens auto-refresh on 401 (one retry) and persist back to `company_integrations`.
+
+### Sync Surfaces
+- Manual: **Sync to QuickBooks** button on commitment + prime contract detail headers → `POST /api/integrations/quickbooks/sync` `{ recordType: commitments|prime_contracts|ap_invoice|ar_invoice, recordId }`.
+- Cron: `GET /api/cron/quickbooks-sync` daily 17:00 UTC (vercel.json), `CRON_SECRET`-gated; pushes dirty rows (updated_at > last_synced_at), capped 25/type/company.
+- Idempotency: `qbo_id`/`qbo_sync_token`/`last_synced_at` (+ `qbo_ap_invoice_*`, `qbo_ar_invoice_*`) from migration `113_qbo_idempotency_columns.sql`; updates re-fetch the live SyncToken and POST `?operation=update` with `sparse: true`; deleted-on-QBO records are recreated.
+- Posting config (per-company keys or env): `QBO_AP_EXPENSE_ACCOUNT`, `QBO_DEFAULT_ITEM`, `QBO_BUDGET_CODE_MAP` (JSON code → account/class/item), `QBO_RETAINAGE_RECEIVABLE_ACCOUNT`, `QBO_RETAINAGE_PAYABLE_ACCOUNT`. All refs post by **Id**, never name; sync fails fast when no valid account/item resolves.
+- Logs: every attempt → `erp_sync_logs` (`integration='quickbooks'`); per-record via `GET /api/integrations/quickbooks/logs`.
+
+### Verification
+- Offline check: `npx tsx scripts/qbo-integration-check.ts` — mocked-fetch assertions for env routing, minorversion separators, 401 refresh+retry+persist, subcontract→Bill create payload, idempotent update, AR retainage line, redirect-URI precedence. Run after touching `lib/quickbooks.ts`.

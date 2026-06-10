@@ -44,6 +44,28 @@ function qboApiBase(environment: QBOEnvironment): string {
 /** Path Intuit redirects back to after OAuth authorization. */
 export const QBO_CALLBACK_PATH = "/api/integrations/quickbooks/callback";
 
+/** Cookie carrying the OAuth state nonce between /connect and /callback (CSRF guard). */
+export const QBO_OAUTH_STATE_COOKIE = "qbo_oauth_state";
+
+/**
+ * Resolves the app's canonical origin for browser-facing redirects.
+ * Prefers NEXT_PUBLIC_APP_URL so post-OAuth redirects land on the domain the
+ * user's session cookie lives on (request-derived origins behind Vercel's
+ * proxy can resolve to a per-deployment *.vercel.app host where the user is
+ * logged out). Falls back to x-forwarded-* request headers.
+ */
+export function getAppOrigin(req: Request): string {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (appUrl) return appUrl.replace(/\/+$/, "");
+
+  const fwdHost = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = fwdHost || req.headers.get("host") || new URL(req.url).host;
+  const fwdProto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const isLocal = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+  const proto = fwdProto || (isLocal ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
 /**
  * Resolves the OAuth redirect_uri sent to Intuit.
  *
@@ -64,16 +86,7 @@ export const QBO_CALLBACK_PATH = "/api/integrations/quickbooks/callback";
 export function getIntuitRedirectUri(req: Request): string {
   const explicit = process.env.INTUIT_REDIRECT_URI?.trim();
   if (explicit) return explicit;
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (appUrl) return `${appUrl.replace(/\/+$/, "")}${QBO_CALLBACK_PATH}`;
-
-  const fwdHost = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
-  const host = fwdHost || req.headers.get("host") || new URL(req.url).host;
-  const fwdProto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
-  const isLocal = host.startsWith("localhost") || host.startsWith("127.0.0.1");
-  const proto = fwdProto || (isLocal ? "http" : "https");
-  return `${proto}://${host}${QBO_CALLBACK_PATH}`;
+  return `${getAppOrigin(req)}${QBO_CALLBACK_PATH}`;
 }
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -237,6 +250,37 @@ export async function refreshQBOTokens(
     return { accessToken: access_token, refreshToken: refresh_token };
   } catch {
     return null;
+  }
+}
+
+const QBO_REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke";
+
+/**
+ * Revokes a refresh (or access) token with Intuit, invalidating the whole
+ * grant. Best-effort: returns false on any failure so disconnect can proceed
+ * to clear local state regardless.
+ */
+export async function revokeQBOToken(
+  appCreds: QBOAppCredentials,
+  token: string
+): Promise<boolean> {
+  if (!appCreds.clientId || !appCreds.clientSecret || !token) return false;
+  const basicAuth = Buffer.from(
+    `${appCreds.clientId}:${appCreds.clientSecret}`
+  ).toString("base64");
+  try {
+    const res = await fetch(QBO_REVOKE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ token }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 

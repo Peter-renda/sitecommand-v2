@@ -20,12 +20,29 @@ For the full field-by-field crosswalk between SiteCommand and the QBO object mod
 ## Setup (company super admin)
 
 1. Go to **Settings → Integrations → QuickBooks Online**.
-2. Enter your Intuit app credentials (`QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`) and save.
+2. Enter your Intuit app credentials (`QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`), pick the
+   **Environment** (Production or Sandbox), and save.
 3. Click **Connect QuickBooks** to run OAuth.
 4. On successful callback, SiteCommand stores:
    - `QBO_REALM_ID`
    - `QBO_ACCESS_TOKEN`
    - `QBO_REFRESH_TOKEN`
+
+For the full step-by-step walkthrough (Intuit portal, sandbox provisioning, production
+keys, troubleshooting), see
+[`quickbooks-online-setup-guide.md`](./quickbooks-online-setup-guide.md).
+
+**Disconnect**: the settings card has a **Disconnect** button →
+`POST /api/integrations/quickbooks/disconnect` (super admin only). It best-effort revokes
+the grant with Intuit's token-revoke endpoint, then deletes the realm + token rows.
+Client ID/Secret and the environment selection are kept for easy reconnect.
+
+**OAuth CSRF protection**: `/connect` stores a random nonce in a 10-minute httpOnly
+cookie (`qbo_oauth_state`) and embeds the same nonce in the OAuth `state` parameter;
+`/callback` rejects any response whose state nonce doesn't match the cookie
+(`qbo_invalid_state`). Post-OAuth redirects resolve the settings-page origin via
+`getAppOrigin()` (prefers `NEXT_PUBLIC_APP_URL`) so users land on the canonical domain
+where their session cookie lives.
 
 ### Redirect URI (the #1 cause of "didn't connect")
 
@@ -59,24 +76,27 @@ environment:
 
 | Setting | Effect |
 |---|---|
-| `QBO_ENVIRONMENT=sandbox` (env var, or a per-company `company_integrations` row) | Routes API calls to `https://sandbox-quickbooks.api.intuit.com` |
-| `QBO_ENVIRONMENT` unset / `production` | Routes to `https://quickbooks.api.intuit.com` (default) |
+| **Environment** selector on Settings → Integrations (stored as a per-company `QBO_ENVIRONMENT` row in `company_integrations`) | `sandbox` routes API calls to `https://sandbox-quickbooks.api.intuit.com` |
+| `QBO_ENVIRONMENT` env var | Fallback when the company has no row; unset / `production` routes to `https://quickbooks.api.intuit.com` (default) |
 | `QBO_API_BASE=<url>` | Explicit override of the REST base (wins over `QBO_ENVIRONMENT`) |
 
 To test end-to-end against a sandbox company:
 
 1. **Intuit Developer portal** → your app → use the **Development** keys (sandbox), and add
-   the redirect URI under the **Development** "Redirect URIs" list.
+   the redirect URI under the **Development** "Redirect URIs" list. The exact value the
+   server will send is displayed on the QuickBooks card (returned as `QBO_REDIRECT_URI`
+   by `GET /api/settings/company-integrations?integration=quickbooks`).
 2. Make sure you have a **sandbox company** (Developer portal → *Sandbox* → it provisions one
    automatically; or add another).
-3. **SiteCommand env** (local `.env` or a preview deployment): set
-   `QBO_ENVIRONMENT=sandbox`, `INTUIT_REDIRECT_URI=<your-callback-url>`, and enter the
-   **Development** Client ID/Secret on the company's Integrations page (or in
-   `platform_settings`). Locally the callback is usually
-   `http://localhost:3000/api/integrations/quickbooks/callback`.
+3. **In SiteCommand** (Settings → Integrations → QuickBooks Online): enter the
+   **Development** Client ID/Secret, set **Environment = Sandbox**, and save. Locally the
+   callback is usually `http://localhost:3000/api/integrations/quickbooks/callback`
+   (set `INTUIT_REDIRECT_URI` or `NEXT_PUBLIC_APP_URL` if the auto-detected origin is wrong).
 4. **Connect** from Settings → Integrations → QuickBooks; pick the sandbox company on the
-   Intuit consent screen.
-5. **Trigger a sync.** There is no QuickBooks "Sync" button in the UI yet — push via either:
+   Intuit consent screen. The card shows **Connected** plus a **Sandbox** badge.
+5. **Trigger a sync** via any of:
+   - the **Sync to QuickBooks** button in the header of a commitment or prime contract
+     detail page,
    - the cron endpoint `GET /api/cron/quickbooks-sync` (locally, with `CRON_SECRET` unset, you
      can just open it in the browser; deployed, send `Authorization: Bearer $CRON_SECRET`), or
    - a direct `POST /api/integrations/quickbooks/sync` with `{ recordType, recordId }` while
@@ -85,8 +105,18 @@ To test end-to-end against a sandbox company:
    Purchase Order / Invoice and any auto-created Vendor/Customer appear, and check the
    `erp_sync_logs` rows (`integration='quickbooks'`) or `/api/integrations/quickbooks/logs`.
 
-When done, point the same company at production by removing `QBO_ENVIRONMENT=sandbox`,
-swapping in the **Production** keys, and reconnecting.
+When done, point the same company at production: **Disconnect**, swap in the
+**Production** keys, set **Environment = Production**, save, and reconnect.
+
+### Offline integration check (no credentials needed)
+
+`npx tsx scripts/qbo-integration-check.ts` exercises `lib/quickbooks.ts` against a mocked
+Intuit API and asserts: sandbox/production base-URL routing + `minorversion` handling,
+401 → token-refresh → retry (with token persistence), the full subcontract→Bill create
+flow (vendor auto-create, COGS account detection, per-SOV-line payload, document dates),
+the idempotent update path (SyncToken re-fetch, `sparse` update, vendor reuse), AR
+retainage lines, and `getIntuitRedirectUri` precedence. Run it after any change to the
+QBO client.
 
 ## How to use it
 
@@ -189,8 +219,10 @@ instead of posting an invalid transaction.
 
 ## Current limitations
 
-- Sync is **push-only** from SiteCommand to QBO. There is no pull from QBO into
-  SiteCommand.
+- Transaction sync is **push-only** from SiteCommand to QBO. The reverse direction is
+  limited to read-only lookups: active Vendor/Customer lists
+  (`GET /api/integrations/quickbooks/vendors` / `/customers`) and the QBO IDs/SyncTokens
+  stored back on synced records. Bills/invoices entered directly in QBO are not imported.
 - Auto-created Vendors/Customers carry only a `DisplayName`; address/email/phone
   enrichment from the directory is a planned follow-up (see data-mapping spec G2).
 - Budget-code → Account/Class/Item mapping works but is **config-driven**: it only takes
