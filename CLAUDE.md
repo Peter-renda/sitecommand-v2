@@ -1549,3 +1549,31 @@ Per-company OAuth connection to QuickBooks Online (and Intuit Enterprise Suite t
 
 ### Verification
 - Offline check: `npx tsx scripts/qbo-integration-check.ts` — mocked-fetch assertions for env routing, minorversion separators, 401 refresh+retry+persist, subcontract→Bill create payload, idempotent update, AR retainage line, redirect-URI precedence. Run after touching `lib/quickbooks.ts`.
+
+## Sage 300 CRE Integration (via Agave)
+
+### Overview
+Per-company integration that syncs commitments (subcontract/PO → **Purchase Order**), prime contracts (→ **AR Invoice**), and AP/AR billing from SOV amounts to **Sage 300 CRE** (Construction & Real Estate, formerly Timberline). Sage 300 CRE is an **on-premise** Windows system with **no native cloud REST API**, so SiteCommand reaches it through **Agave** (`https://api.agaveapi.com`) — a unified connector that runs an agent on the customer's Sage server and exposes a normalized cloud REST API. Docs: `docs/sage-300-cre-integration.md`.
+
+> The `SageNADev/Sage300-SDK` repo is the *Sage 300 (Accpac) Web SDK* — a UI-screen toolkit for a **different** product (not CRE) with no external data API. Agave is the real connectivity layer for on-premise Sage 300 CRE. The existing `lib/sage-intacct.ts` is **Sage Intacct**, yet another separate Sage product — hence this integration uses the distinct `sage300cre` namespace.
+
+### Auth model (Agave)
+- App creds (resolve company → platform → env, like QBO): `SAGE300CRE_CLIENT_ID`, `SAGE300CRE_CLIENT_SECRET` → sent as `Client-Id` / `Client-Secret` headers.
+- Per-company connection: `SAGE300CRE_ACCOUNT_TOKEN` (in `company_integrations`) → `Account-Token` header. Constant `API-Version: 2021-11-21`.
+- `isSage300CreConnected` = app creds + account token. Helpers in `lib/sage300cre.ts`.
+
+### Connect flow (Agave Link)
+- `POST /api/integrations/sage300cre/connect` (super_admin/site_admin) → Agave `POST /link/token/create` → returns a `linkToken`.
+- The user runs Agave Link (selects "Sage 300 CRE"), gets a `public_token`, then `POST /api/integrations/sage300cre/exchange` `{ publicToken }` → Agave `POST /link/token/exchange` → stores `SAGE300CRE_ACCOUNT_TOKEN`.
+- `POST /api/integrations/sage300cre/disconnect` clears the account token (keeps app creds). Manual Account-Token paste is supported as a fallback in the UI.
+- UI: `Sage300CreSection` (company) + `Sage300CreAppSection` (site_admin) in `IntegrationsClient.tsx`.
+
+### Sync surfaces
+- Manual: **Sync to Sage 300 CRE** button on commitment + prime contract detail headers (next to the QuickBooks button) → `POST /api/integrations/sage300cre/sync` `{ recordType: commitments|prime_contracts|ap_invoice|ar_invoice, recordId }`.
+- Cron: `GET /api/cron/sage300cre-sync` daily 18:00 UTC (vercel.json, staggered after QBO), `CRON_SECRET`-gated; pushes dirty rows (`updated_at > sage300cre_synced_at`), capped 25/type/company.
+- Mapping: commitment → `POST/PUT /purchase-orders`; ap_invoice → `/ap-invoices`; prime/ar_invoice → `/ar-invoices`. Vendors/customers resolved **by name** via `GET /vendors|/customers` — sync fails fast (no auto-create) when the party isn't already in Sage 300 CRE (the ERP is the system of record). AR is connector-dependent; unsupported resources surface as logged errors.
+- Idempotency: `sage300cre_id`/`sage300cre_synced_at` (+ `sage300cre_ap_invoice_*`, `sage300cre_ar_invoice_*`) from migration `160_sage300cre_idempotency_columns.sql`. Agave has no SyncToken — updates `PUT /{resource}/{id}`; a 404 (deleted on Sage) falls back to create. Columns sit alongside the `qbo_*` ones so a record can sync to both ERPs independently.
+- Logs: every attempt → `erp_sync_logs` (`integration='sage300cre'`); per-record via `GET /api/integrations/sage300cre/logs`.
+
+### Verification
+- Offline check: `npx tsx scripts/sage300cre-integration-check.ts` — mocked-fetch assertions for Agave headers/base URL, link create+exchange, vendor resolution + "not found" guard, Purchase Order create payload, idempotent PUT + 404→recreate fallback, AR invoice revised-amount. Run after touching `lib/sage300cre.ts`.

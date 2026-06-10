@@ -41,9 +41,17 @@ const XERO_KEYS = [
   "XERO_REFRESH_TOKEN",
 ] as const;
 
+// Sage 300 CRE via the Agave unified connector. Client ID/Secret identify the
+// Agave app; Account Token identifies the company's connected Sage 300 CRE.
+const SAGE300CRE_KEYS = [
+  "SAGE300CRE_CLIENT_ID",
+  "SAGE300CRE_CLIENT_SECRET",
+  "SAGE300CRE_ACCOUNT_TOKEN",
+] as const;
+
 const ELEVENLABS_KEYS = ["ELEVENLABS_API_KEY"] as const;
 
-const ALL_KEYS = [...SAGE_KEYS, ...QBO_KEYS, ...XERO_KEYS, ...ELEVENLABS_KEYS] as const;
+const ALL_KEYS = [...SAGE_KEYS, ...QBO_KEYS, ...XERO_KEYS, ...SAGE300CRE_KEYS, ...ELEVENLABS_KEYS] as const;
 type AllKey = (typeof ALL_KEYS)[number];
 
 async function requireSuperAdmin() {
@@ -65,6 +73,7 @@ export async function GET(req: NextRequest) {
   if (integration === "quickbooks")   keysToFetch = QBO_KEYS;
   else if (integration === "xero")    keysToFetch = XERO_KEYS;
   else if (integration === "sage")    keysToFetch = SAGE_KEYS;
+  else if (integration === "sage300cre") keysToFetch = SAGE300CRE_KEYS;
   else if (integration === "elevenlabs") keysToFetch = ELEVENLABS_KEYS;
   else                                keysToFetch = ALL_KEYS;
 

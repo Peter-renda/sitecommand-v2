@@ -477,6 +477,8 @@ export default function CommitmentDetailClient({
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [qbSyncing, setQbSyncing] = useState(false);
   const [qbSyncMsg, setQbSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [s3Syncing, setS3Syncing] = useState(false);
+  const [s3SyncMsg, setS3SyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [changeHistory, setChangeHistory] = useState<ChangeHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -526,6 +528,32 @@ export default function CommitmentDetailClient({
       setQbSyncMsg({ ok: false, text: "Network error while syncing." });
     } finally {
       setQbSyncing(false);
+    }
+  }
+
+  async function handleSyncToSage300Cre() {
+    setS3Syncing(true);
+    setS3SyncMsg(null);
+    setCommitment((c) => (c ? { ...c, erp_status: "pending" } : c));
+    try {
+      const res = await fetch("/api/integrations/sage300cre/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordType: "commitments", recordId: commitmentId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommitment((c) => (c ? { ...c, erp_status: "not_synced" } : c));
+        setS3SyncMsg({ ok: false, text: data.error ?? "Sync failed" });
+      } else {
+        setCommitment((c) => (c ? { ...c, erp_status: "synced" } : c));
+        setS3SyncMsg({ ok: true, text: "Synced to Sage 300 CRE." });
+      }
+    } catch {
+      setCommitment((c) => (c ? { ...c, erp_status: "not_synced" } : c));
+      setS3SyncMsg({ ok: false, text: "Network error while syncing." });
+    } finally {
+      setS3Syncing(false);
     }
   }
 
@@ -686,6 +714,17 @@ export default function CommitmentDetailClient({
               {qbSyncing ? "Syncing…" : "Sync to QuickBooks"}
             </button>
             <button
+              onClick={handleSyncToSage300Cre}
+              disabled={s3Syncing}
+              title="Push this commitment to Sage 300 CRE"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-200 rounded hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              <svg className={`w-4 h-4 ${s3Syncing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {s3Syncing ? "Syncing…" : "Sync to Sage 300 CRE"}
+            </button>
+            <button
               onClick={() => setShowDeleteConfirm(true)}
               disabled={commitment?.status === "approved"}
               title={commitment?.status === "approved" ? "Cannot delete an Approved contract. Change status first." : "Delete this contract"}
@@ -744,6 +783,12 @@ export default function CommitmentDetailClient({
           <div className={`px-4 sm:px-8 py-2 text-xs flex items-center justify-between border-t border-gray-100 ${qbSyncMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
             <span>{qbSyncMsg.text}</span>
             <button onClick={() => setQbSyncMsg(null)} className="opacity-60 hover:opacity-100 ml-3">✕</button>
+          </div>
+        )}
+        {s3SyncMsg && (
+          <div className={`px-4 sm:px-8 py-2 text-xs flex items-center justify-between border-t border-gray-100 ${s3SyncMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+            <span>{s3SyncMsg.text}</span>
+            <button onClick={() => setS3SyncMsg(null)} className="opacity-60 hover:opacity-100 ml-3">✕</button>
           </div>
         )}
         {/* Tab bar */}

@@ -646,6 +646,279 @@ function XeroSection() {
   );
 }
 
+// ── Sage 300 CRE section (company super_admin) ────────────────────────────────
+
+function Sage300CreSection() {
+  const [data, setData] = useState<Record<string, string | null>>({});
+  const [form, setForm] = useState({ SAGE300CRE_CLIENT_ID: "", SAGE300CRE_CLIENT_SECRET: "" });
+  const [accountTokenForm, setAccountTokenForm] = useState("");
+  const [publicToken, setPublicToken] = useState("");
+  const [linkToken, setLinkToken] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [exchanging, setExchanging] = useState(false);
+  const [savingToken, setSavingToken] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [error, setError] = useState("");
+
+  const connected = !!data.SAGE300CRE_ACCOUNT_TOKEN;
+  const appConfigured = !!(data.SAGE300CRE_CLIENT_ID && data.SAGE300CRE_CLIENT_SECRET);
+
+  useEffect(() => {
+    fetch("/api/settings/company-integrations?integration=sage300cre")
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d);
+        setForm({
+          SAGE300CRE_CLIENT_ID: d.SAGE300CRE_CLIENT_ID ?? "",
+          SAGE300CRE_CLIENT_SECRET: d.SAGE300CRE_CLIENT_SECRET ?? "",
+        });
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true); setSaved(false); setError("");
+
+    const payload: Record<string, string> = {};
+    if (form.SAGE300CRE_CLIENT_ID.trim()) payload.SAGE300CRE_CLIENT_ID = form.SAGE300CRE_CLIENT_ID.trim();
+    if (form.SAGE300CRE_CLIENT_SECRET.trim()) payload.SAGE300CRE_CLIENT_SECRET = form.SAGE300CRE_CLIENT_SECRET.trim();
+
+    const res = await fetch("/api/settings/company-integrations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await res.json();
+    setSaving(false);
+    if (!res.ok) { setError(result.error ?? "Failed to save"); return; }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+    setData((prev) => ({ ...prev, ...payload }));
+  }
+
+  async function handleGenerateLinkToken() {
+    setGenerating(true); setError(""); setLinkToken("");
+    try {
+      const res = await fetch("/api/integrations/sage300cre/connect", { method: "POST" });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(result.error ?? "Failed to generate link token"); return; }
+      setLinkToken(result.linkToken ?? "");
+    } catch {
+      setError("Network error while generating the link token.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function handleExchange() {
+    if (!publicToken.trim()) return;
+    setExchanging(true); setError("");
+    try {
+      const res = await fetch("/api/integrations/sage300cre/exchange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ publicToken: publicToken.trim() }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(result.error ?? "Failed to complete connection"); return; }
+      setData((prev) => ({ ...prev, SAGE300CRE_ACCOUNT_TOKEN: "connected" }));
+      setPublicToken(""); setLinkToken("");
+    } catch {
+      setError("Network error while completing the connection.");
+    } finally {
+      setExchanging(false);
+    }
+  }
+
+  async function handleSaveToken() {
+    if (!accountTokenForm.trim()) return;
+    setSavingToken(true); setError("");
+    try {
+      const res = await fetch("/api/settings/company-integrations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ SAGE300CRE_ACCOUNT_TOKEN: accountTokenForm.trim() }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(result.error ?? "Failed to save token"); return; }
+      setData((prev) => ({ ...prev, SAGE300CRE_ACCOUNT_TOKEN: "connected" }));
+      setAccountTokenForm("");
+    } catch {
+      setError("Network error while saving the token.");
+    } finally {
+      setSavingToken(false);
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!window.confirm("Disconnect Sage 300 CRE? Syncing will stop until you reconnect.")) return;
+    setDisconnecting(true); setError("");
+    try {
+      const res = await fetch("/api/integrations/sage300cre/disconnect", { method: "POST" });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(result.error ?? "Failed to disconnect"); return; }
+      setData((prev) => ({ ...prev, SAGE300CRE_ACCOUNT_TOKEN: null }));
+    } catch {
+      setError("Network error while disconnecting.");
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
+  if (loading) return <div className="text-xs text-gray-400 py-8 text-center">Loading...</div>;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="flex items-start justify-between mb-5">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Sage 300 CRE</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Sync commitments and prime contracts to Sage 300 CRE (Timberline) through the Agave connector.
+          </p>
+        </div>
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ml-4 ${connected ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
+          {connected ? "Connected" : "Not connected"}
+        </span>
+      </div>
+
+      {/* Step 1 — Agave app credentials */}
+      <form onSubmit={handleSave} className="space-y-3 mb-5">
+        <p className="text-xs font-medium text-gray-700">
+          Step 1 — Agave app credentials
+          <span className="ml-1 font-normal text-gray-400">(from agaveapi.com)</span>
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="s3cre-cid" className="block text-xs font-medium text-gray-700 mb-1">Client ID</label>
+            <MaskedInput
+              id="s3cre-cid"
+              value={form.SAGE300CRE_CLIENT_ID}
+              onChange={(v) => setForm((f) => ({ ...f, SAGE300CRE_CLIENT_ID: v }))}
+              placeholder={data.SAGE300CRE_CLIENT_ID ? "••••••••••••••••" : "Agave Client ID (UUID)"}
+            />
+          </div>
+          <div>
+            <label htmlFor="s3cre-csec" className="block text-xs font-medium text-gray-700 mb-1">Client Secret</label>
+            <MaskedInput
+              id="s3cre-csec"
+              value={form.SAGE300CRE_CLIENT_SECRET}
+              onChange={(v) => setForm((f) => ({ ...f, SAGE300CRE_CLIENT_SECRET: v }))}
+              placeholder={data.SAGE300CRE_CLIENT_SECRET ? "••••••••••••••••" : "Agave Client Secret"}
+            />
+          </div>
+        </div>
+        <SaveButton saving={saving} saved={saved} />
+      </form>
+
+      {/* Step 2 — Connect via Agave Link */}
+      <div className="border-t border-gray-100 pt-5 space-y-3">
+        <p className="text-xs font-medium text-gray-700">Step 2 — Connect Sage 300 CRE</p>
+
+        {connected ? (
+          <div className="flex items-center gap-3">
+            <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
+            <p className="text-sm text-gray-700">Sage 300 CRE is connected.</p>
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="ml-auto px-4 py-1.5 text-sm font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50"
+            >
+              {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className="text-xs text-gray-500">
+              {appConfigured
+                ? "Generate a Link token, open Agave Link to authenticate your on-premise Sage 300 CRE connector and choose “Sage 300 CRE”, then paste the public token Agave returns."
+                : "Save your Agave Client ID and Secret above first, then connect."}
+            </p>
+            <button
+              type="button"
+              onClick={handleGenerateLinkToken}
+              disabled={!appConfigured || generating}
+              className={`inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-md transition-colors ${
+                appConfigured ? "bg-[#1f6feb] hover:bg-[#1a5fd0]" : "bg-gray-300 cursor-not-allowed"
+              }`}
+            >
+              <ExternalLink className="w-4 h-4" />
+              {generating ? "Generating…" : "Generate Agave Link token"}
+            </button>
+
+            {linkToken && (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500">Use this Link token with Agave Link:</p>
+                <code className="block font-mono text-xs bg-gray-100 px-2 py-1.5 rounded break-all">{linkToken}</code>
+                <label htmlFor="s3cre-public" className="block text-xs font-medium text-gray-700 mb-1 pt-1">
+                  Public token (from Agave Link)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="s3cre-public"
+                    type="text"
+                    value={publicToken}
+                    onChange={(e) => setPublicToken(e.target.value)}
+                    placeholder="public-…"
+                    className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleExchange}
+                    disabled={!publicToken.trim() || exchanging}
+                    className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    {exchanging ? "Connecting…" : "Complete connection"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Manual fallback — paste an Account Token directly */}
+            <details className="pt-1">
+              <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                Or paste an Account Token directly
+              </summary>
+              <div className="flex items-center gap-2 mt-2">
+                <MaskedInput
+                  id="s3cre-account-token"
+                  value={accountTokenForm}
+                  onChange={setAccountTokenForm}
+                  placeholder="Agave Account Token"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveToken}
+                  disabled={!accountTokenForm.trim() || savingToken}
+                  className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 disabled:opacity-50 whitespace-nowrap"
+                >
+                  {savingToken ? "Saving…" : "Save token"}
+                </button>
+              </div>
+            </details>
+          </>
+        )}
+
+        {error && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>
+        )}
+      </div>
+
+      <div className="mt-5 pt-4 border-t border-gray-100">
+        <p className="text-xs text-gray-400">
+          Sage 300 CRE is on-premise; SiteCommand reaches it through{" "}
+          <a href="https://www.agaveapi.com" target="_blank" rel="noreferrer" className="underline hover:text-gray-600">Agave</a>,
+          which runs a connector on your Sage server. Vendors and customers must already exist in Sage 300 CRE — syncs resolve them by name.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── APS section (site_admin only) ─────────────────────────────────────────────
 
 type ApsSettings = {
@@ -996,6 +1269,109 @@ function XeroAppSection() {
   );
 }
 
+// ── Sage 300 CRE App Credentials section (site_admin only) ────────────────────
+
+type Sage300CreAppSettings = {
+  SAGE300CRE_CLIENT_ID: string | null;
+  SAGE300CRE_CLIENT_SECRET: string | null;
+};
+
+function Sage300CreAppSection() {
+  const [settings, setSettings] = useState<Sage300CreAppSettings>({
+    SAGE300CRE_CLIENT_ID: null,
+    SAGE300CRE_CLIENT_SECRET: null,
+  });
+  const [form, setForm] = useState({ SAGE300CRE_CLIENT_ID: "", SAGE300CRE_CLIENT_SECRET: "" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/admin/platform-settings")
+      .then((r) => r.json())
+      .then((data: Sage300CreAppSettings) => {
+        setSettings(data);
+        setForm({
+          SAGE300CRE_CLIENT_ID: data.SAGE300CRE_CLIENT_ID ?? "",
+          SAGE300CRE_CLIENT_SECRET: data.SAGE300CRE_CLIENT_SECRET ?? "",
+        });
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true); setError(""); setSaved(false);
+
+    const payload: Record<string, string> = {};
+    if (form.SAGE300CRE_CLIENT_ID.trim()) payload.SAGE300CRE_CLIENT_ID = form.SAGE300CRE_CLIENT_ID.trim();
+    if (form.SAGE300CRE_CLIENT_SECRET.trim()) payload.SAGE300CRE_CLIENT_SECRET = form.SAGE300CRE_CLIENT_SECRET.trim();
+
+    const res = await fetch("/api/admin/platform-settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    setSaving(false);
+    if (!res.ok) { setError(data.error ?? "Failed to save settings"); return; }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+    setSettings((prev) => ({ ...prev, ...payload }));
+  }
+
+  const configured = !!(settings.SAGE300CRE_CLIENT_ID && settings.SAGE300CRE_CLIENT_SECRET);
+  if (loading) return <div className="text-xs text-gray-400 py-8 text-center">Loading...</div>;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="flex items-start justify-between mb-5">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Sage 300 CRE — Agave App Credentials</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Platform-level Agave app credentials. Company admins use these to connect their own Sage 300 CRE instances.
+          </p>
+        </div>
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ml-4 ${configured ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
+          {configured ? "Configured" : "Not configured"}
+        </span>
+      </div>
+
+      <form onSubmit={handleSave} className="space-y-4">
+        <div>
+          <label htmlFor="s3cre-app-client-id" className="block text-xs font-medium text-gray-700 mb-1">Client ID</label>
+          <MaskedInput
+            id="s3cre-app-client-id"
+            value={form.SAGE300CRE_CLIENT_ID}
+            onChange={(v) => setForm((f) => ({ ...f, SAGE300CRE_CLIENT_ID: v }))}
+            placeholder={settings.SAGE300CRE_CLIENT_ID ? "••••••••••••••••" : "Agave app Client ID"}
+          />
+          <p className="text-xs text-gray-400 mt-1">Found in your Agave dashboard under API credentials.</p>
+        </div>
+        <div>
+          <label htmlFor="s3cre-app-client-secret" className="block text-xs font-medium text-gray-700 mb-1">Client Secret</label>
+          <MaskedInput
+            id="s3cre-app-client-secret"
+            value={form.SAGE300CRE_CLIENT_SECRET}
+            onChange={(v) => setForm((f) => ({ ...f, SAGE300CRE_CLIENT_SECRET: v }))}
+            placeholder={settings.SAGE300CRE_CLIENT_SECRET ? "••••••••••••••••" : "Agave app Client Secret"}
+          />
+        </div>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="pt-1"><SaveButton saving={saving} saved={saved} /></div>
+      </form>
+
+      <div className="mt-6 pt-5 border-t border-gray-100">
+        <p className="text-xs text-gray-400">
+          Stored in platform settings and shared across companies that haven&apos;t set their own. Each company still
+          connects its own Sage 300 CRE through Agave Link (producing a per-company Account Token).
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── ElevenLabs section (company super_admin) ─────────────────────────────────
 
 function ElevenLabsCompanySection() {
@@ -1203,6 +1579,7 @@ export default function IntegrationsClient({ isSiteAdmin }: { isSiteAdmin: boole
           <ApsSection />
           <QBOAppSection />
           <XeroAppSection />
+          <Sage300CreAppSection />
           <ElevenLabsSection />
         </>
       ) : (
@@ -1210,6 +1587,7 @@ export default function IntegrationsClient({ isSiteAdmin }: { isSiteAdmin: boole
           <SageSection />
           <QuickBooksSection />
           <XeroSection />
+          <Sage300CreSection />
           <ElevenLabsCompanySection />
         </>
       )}
