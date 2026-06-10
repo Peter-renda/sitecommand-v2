@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
+import { getIntuitRedirectUri } from "@/lib/quickbooks";
 
 const SAGE_KEYS = [
   "SAGE_SENDER_ID",
@@ -29,6 +30,7 @@ const QBO_KEYS = [
   "QBO_REALM_ID",
   "QBO_ACCESS_TOKEN",
   "QBO_REFRESH_TOKEN",
+  "QBO_ENVIRONMENT",
 ] as const;
 
 const XERO_KEYS = [
@@ -81,6 +83,12 @@ export async function GET(req: NextRequest) {
     settings[key] = row ? row.value : null;
   }
 
+  // Derived (not stored): the exact redirect_uri the server will send to
+  // Intuit, so the settings UI can show the value to register in the portal.
+  if (integration === "quickbooks") {
+    settings.QBO_REDIRECT_URI = getIntuitRedirectUri(req);
+  }
+
   return NextResponse.json(settings);
 }
 
@@ -97,6 +105,12 @@ export async function PATCH(req: NextRequest) {
     if (typeof body[key as AllKey] === "string") {
       const val = (body[key as AllKey] as string).trim();
       if (val) {
+        if (key === "QBO_ENVIRONMENT" && val !== "sandbox" && val !== "production") {
+          return NextResponse.json(
+            { error: "QBO_ENVIRONMENT must be 'sandbox' or 'production'" },
+            { status: 400 }
+          );
+        }
         upserts.push({ company_id: session.company_id!, key, value: val, updated_at: now });
       }
     }

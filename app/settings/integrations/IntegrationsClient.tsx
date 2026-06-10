@@ -258,15 +258,19 @@ const QBO_ERROR_MESSAGES: Record<string, string> = {
   qbo_no_company:   "Your account is not associated with a company.",
   qbo_denied:       "QuickBooks authorization was cancelled.",
   qbo_invalid_callback: "Invalid response from QuickBooks. Please try again.",
+  qbo_invalid_state: "The authorization request could not be verified (expired or mismatched). Please try connecting again.",
+  qbo_missing_app_creds: "QuickBooks app credentials are missing. Save your Client ID and Secret, then reconnect.",
   qbo_token_exchange_failed: "Failed to exchange authorization code. Please try again.",
 };
 
 function QuickBooksSection() {
   const [data, setData] = useState<Record<string, string | null>>({});
   const [form, setForm] = useState({ QBO_CLIENT_ID: "", QBO_CLIENT_SECRET: "" });
+  const [environment, setEnvironment] = useState<"production" | "sandbox">("production");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   const connected = !!(data.QBO_REALM_ID && data.QBO_ACCESS_TOKEN);
@@ -281,6 +285,7 @@ function QuickBooksSection() {
           QBO_CLIENT_ID:     d.QBO_CLIENT_ID     ?? "",
           QBO_CLIENT_SECRET: d.QBO_CLIENT_SECRET ?? "",
         });
+        setEnvironment(d.QBO_ENVIRONMENT === "sandbox" ? "sandbox" : "production");
       })
       .finally(() => setLoading(false));
   }, []);
@@ -310,7 +315,7 @@ function QuickBooksSection() {
     e.preventDefault();
     setSaving(true); setSaved(false); setErrorMsg("");
 
-    const payload: Record<string, string> = {};
+    const payload: Record<string, string> = { QBO_ENVIRONMENT: environment };
     if (form.QBO_CLIENT_ID.trim())     payload.QBO_CLIENT_ID     = form.QBO_CLIENT_ID.trim();
     if (form.QBO_CLIENT_SECRET.trim()) payload.QBO_CLIENT_SECRET = form.QBO_CLIENT_SECRET.trim();
 
@@ -327,6 +332,21 @@ function QuickBooksSection() {
     setData((prev) => ({ ...prev, ...payload }));
   }
 
+  async function handleDisconnect() {
+    if (!window.confirm("Disconnect QuickBooks Online? Syncing will stop until you reconnect.")) return;
+    setDisconnecting(true); setErrorMsg("");
+    try {
+      const res = await fetch("/api/integrations/quickbooks/disconnect", { method: "POST" });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) { setErrorMsg(result.error ?? "Failed to disconnect"); return; }
+      setData((prev) => ({ ...prev, QBO_REALM_ID: null, QBO_ACCESS_TOKEN: null, QBO_REFRESH_TOKEN: null }));
+    } catch {
+      setErrorMsg("Network error while disconnecting.");
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
   if (loading) return <div className="text-xs text-gray-400 py-8 text-center">Loading...</div>;
 
   return (
@@ -338,9 +358,16 @@ function QuickBooksSection() {
             Sync prime contracts, subcontracts, and purchase orders to QuickBooks Online via OAuth.
           </p>
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ml-4 ${connected ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
-          {connected ? "Connected" : "Not connected"}
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0 ml-4">
+          {environment === "sandbox" && (
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-50 text-blue-700">
+              Sandbox
+            </span>
+          )}
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${connected ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
+            {connected ? "Connected" : "Not connected"}
+          </span>
+        </div>
       </div>
 
       {/* Step 1 — App credentials */}
@@ -369,6 +396,22 @@ function QuickBooksSection() {
             />
           </div>
         </div>
+        <div>
+          <label htmlFor="qbo-env" className="block text-xs font-medium text-gray-700 mb-1">Environment</label>
+          <select
+            id="qbo-env"
+            value={environment}
+            onChange={(e) => setEnvironment(e.target.value === "sandbox" ? "sandbox" : "production")}
+            className="w-full max-w-xs px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white"
+          >
+            <option value="production">Production (real QuickBooks company)</option>
+            <option value="sandbox">Sandbox (Intuit test company)</option>
+          </select>
+          <p className="text-xs text-gray-400 mt-1">
+            Sandbox requires <strong>Development</strong> keys from the Intuit portal; production requires{" "}
+            <strong>Production</strong> keys. If you change this after connecting, disconnect and reconnect.
+          </p>
+        </div>
         {errorMsg && (
           <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{errorMsg}</p>
         )}
@@ -381,7 +424,9 @@ function QuickBooksSection() {
         {connected ? (
           <div className="flex items-center gap-3">
             <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
-            <p className="text-sm text-gray-700">QuickBooks Online is connected.</p>
+            <p className="text-sm text-gray-700">
+              QuickBooks Online is connected{environment === "sandbox" ? " (sandbox)" : ""}.
+            </p>
           </div>
         ) : (
           <p className="text-xs text-gray-500">
@@ -390,19 +435,31 @@ function QuickBooksSection() {
               : "Save your Client ID and Secret above first, then connect."}
           </p>
         )}
-        <a
-          href="/api/integrations/quickbooks/connect"
-          aria-disabled={!appConfigured}
-          onClick={(e) => { if (!appConfigured) e.preventDefault(); }}
-          className={`inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-md transition-colors ${
-            appConfigured
-              ? "bg-[#2CA01C] hover:bg-[#237d16]"
-              : "bg-gray-300 cursor-not-allowed"
-          }`}
-        >
-          <ExternalLink className="w-4 h-4" />
-          {connected ? "Reconnect QuickBooks" : "Connect QuickBooks Online"}
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href="/api/integrations/quickbooks/connect"
+            aria-disabled={!appConfigured}
+            onClick={(e) => { if (!appConfigured) e.preventDefault(); }}
+            className={`inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-md transition-colors ${
+              appConfigured
+                ? "bg-[#2CA01C] hover:bg-[#237d16]"
+                : "bg-gray-300 cursor-not-allowed"
+            }`}
+          >
+            <ExternalLink className="w-4 h-4" />
+            {connected ? "Reconnect QuickBooks" : "Connect QuickBooks Online"}
+          </a>
+          {connected && (
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50"
+            >
+              {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="mt-5 pt-4 border-t border-gray-100">
@@ -411,7 +468,10 @@ function QuickBooksSection() {
           (scheme, host, and path) the one below — a mismatch is what causes Intuit&apos;s
           &ldquo;didn&apos;t connect&rdquo; error:
           <br />
-          <code className="font-mono bg-gray-100 px-1 rounded">{(process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") || (typeof window !== "undefined" ? window.location.origin : ""))}/api/integrations/quickbooks/callback</code>.
+          <code className="font-mono bg-gray-100 px-1 rounded">
+            {data.QBO_REDIRECT_URI ||
+              `${process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") || (typeof window !== "undefined" ? window.location.origin : "")}/api/integrations/quickbooks/callback`}
+          </code>
           <br />
           Register it under the same key set (Development vs Production) as the Client ID/Secret you saved above.
           Required scope: <code className="font-mono bg-gray-100 px-1 rounded">com.intuit.quickbooks.accounting</code>.
