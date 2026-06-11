@@ -26,6 +26,8 @@ import {
   syncPrimeContractToSage300Cre,
   syncAPInvoiceToSage300Cre,
   syncARInvoiceToSage300Cre,
+  fetchSage300CreRecordFinancials,
+  type Sage300CreFinancials,
   type Sage300CreResult,
 } from "@/lib/sage300cre";
 
@@ -33,6 +35,31 @@ const MAX_COMMITMENTS_PER_COMPANY = 25;
 const MAX_PRIME_CONTRACTS_PER_COMPANY = 25;
 const MAX_AP_INVOICES_PER_COMPANY = 25;
 const MAX_AR_INVOICES_PER_COMPANY = 25;
+const MAX_PAYMENT_REFRESHES_PER_COMPANY = 25;
+
+/**
+ * Maps Agave financial feedback onto update columns with the given prefix.
+ * The commitment header PO is non-posting, so only its status column exists
+ * (includeAmounts=false); the AP/AR invoices and the prime-contract header
+ * invoice also carry total / paid / balance.
+ */
+function financialsColumns(
+  prefix: "sage300cre_ap_invoice" | "sage300cre_ar_invoice" | "sage300cre",
+  fin: Sage300CreFinancials | undefined | null,
+  includeAmounts: boolean
+): Record<string, unknown> {
+  if (!fin) return {};
+  const cols: Record<string, unknown> = {
+    [`${prefix}_status`]: fin.status,
+    sage300cre_payments_refreshed_at: new Date().toISOString(),
+  };
+  if (includeAmounts) {
+    cols[`${prefix}_total_amount`] = fin.totalAmount;
+    cols[`${prefix}_amount_paid`] = fin.amountPaid;
+    cols[`${prefix}_balance`] = fin.balance;
+  }
+  return cols;
+}
 
 type SupabaseClient = ReturnType<typeof getSupabase>;
 
@@ -82,6 +109,7 @@ export async function GET(req: NextRequest) {
     primeContractsSynced: 0,
     apInvoicesSynced: 0,
     arInvoicesSynced: 0,
+    paymentsRefreshed: 0,
     failures: 0,
     errors: [] as string[],
   };
@@ -98,16 +126,22 @@ export async function GET(req: NextRequest) {
     // ── 2. Find this company's projects ──────────────────────────────────────
     const { data: projects } = await supabase
       .from("projects")
-      .select("id")
+      .select("id, name, project_number")
       .eq("company_id", companyId);
 
     const projectIds = (projects ?? []).map((p: { id: string }) => p.id);
     if (projectIds.length === 0) continue;
+    const projectById = new Map(
+      (projects ?? []).map((p: { id: string; name: string | null; project_number: string | null }) => [
+        p.id, { name: p.name ?? null, number: p.project_number ?? null },
+      ])
+    );
+    const projectCtx = (projectId: string) => projectById.get(projectId) ?? { name: null, number: null };
 
     // ── 3. Dirty commitments ─────────────────────────────────────────────────
     const { data: commitmentCandidates } = await supabase
       .from("commitments")
-      .select("id, type, number, title, contract_company, original_contract_amount, status, project_id, sage300cre_id, sage300cre_synced_at, updated_at, start_date, estimated_completion, contract_date, issued_on_date, delivery_date, sage300cre_ap_invoice_id, sage300cre_ap_invoice_synced_at")
+      .select("id, type, number, title, contract_company, original_contract_amount, approved_change_orders, default_retainage, status, project_id, sage300cre_id, sage300cre_synced_at, updated_at, start_date, estimated_completion, contract_date, issued_on_date, delivery_date, sage300cre_ap_invoice_id, sage300cre_ap_invoice_synced_at")
       .in("project_id", projectIds)
       .is("deleted_at", null)
       .order("updated_at", { ascending: true })
@@ -132,14 +166,19 @@ export async function GET(req: NextRequest) {
         uom: r.uom || undefined,
         unitCost: Number(r.unit_cost) || undefined,
       }));
+      const project = projectCtx(commitment.project_id);
       const result = await syncCommitmentToSage300Cre(
-        app, company, { ...commitment, sovLines }, commitment.sage300cre_id
+        app, company,
+        { ...commitment, sovLines, project_name: project.name, project_number: project.number },
+        commitment.sage300cre_id
       );
 
       const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
       if (result.ok) {
         update.sage300cre_id = result.id;
         update.sage300cre_synced_at = new Date().toISOString();
+        if (result.vendorId) update.sage300cre_vendor_id = result.vendorId;
+        Object.assign(update, financialsColumns("sage300cre", result.financials, false));
         summary.commitmentsSynced++;
       } else {
         summary.failures++;
@@ -155,7 +194,7 @@ export async function GET(req: NextRequest) {
     // ── 4. Dirty prime contracts ─────────────────────────────────────────────
     const { data: contractCandidates } = await supabase
       .from("prime_contracts")
-      .select("id, contract_number, title, owner_client, contractor, architect_engineer, description, original_contract_amount, approved_change_orders, default_retainage, status, executed, start_date, estimated_completion_date, sage300cre_id, sage300cre_synced_at, updated_at, sage300cre_ar_invoice_id, sage300cre_ar_invoice_synced_at")
+      .select("id, project_id, contract_number, title, owner_client, contractor, architect_engineer, description, original_contract_amount, approved_change_orders, default_retainage, status, executed, start_date, estimated_completion_date, sage300cre_id, sage300cre_synced_at, updated_at, sage300cre_ar_invoice_id, sage300cre_ar_invoice_synced_at")
       .in("project_id", projectIds)
       .is("deleted_at", null)
       .order("updated_at", { ascending: true })
@@ -180,14 +219,19 @@ export async function GET(req: NextRequest) {
         uom: r.uom || undefined,
         unitCost: Number(r.unit_cost) || undefined,
       }));
+      const project = projectCtx(contract.project_id);
       const result = await syncPrimeContractToSage300Cre(
-        app, company, { ...contract, sovLines }, contract.sage300cre_id
+        app, company,
+        { ...contract, sovLines, project_name: project.name, project_number: project.number },
+        contract.sage300cre_id
       );
 
       const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
       if (result.ok) {
         update.sage300cre_id = result.id;
         update.sage300cre_synced_at = new Date().toISOString();
+        if (result.customerId) update.sage300cre_customer_id = result.customerId;
+        Object.assign(update, financialsColumns("sage300cre", result.financials, true));
         summary.primeContractsSynced++;
       } else {
         summary.failures++;
@@ -229,6 +273,7 @@ export async function GET(req: NextRequest) {
         }
 
         const existingApId = (commitment as { sage300cre_ap_invoice_id?: string }).sage300cre_ap_invoice_id;
+        const apProject = projectCtx(commitment.project_id);
         const result = await syncAPInvoiceToSage300Cre(
           app, company,
           {
@@ -241,6 +286,9 @@ export async function GET(req: NextRequest) {
               description: item.description || commitment.title,
               amount: Number(item.billed_to_date),
             })),
+            retainagePct: Number((commitment as { default_retainage?: number }).default_retainage) || 0,
+            projectName: apProject.name,
+            projectNumber: apProject.number,
           },
           existingApId
         );
@@ -251,6 +299,8 @@ export async function GET(req: NextRequest) {
             .update({
               sage300cre_ap_invoice_id: result.id,
               sage300cre_ap_invoice_synced_at: new Date().toISOString(),
+              ...(result.vendorId ? { sage300cre_vendor_id: result.vendorId } : {}),
+              ...financialsColumns("sage300cre_ap_invoice", result.financials, true),
             })
             .eq("id", commitmentId);
           summary.apInvoicesSynced++;
@@ -276,7 +326,7 @@ export async function GET(req: NextRequest) {
 
         const { data: sovItems } = await supabase
           .from("prime_contract_sov_items")
-          .select("budget_code, description, work_completed_this_period, updated_at")
+          .select("budget_code, description, work_completed_this_period, retainage_pct, updated_at")
           .eq("prime_contract_id", contractId)
           .eq("is_group_header", false)
           .gt("work_completed_this_period", 0)
@@ -293,6 +343,7 @@ export async function GET(req: NextRequest) {
         }
 
         const existingArId = (contract as { sage300cre_ar_invoice_id?: string }).sage300cre_ar_invoice_id;
+        const arProject = projectCtx(contract.project_id);
         const result = await syncARInvoiceToSage300Cre(
           app, company,
           {
@@ -300,11 +351,18 @@ export async function GET(req: NextRequest) {
             contractNumber: contract.contract_number,
             customerName: contract.owner_client,
             description: contract.title,
-            lineItems: sovItems.map((item) => ({
-              budgetCode: item.budget_code ?? "",
-              description: item.description || contract.title,
-              amount: Number(item.work_completed_this_period),
-            })),
+            lineItems: sovItems.map((item) => {
+              const amount = Number(item.work_completed_this_period);
+              const pct = Number(item.retainage_pct) || 0;
+              return {
+                budgetCode: item.budget_code ?? "",
+                description: item.description || contract.title,
+                amount,
+                retainageAmount: pct > 0 ? Number(((amount * pct) / 100).toFixed(2)) : 0,
+              };
+            }),
+            projectName: arProject.name,
+            projectNumber: arProject.number,
           },
           existingArId
         );
@@ -315,6 +373,8 @@ export async function GET(req: NextRequest) {
             .update({
               sage300cre_ar_invoice_id: result.id,
               sage300cre_ar_invoice_synced_at: new Date().toISOString(),
+              ...(result.customerId ? { sage300cre_customer_id: result.customerId } : {}),
+              ...financialsColumns("sage300cre_ar_invoice", result.financials, true),
             })
             .eq("id", contractId);
           summary.arInvoicesSynced++;
@@ -326,6 +386,56 @@ export async function GET(req: NextRequest) {
         await writeLog(supabase, "ar_invoice", contractId, result);
         arProcessed++;
       }
+    }
+
+    // ── 7. Payment-status refresh: pull balances back for synced records ──────
+    // Payments entered entirely inside Sage never touch updated_at here, so the
+    // dirty filters above won't see them. Walk the stalest synced records
+    // (oldest sage300cre_payments_refreshed_at first) and re-read financials.
+    const { data: payCommitments } = await supabase
+      .from("commitments")
+      .select("id, sage300cre_id, sage300cre_ap_invoice_id")
+      .in("project_id", projectIds)
+      .is("deleted_at", null)
+      .or("sage300cre_id.not.is.null,sage300cre_ap_invoice_id.not.is.null")
+      .order("sage300cre_payments_refreshed_at", { ascending: true, nullsFirst: true })
+      .limit(MAX_PAYMENT_REFRESHES_PER_COMPANY);
+
+    for (const c of payCommitments ?? []) {
+      const update: Record<string, unknown> = { sage300cre_payments_refreshed_at: new Date().toISOString() };
+      if (c.sage300cre_id) {
+        const fin = await fetchSage300CreRecordFinancials(app, company, "purchase-orders", c.sage300cre_id);
+        Object.assign(update, financialsColumns("sage300cre", fin, false));
+      }
+      if (c.sage300cre_ap_invoice_id) {
+        const fin = await fetchSage300CreRecordFinancials(app, company, "ap-invoices", c.sage300cre_ap_invoice_id);
+        Object.assign(update, financialsColumns("sage300cre_ap_invoice", fin, true));
+      }
+      await supabase.from("commitments").update(update).eq("id", c.id);
+      summary.paymentsRefreshed++;
+    }
+
+    const { data: payContracts } = await supabase
+      .from("prime_contracts")
+      .select("id, sage300cre_id, sage300cre_ar_invoice_id")
+      .in("project_id", projectIds)
+      .is("deleted_at", null)
+      .or("sage300cre_id.not.is.null,sage300cre_ar_invoice_id.not.is.null")
+      .order("sage300cre_payments_refreshed_at", { ascending: true, nullsFirst: true })
+      .limit(MAX_PAYMENT_REFRESHES_PER_COMPANY);
+
+    for (const pc of payContracts ?? []) {
+      const update: Record<string, unknown> = { sage300cre_payments_refreshed_at: new Date().toISOString() };
+      if (pc.sage300cre_id) {
+        const fin = await fetchSage300CreRecordFinancials(app, company, "ar-invoices", pc.sage300cre_id);
+        Object.assign(update, financialsColumns("sage300cre", fin, true));
+      }
+      if (pc.sage300cre_ar_invoice_id) {
+        const fin = await fetchSage300CreRecordFinancials(app, company, "ar-invoices", pc.sage300cre_ar_invoice_id);
+        Object.assign(update, financialsColumns("sage300cre_ar_invoice", fin, true));
+      }
+      await supabase.from("prime_contracts").update(update).eq("id", pc.id);
+      summary.paymentsRefreshed++;
     }
   }
 

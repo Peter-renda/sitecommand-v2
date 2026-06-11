@@ -6,10 +6,14 @@
  * Verifies, with a mocked fetch (no Intuit credentials or network needed):
  *   1. Sandbox vs production API base routing + minorversion handling
  *   2. Automatic token refresh + retry on 401 (and token persistence)
- *   3. syncCommitmentToQBO create flow (vendor resolution → account → Bill payload)
- *   4. Idempotent update flow (SyncToken re-fetch → sparse update)
- *   5. AR invoice with per-line retainage withholding
+ *   3. syncCommitmentToQBO create flow (vendor resolution+enrichment → account →
+ *      Bill payload with terms, project Class fallback, financial feedback)
+ *   4. Idempotent update flow (SyncToken re-fetch → sparse update, revised amount)
+ *   5. AR invoice with per-line retainage withholding + stored materials
  *   6. getIntuitRedirectUri resolution precedence
+ *   7. Purchase order ship-to / ship-via / delivery-date mapping
+ *   8. Void/terminated handling (Bill delete, PO close, skip when never synced)
+ *   9. DocNumber project prefix (QBO_DOC_NUMBER_PREFIX)
  *
  * Exits non-zero on the first failed assertion.
  */
@@ -26,6 +30,8 @@ delete process.env.QBO_DEFAULT_ITEM;
 delete process.env.QBO_BUDGET_CODE_MAP;
 delete process.env.QBO_RETAINAGE_RECEIVABLE_ACCOUNT;
 delete process.env.QBO_RETAINAGE_PAYABLE_ACCOUNT;
+delete process.env.QBO_PROJECT_TRACKING;
+delete process.env.QBO_DOC_NUMBER_PREFIX;
 delete process.env.INTUIT_REDIRECT_URI;
 delete process.env.NEXT_PUBLIC_APP_URL;
 
@@ -105,27 +111,58 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       if (q.includes("FROM Item")) {
         return json(200, { QueryResponse: { Item: [{ Id: "9" }] } });
       }
+      if (q.includes("FROM Term") && q.includes("'Net 30'")) {
+        return json(200, { QueryResponse: { Term: [{ Id: "33" }] } });
+      }
+      if (q.includes("FROM Class")) {
+        return json(200, { QueryResponse: {} }); // no existing class → create
+      }
       return json(200, { QueryResponse: {} });
     }
 
     if (path.endsWith("/vendor") && method === "POST") {
       return json(200, { Vendor: { Id: "72", DisplayName: JSON.parse(body).DisplayName } });
     }
+    if (path.endsWith("/class") && method === "POST") {
+      return json(200, { Class: { Id: "44", Name: JSON.parse(body).Name } });
+    }
     if (/\/bill\/\d+$/.test(path) && method === "GET") {
       return json(200, { Bill: { Id: path.split("/").pop(), SyncToken: "4" } });
     }
     if (path.endsWith("/bill") && method === "POST") {
-      const isUpdate = u.searchParams.get("operation") === "update";
-      return json(200, { Bill: { Id: isUpdate ? JSON.parse(body).Id : "201", SyncToken: isUpdate ? "5" : "0" } });
+      const op = u.searchParams.get("operation");
+      if (op === "delete") {
+        return json(200, { Bill: { Id: JSON.parse(body).Id, status: "Deleted" } });
+      }
+      const isUpdate = op === "update";
+      return json(200, {
+        Bill: { Id: isUpdate ? JSON.parse(body).Id : "201", SyncToken: isUpdate ? "5" : "0", TotalAmt: 125000, Balance: 125000 },
+      });
     }
     if (/\/invoice\/\d+$/.test(path) && method === "GET") {
       return json(200, { Invoice: { Id: path.split("/").pop(), SyncToken: "2" } });
     }
     if (path.endsWith("/invoice") && method === "POST") {
-      return json(200, { Invoice: { Id: "301", SyncToken: "0" } });
+      const op = u.searchParams.get("operation");
+      if (op === "void") {
+        return json(200, { Invoice: { Id: JSON.parse(body).Id, SyncToken: "3", TotalAmt: 0, Balance: 0 } });
+      }
+      return json(200, { Invoice: { Id: "301", SyncToken: "0", TotalAmt: 40000, Balance: 15000 } });
+    }
+    if (/\/purchaseorder\/\d+$/.test(path) && method === "GET") {
+      return json(200, { PurchaseOrder: { Id: path.split("/").pop(), SyncToken: "1", POStatus: "Open" } });
     }
     if (path.endsWith("/purchaseorder") && method === "POST") {
-      return json(200, { PurchaseOrder: { Id: "401", SyncToken: "0" } });
+      const isUpdate = u.searchParams.get("operation") === "update";
+      const parsed = body ? JSON.parse(body) : {};
+      return json(200, {
+        PurchaseOrder: {
+          Id: isUpdate ? parsed.Id : "401",
+          SyncToken: isUpdate ? "2" : "0",
+          POStatus: parsed.POStatus ?? "Open",
+          TotalAmt: 5000,
+        },
+      });
     }
     return json(404, { Fault: { Error: [{ Message: `Unhandled mock path ${path}` }] } });
   }
@@ -141,6 +178,7 @@ async function main() {
   const {
     callQBO,
     syncCommitmentToQBO,
+    syncPrimeContractToQBO,
     syncARInvoiceToQBO,
     getIntuitRedirectUri,
   } = await import("../lib/quickbooks");
@@ -217,6 +255,17 @@ async function main() {
     project_id: "p-1",
     start_date: "2026-05-01",
     estimated_completion: "2026-09-30",
+    payment_terms: "Net 30",
+    project_name: "Riverside Plaza",
+    vendorDetails: {
+      companyName: "Acme Concrete LLC",
+      email: "ap@acmeconcrete.com",
+      phone: "555-0100",
+      addressLine1: "100 Main St",
+      city: "Austin",
+      state: "TX",
+      zip: "78701",
+    },
     sovLines: [
       { budgetCode: "03-100", description: "Footings", amount: 75000 },
       { budgetCode: "03-200", description: "Slabs", amount: 50000 },
@@ -228,7 +277,12 @@ async function main() {
 
   const vendorCreate = calls.find((c) => c.url.includes("/vendor?") && c.method === "POST");
   assert.ok(vendorCreate, "missing vendor should be created");
-  assert.equal(JSON.parse(vendorCreate!.body).DisplayName, "Acme Concrete");
+  const vendorPayload = JSON.parse(vendorCreate!.body);
+  assert.equal(vendorPayload.DisplayName, "Acme Concrete");
+  assert.equal(vendorPayload.CompanyName, "Acme Concrete LLC", "vendor create must carry the directory company name");
+  assert.equal(vendorPayload.PrimaryEmailAddr.Address, "ap@acmeconcrete.com", "vendor create must carry the directory email");
+  assert.equal(vendorPayload.PrimaryPhone.FreeFormNumber, "555-0100", "vendor create must carry the directory phone");
+  assert.equal(vendorPayload.BillAddr.City, "Austin", "vendor create must carry the directory address");
 
   const billCreate = calls.find((c) => /\/bill\?minorversion/.test(c.url) && c.method === "POST");
   assert.ok(billCreate, "bill create must be POSTed");
@@ -237,12 +291,17 @@ async function main() {
   assert.equal(billPayload.DocNumber, "14");
   assert.equal(billPayload.TxnDate, "2026-05-01", "Bill TxnDate must use commitment start date");
   assert.equal(billPayload.DueDate, "2026-09-30", "Bill DueDate must use estimated completion");
+  assert.equal(billPayload.SalesTermRef.value, "33", "payment terms must resolve to a QBO Term Id");
   assert.equal(billPayload.Line.length, 2, "one QBO line per SOV item");
   assert.equal(billPayload.Line[0].DetailType, "AccountBasedExpenseLineDetail");
   assert.equal(billPayload.Line[0].AccountBasedExpenseLineDetail.AccountRef.value, "80", "expense line must debit detected COGS account");
+  assert.equal(billPayload.Line[0].AccountBasedExpenseLineDetail.ClassRef.value, "44", "lines must fall back to the project Class for job costing");
   assert.equal(billPayload.Line[0].Description, "03-100 — Footings", "line description carries budget code");
   assert.equal(billPayload.Id, undefined, "create payload must not carry Id");
-  pass("creates Vendor on demand and posts Bill with per-SOV-line detail and real dates");
+  assert.ok(createResult.ok && createResult.vendorId === "72", "result must surface the resolved vendor id");
+  assert.ok(createResult.ok && createResult.financials?.totalAmount === 125000, "result must parse TotalAmt from the response");
+  assert.ok(createResult.ok && createResult.financials?.paymentStatus === "unpaid", "balance == total derives an unpaid status");
+  pass("creates enriched Vendor, posts Bill with terms, project Class, SOV detail, and parses financial feedback");
 
   // ── 3b. Missing Contract Company → actionable validation error ─────────────
   calls.length = 0;
@@ -266,6 +325,7 @@ async function main() {
     {
       id: "c-1", type: "subcontract", number: 14, title: "Concrete package",
       contract_company: "Acme Concrete", original_contract_amount: 130000,
+      approved_change_orders: 5000,
       status: "approved", project_id: "p-1",
     },
     "201" // existing QBO Bill id
@@ -280,12 +340,13 @@ async function main() {
   assert.equal(updatePayload.Id, "201");
   assert.equal(updatePayload.SyncToken, "4", "update must carry the freshly fetched SyncToken");
   assert.equal(updatePayload.sparse, true);
+  assert.equal(updatePayload.Line[0].Amount, 135000, "lump-sum fallback must post the REVISED amount (original + approved COs)");
   const vendorCreates = calls.filter((c) => c.url.includes("/vendor?") && c.method === "POST");
   assert.equal(vendorCreates.length, 0, "existing vendor must be reused, not duplicated");
-  pass("update path re-fetches SyncToken, posts sparse update, reuses existing vendor");
+  pass("update path re-fetches SyncToken, posts sparse revised-amount update, reuses existing vendor");
 
-  // ── 5. AR invoice with retainage ────────────────────────────────────────────
-  console.log("\n[5] AR invoice with retainage");
+  // ── 5. AR invoice with retainage + stored materials ─────────────────────────
+  console.log("\n[5] AR invoice with retainage + stored materials");
   process.env.QBO_RETAINAGE_RECEIVABLE_ACCOUNT = "Retainage Receivable";
   calls.length = 0;
   const arResult = await syncARInvoiceToQBO("co-1", appCreds, prodCreds, {
@@ -294,7 +355,7 @@ async function main() {
     customerName: "Owner LLC",
     description: "Pay app #2",
     lineItems: [
-      { budgetCode: "01-000", description: "GC work", amount: 40000, retainageAmount: 4000 },
+      { budgetCode: "01-000", description: "GC work", amount: 40000, retainageAmount: 4000, materialsStored: 2500 },
     ],
   });
   delete process.env.QBO_RETAINAGE_RECEIVABLE_ACCOUNT;
@@ -304,11 +365,15 @@ async function main() {
   assert.ok(invoiceCreate, "invoice must be POSTed");
   const invPayload = JSON.parse(invoiceCreate!.body);
   assert.equal(invPayload.CustomerRef.value, "55", "CustomerRef must post by Id");
-  assert.equal(invPayload.Line.length, 2, "billing line + retainage line");
+  assert.equal(invPayload.Line.length, 3, "billing line + stored materials line + retainage line");
   assert.equal(invPayload.Line[0].DetailType, "SalesItemLineDetail");
-  assert.equal(invPayload.Line[1].Amount, -4000, "retainage withheld as negative line");
-  assert.equal(invPayload.Line[1].SalesItemLineDetail.ItemRef.value, "10", "retainage line uses Retainage item");
-  pass("AR invoice posts sales lines by Item Id and withholds retainage as a negative line");
+  assert.equal(invPayload.Line[1].Amount, 2500, "stored materials billed as its own line");
+  assert.equal(invPayload.Line[1].Description, "Materials presently stored");
+  assert.equal(invPayload.Line[2].Amount, -4000, "retainage withheld as negative line");
+  assert.equal(invPayload.Line[2].SalesItemLineDetail.ItemRef.value, "10", "retainage line uses Retainage item");
+  assert.ok(arResult.ok && arResult.financials?.balance === 15000, "result must parse the invoice open Balance");
+  assert.ok(arResult.ok && arResult.financials?.paymentStatus === "partially_paid", "balance < total derives partially_paid");
+  pass("AR invoice withholds retainage, bills stored materials, and parses payment feedback");
 
   // ── 6. Redirect URI precedence ──────────────────────────────────────────────
   console.log("\n[6] Redirect URI resolution");
@@ -334,6 +399,92 @@ async function main() {
     "https://fwd.example.com/api/integrations/quickbooks/callback"
   );
   pass("INTUIT_REDIRECT_URI > NEXT_PUBLIC_APP_URL > x-forwarded-* precedence holds");
+
+  // ── 7. Purchase order ship-to / ship-via / delivery date ────────────────────
+  console.log("\n[7] Purchase order shipping detail");
+  calls.length = 0;
+  scenario.vendorExists = true;
+  const poResult = await syncCommitmentToQBO("co-1", appCreds, prodCreds, {
+    id: "c-3", type: "purchase_order", number: 21, title: "Rebar order",
+    contract_company: "Acme Concrete", original_contract_amount: 5000,
+    status: "approved", project_id: "p-1",
+    issued_on_date: "2026-06-01",
+    delivery_date: "2026-07-15",
+    ship_to: "Jobsite Gate 4\n200 River Rd\nAustin, TX 78701",
+    ship_via: "Flatbed freight",
+    bill_to: "Accounts Payable",
+  });
+  assert.ok(poResult.ok, `PO sync failed: ${!poResult.ok ? poResult.error : ""}`);
+  const poCreate = calls.find((c) => /\/purchaseorder\?minorversion/.test(c.url) && c.method === "POST");
+  assert.ok(poCreate, "purchase order must be POSTed");
+  const poPayload = JSON.parse(poCreate!.body);
+  assert.equal(poPayload.TxnDate, "2026-06-01", "PO TxnDate must use issued-on date");
+  assert.equal(poPayload.DueDate, "2026-07-15", "PO DueDate must use delivery date");
+  assert.equal(poPayload.ShipAddr.Line1, "Jobsite Gate 4", "ship_to maps to ShipAddr lines");
+  assert.equal(poPayload.ShipAddr.Line3, "Austin, TX 78701");
+  assert.match(poPayload.PrivateNote, /Ship Via: Flatbed freight/, "ship_via lands in the note");
+  assert.match(poPayload.PrivateNote, /Bill To: Accounts Payable/, "bill_to lands in the note");
+  pass("PO maps ship-to address, delivery due date, and ship-via/bill-to context");
+
+  // ── 8. Void / terminated handling ────────────────────────────────────────────
+  console.log("\n[8] Void / terminated handling");
+  calls.length = 0;
+  const voidBill = await syncCommitmentToQBO("co-1", appCreds, prodCreds, {
+    id: "c-1", type: "subcontract", number: 14, title: "Concrete package",
+    contract_company: "Acme Concrete", original_contract_amount: 130000,
+    status: "void", project_id: "p-1",
+  }, "201");
+  assert.ok(voidBill.ok && voidBill.action === "deleted", "void subcontract must delete the QBO Bill");
+  const billDelete = calls.find((c) => c.url.includes("/bill?operation=delete"));
+  assert.ok(billDelete, "must POST bill?operation=delete");
+  assert.equal(JSON.parse(billDelete!.body).Id, "201");
+
+  calls.length = 0;
+  const voidPo = await syncCommitmentToQBO("co-1", appCreds, prodCreds, {
+    id: "c-3", type: "purchase_order", number: 21, title: "Rebar order",
+    contract_company: "Acme Concrete", original_contract_amount: 5000,
+    status: "terminated", project_id: "p-1",
+  }, "401");
+  assert.ok(voidPo.ok && voidPo.action === "closed", "terminated PO must be closed, not deleted");
+  const poClose = calls.find((c) => c.url.includes("/purchaseorder?operation=update"));
+  assert.ok(poClose, "must POST purchaseorder?operation=update");
+  assert.equal(JSON.parse(poClose!.body).POStatus, "Closed");
+
+  calls.length = 0;
+  const voidNeverSynced = await syncCommitmentToQBO("co-1", appCreds, prodCreds, {
+    id: "c-4", type: "subcontract", number: 30, title: "Cancelled scope",
+    contract_company: "Acme Concrete", original_contract_amount: 1000,
+    status: "void", project_id: "p-1",
+  });
+  assert.ok(voidNeverSynced.ok && voidNeverSynced.action === "skipped", "void + never synced must skip");
+  assert.equal(qboCalls().length, 0, "skip must not call QBO at all");
+
+  calls.length = 0;
+  const voidInvoice = await syncPrimeContractToQBO("co-1", appCreds, prodCreds, {
+    id: "pc-1", contract_number: 3, title: "Prime", owner_client: "Owner LLC",
+    contractor: "GC", architect_engineer: "AE", description: "Base contract",
+    original_contract_amount: 1000000, approved_change_orders: 0, default_retainage: 10,
+    status: "Void", executed: false, start_date: null, estimated_completion_date: null,
+  }, "301");
+  assert.ok(voidInvoice.ok && voidInvoice.action === "voided", "void prime contract must void the AR Invoice");
+  const invVoid = calls.find((c) => c.url.includes("/invoice?operation=void"));
+  assert.ok(invVoid, "must POST invoice?operation=void");
+  pass("void/terminated deletes Bills, closes POs, voids Invoices, and skips never-synced records");
+
+  // ── 9. DocNumber project prefix ──────────────────────────────────────────────
+  console.log("\n[9] DocNumber project prefix");
+  process.env.QBO_DOC_NUMBER_PREFIX = "project";
+  calls.length = 0;
+  const prefixed = await syncCommitmentToQBO("co-1", appCreds, prodCreds, {
+    id: "c-1", type: "subcontract", number: 14, title: "Concrete package",
+    contract_company: "Acme Concrete", original_contract_amount: 130000,
+    status: "approved", project_id: "p-1", project_number: "P-100",
+  });
+  delete process.env.QBO_DOC_NUMBER_PREFIX;
+  assert.ok(prefixed.ok, `prefixed sync failed: ${!prefixed.ok ? prefixed.error : ""}`);
+  const prefixedBill = calls.find((c) => /\/bill\?minorversion/.test(c.url) && c.method === "POST");
+  assert.equal(JSON.parse(prefixedBill!.body).DocNumber, "P-100-14", "QBO_DOC_NUMBER_PREFIX=project prefixes the project number");
+  pass("DocNumber carries the project number when QBO_DOC_NUMBER_PREFIX=project");
 
   console.log(`\nAll ${passed} QBO integration checks passed.`);
 }

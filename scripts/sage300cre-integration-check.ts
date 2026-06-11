@@ -7,9 +7,12 @@
  *   1. Required Agave headers + base URL on data calls
  *   2. Link token create + public-token exchange
  *   3. Vendor resolution by name and the "vendor not found" guard
- *   4. Commitment → Purchase Order create payload (vendor by id, per-SOV lines)
+ *   4. Commitment → Purchase Order create payload (vendor by id, per-SOV lines,
+ *      job + cost-code resolution, quantity detail, due date)
  *   5. Idempotent update (PUT /{resource}/{id}) and 404 → recreate fallback
- *   6. Prime contract → AR Invoice create (customer resolved by name)
+ *   6. Prime contract → AR Invoice create (customer resolved by name, due date)
+ *   7. AP invoice with retention + financial feedback (amount paid / balance / status)
+ *   8. AR invoice retention rollup from per-line retainage
  *
  * Exits non-zero on the first failed assertion.
  */
@@ -65,17 +68,28 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (path.startsWith("customers") && method === "GET") {
       return json(200, { data: [{ id: "C1", name: "Owner LLC" }] });
     }
+    if (path.startsWith("jobs") && method === "GET") {
+      return json(200, { data: [{ id: "J1", name: "Riverside Plaza", number: "P-100" }] });
+    }
+    if (path.startsWith("cost-codes") && method === "GET") {
+      return json(200, {
+        data: [
+          { id: "CC1", code: "03-100", name: "Footings" },
+          { id: "CC2", code: "03-200", name: "Slabs" },
+        ],
+      });
+    }
     if (path === "purchase-orders" && method === "POST") {
-      return json(201, { id: "PO-100" });
+      return json(201, { id: "PO-100", status: "Open" });
     }
     if (/^purchase-orders\/.+/.test(path) && method === "PUT") {
       return scenario.poUpdateReturns404 ? json(404, { message: "not found" }) : json(200, { id: path.split("/").pop() });
     }
     if (path === "ar-invoices" && method === "POST") {
-      return json(201, { id: "AR-200" });
+      return json(201, { id: "AR-200", amount: 1050000, amount_paid: 0, balance: 1050000, status: "Open" });
     }
     if (path === "ap-invoices" && method === "POST") {
-      return json(201, { id: "AP-300" });
+      return json(201, { id: "AP-300", amount: 75000, amount_paid: 25000, balance: 50000, status: "Open" });
     }
     return json(404, { message: `Unhandled mock path ${path}` });
   }
@@ -93,6 +107,8 @@ async function main() {
     exchangePublicToken,
     syncCommitmentToSage300Cre,
     syncPrimeContractToSage300Cre,
+    syncAPInvoiceToSage300Cre,
+    syncARInvoiceToSage300Cre,
   } = await import("../lib/sage300cre");
 
   const app = { clientId: "client-uuid", clientSecret: "client-secret-40chars" };
@@ -140,17 +156,24 @@ async function main() {
     status: "approved",
     project_id: "p-1",
     start_date: "2026-05-01",
+    estimated_completion: "2026-09-30",
+    project_number: "P-100",
+    project_name: "Riverside Plaza",
     sovLines: [
       { budgetCode: "03-100", description: "Footings", amount: 75000 },
-      { budgetCode: "03-200", description: "Slabs", amount: 50000 },
+      { budgetCode: "03-200", description: "Slabs", amount: 50000, qty: 100, uom: "CY", unitCost: 500 },
     ],
   });
   assert.ok(createResult.ok, `commitment sync failed: ${!createResult.ok ? createResult.error : ""}`);
   assert.equal(createResult.ok && createResult.id, "PO-100");
+  assert.ok(createResult.ok && createResult.vendorId === "V1", "result must surface the resolved vendor id");
 
   const vendorLookup = agaveCalls().find((c) => c.url.includes("/vendors") && c.method === "GET");
   assert.ok(vendorLookup, "must look up vendors to resolve the contract company by name");
   assert.equal(vendorLookup!.headers["Account-Token"], "acct-xyz", "data calls must send the Account-Token");
+
+  const jobLookup = agaveCalls().find((c) => c.url.includes("/jobs") && c.method === "GET");
+  assert.ok(jobLookup, "must look up jobs to resolve the project for job costing");
 
   const poCreate = agaveCalls().find((c) => c.url.endsWith("/purchase-orders") && c.method === "POST");
   assert.ok(poCreate, "purchase order must be POSTed");
@@ -158,10 +181,17 @@ async function main() {
   assert.equal(poBody.vendor, "V1", "vendor must post by resolved Agave id, not name");
   assert.equal(poBody.number, "14");
   assert.equal(poBody.issued_date, "2026-05-01", "issued_date should use the commitment start date when no other date");
+  assert.equal(poBody.due_date, "2026-09-30", "due_date should use estimated completion when no delivery date");
+  assert.equal(poBody.job_id, "J1", "header must carry the resolved Sage job id (matched by project number)");
   assert.equal(poBody.line_items.length, 2, "one line item per SOV line");
   assert.equal(poBody.line_items[0].description, "03-100 — Footings", "line description carries the budget code");
   assert.equal(poBody.line_items[0].amount, 75000);
-  pass("resolves vendor by name and POSTs a purchase order with per-SOV-line detail");
+  assert.equal(poBody.line_items[0].cost_code_id, "CC1", "budget code must resolve to the Sage cost-code id");
+  assert.equal(poBody.line_items[0].job_id, "J1", "every line carries the job id");
+  assert.equal(poBody.line_items[1].quantity, 100, "consistent qty × unit cost emits quantity detail");
+  assert.equal(poBody.line_items[1].unit_cost, 500);
+  assert.equal(poBody.line_items[1].unit_of_measure, "CY");
+  pass("resolves vendor/job/cost codes and POSTs a purchase order with full line detail");
 
   // ── 4. Idempotent update (PUT) ──────────────────────────────────────────────
   console.log("\n[4] Idempotent update");
@@ -220,11 +250,60 @@ async function main() {
     start_date: "2026-01-01", estimated_completion_date: "2026-12-31",
   });
   assert.ok(arResult.ok && arResult.id === "AR-200", `AR sync failed: ${!arResult.ok ? arResult.error : ""}`);
+  assert.ok(arResult.ok && arResult.customerId === "C1", "result must surface the resolved customer id");
   const arCreate = agaveCalls().find((c) => c.url.endsWith("/ar-invoices") && c.method === "POST");
   const arBody = JSON.parse(arCreate!.body);
   assert.equal(arBody.customer, "C1", "AR invoice must resolve the owner to a customer id");
   assert.equal(arBody.amount, 1050000, "AR amount must be original + approved change orders");
+  assert.equal(arBody.due_date, "2026-12-31", "due_date should use the estimated completion date");
   pass("prime contract resolves customer by name and posts a revised-amount AR invoice");
+
+  // ── 8. AP invoice retention + financial feedback ────────────────────────────
+  console.log("\n[8] AP invoice retention + financial feedback");
+  calls.length = 0;
+  const apResult = await syncAPInvoiceToSage300Cre(app, company, {
+    commitmentId: "c-1",
+    commitmentNumber: 14,
+    vendorName: "Acme Concrete",
+    description: "Concrete package",
+    retainagePct: 10,
+    projectNumber: "P-100",
+    lineItems: [
+      { budgetCode: "03-100", description: "Footings", amount: 50000 },
+      { budgetCode: "03-200", description: "Slabs", amount: 25000 },
+    ],
+  });
+  assert.ok(apResult.ok && apResult.id === "AP-300", `AP sync failed: ${!apResult.ok ? apResult.error : ""}`);
+  const apCreate = agaveCalls().find((c) => c.url.endsWith("/ap-invoices") && c.method === "POST");
+  const apBody = JSON.parse(apCreate!.body);
+  assert.equal(apBody.amount, 75000, "AP amount is the sum of billed lines");
+  assert.equal(apBody.retention_amount, 7500, "retention_amount = billed × default retainage %");
+  assert.equal(apBody.job_id, "J1", "AP invoice carries the resolved job id");
+  assert.equal(apBody.line_items[0].cost_code_id, "CC1", "AP lines carry resolved cost codes");
+  assert.ok(apResult.ok && apResult.financials?.amountPaid === 25000, "result must parse amount_paid from the response");
+  assert.ok(apResult.ok && apResult.financials?.balance === 50000, "result must parse the open balance");
+  assert.ok(apResult.ok && apResult.financials?.status === "Open", "result must parse the source status");
+  pass("AP invoice posts retention + job costing and parses payment feedback");
+
+  // ── 9. AR invoice retention rollup ──────────────────────────────────────────
+  console.log("\n[9] AR invoice retention rollup");
+  calls.length = 0;
+  const arInvResult = await syncARInvoiceToSage300Cre(app, company, {
+    contractId: "pc-1",
+    contractNumber: 3,
+    customerName: "Owner LLC",
+    description: "Pay app #2",
+    lineItems: [
+      { budgetCode: "01-000", description: "GC work", amount: 40000, retainageAmount: 4000 },
+      { budgetCode: "01-100", description: "Sitework", amount: 10000, retainageAmount: 1000 },
+    ],
+  });
+  assert.ok(arInvResult.ok, `AR invoice sync failed: ${!arInvResult.ok ? arInvResult.error : ""}`);
+  const arInvCreate = agaveCalls().find((c) => c.url.endsWith("/ar-invoices") && c.method === "POST");
+  const arInvBody = JSON.parse(arInvCreate!.body);
+  assert.equal(arInvBody.amount, 50000, "AR invoice amount is the sum of this-period lines");
+  assert.equal(arInvBody.retention_amount, 5000, "per-line retainage rolls up to the header retention_amount");
+  pass("AR invoice rolls per-line retainage up to retention_amount");
 
   console.log(`\nAll ${passed} Sage 300 CRE integration checks passed.`);
 }

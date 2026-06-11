@@ -286,9 +286,63 @@ export async function revokeQBOToken(
 
 // ── API call helper ───────────────────────────────────────────────────────────
 
+/**
+ * Accounting feedback parsed from a QBO entity: the totals as QBO computed
+ * them, the open balance, and a derived payment status. Posting docs
+ * (Bill/Invoice) carry TotalAmt + Balance; a PurchaseOrder is non-posting and
+ * reports its POStatus (Open/Closed) via `docStatus` instead.
+ */
+export type QBOEntityFinancials = {
+  totalAmount: number | null;
+  balance: number | null;
+  paymentStatus: "paid" | "partially_paid" | "unpaid" | null;
+  docStatus: string | null;
+};
+
+/**
+ * What the sync actually did to the QBO document:
+ *   synced  – created or updated normally (default when omitted)
+ *   deleted – Bill removed because the commitment is void/terminated
+ *   closed  – PurchaseOrder POStatus set to Closed (void/terminated)
+ *   voided  – Invoice voided (void/terminated prime contract)
+ *   skipped – record is void/terminated and was never synced; nothing to do
+ */
+export type QBOSyncAction = "synced" | "deleted" | "closed" | "voided" | "skipped";
+
 export type QBOResult =
-  | { ok: true; id: string; syncToken?: string; rawResponse: string }
+  | {
+      ok: true;
+      id: string;
+      syncToken?: string;
+      rawResponse: string;
+      action?: QBOSyncAction;
+      financials?: QBOEntityFinancials;
+      vendorId?: string;
+      customerId?: string;
+    }
   | { ok: false; error: string; rawResponse: string; validation?: boolean };
+
+function derivePaymentStatus(
+  totalAmount: number | null,
+  balance: number | null
+): "paid" | "partially_paid" | "unpaid" | null {
+  if (totalAmount == null || balance == null) return null;
+  if (balance <= 0) return "paid";
+  if (balance < totalAmount) return "partially_paid";
+  return "unpaid";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractFinancials(entity: any): QBOEntityFinancials {
+  const totalAmount = entity?.TotalAmt != null ? Number(entity.TotalAmt) : null;
+  const balance = entity?.Balance != null ? Number(entity.Balance) : null;
+  return {
+    totalAmount,
+    balance,
+    paymentStatus: derivePaymentStatus(totalAmount, balance),
+    docStatus: entity?.POStatus != null ? String(entity.POStatus) : null,
+  };
+}
 
 /**
  * Makes an authenticated JSON request to the QBO REST API. Automatically
@@ -371,6 +425,34 @@ export async function fetchQBOSyncToken(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const syncToken = (json as any)?.[entityKey]?.SyncToken;
     return syncToken !== undefined && syncToken !== null ? String(syncToken) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Re-reads a QBO entity and returns its current totals / open balance /
+ * payment status. Used by the refresh endpoint and the cron's payment-status
+ * pass so payments applied entirely inside QBO flow back to SiteCommand.
+ * Returns null when the entity can't be read (deleted, no access, transport).
+ */
+export async function fetchQBOEntityFinancials(
+  companyId: string,
+  appCreds: QBOAppCredentials,
+  companyCreds: QBOCompanyCredentials,
+  entity: "bill" | "purchaseorder" | "invoice",
+  qboId: string
+): Promise<QBOEntityFinancials | null> {
+  try {
+    const { status, json } = await callQBO(
+      companyId, appCreds, companyCreds, "GET", `${entity}/${qboId}`
+    );
+    if (status !== 200) return null;
+    const entityKey = entity === "purchaseorder" ? "PurchaseOrder" : entity.charAt(0).toUpperCase() + entity.slice(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const row = (json as any)?.[entityKey];
+    if (!row) return null;
+    return extractFinancials(row);
   } catch {
     return null;
   }
@@ -489,6 +571,10 @@ export type QBOPostingConfig = {
   itemName: string | null;
   retainageReceivableAccount: string | null; // AR retainage (Invoices)
   retainagePayableAccount: string | null;     // AP retainage (Bills)
+  /** "class" (default) job-costs every line to a Class named after the project; "none" disables. */
+  projectTracking: "class" | "none";
+  /** DocNumber prefix: "project" → use the project number, any other value → literal prefix, unset → bare number. */
+  docNumberPrefix: string | null;
 };
 
 /** Per-company posting defaults (overridable via company_integrations or env). */
@@ -498,12 +584,18 @@ export async function getQBOPostingConfig(companyId: string): Promise<QBOPosting
     "QBO_DEFAULT_ITEM",
     "QBO_RETAINAGE_RECEIVABLE_ACCOUNT",
     "QBO_RETAINAGE_PAYABLE_ACCOUNT",
+    "QBO_PROJECT_TRACKING",
+    "QBO_DOC_NUMBER_PREFIX",
   ];
+  const resolveTracking = (v?: string | null): "class" | "none" =>
+    (v ?? "").trim().toLowerCase() === "none" ? "none" : "class";
   const env: QBOPostingConfig = {
     expenseAccountName:        process.env.QBO_AP_EXPENSE_ACCOUNT          ?? null,
     itemName:                  process.env.QBO_DEFAULT_ITEM               ?? null,
     retainageReceivableAccount: process.env.QBO_RETAINAGE_RECEIVABLE_ACCOUNT ?? null,
     retainagePayableAccount:    process.env.QBO_RETAINAGE_PAYABLE_ACCOUNT    ?? null,
+    projectTracking:            resolveTracking(process.env.QBO_PROJECT_TRACKING),
+    docNumberPrefix:            process.env.QBO_DOC_NUMBER_PREFIX           ?? null,
   };
   try {
     const supabase = getSupabase();
@@ -519,18 +611,119 @@ export async function getQBOPostingConfig(companyId: string): Promise<QBOPosting
       itemName:                   map.QBO_DEFAULT_ITEM                ?? env.itemName,
       retainageReceivableAccount: map.QBO_RETAINAGE_RECEIVABLE_ACCOUNT ?? env.retainageReceivableAccount,
       retainagePayableAccount:    map.QBO_RETAINAGE_PAYABLE_ACCOUNT    ?? env.retainagePayableAccount,
+      projectTracking:            map.QBO_PROJECT_TRACKING !== undefined
+                                    ? resolveTracking(map.QBO_PROJECT_TRACKING)
+                                    : env.projectTracking,
+      docNumberPrefix:            map.QBO_DOC_NUMBER_PREFIX            ?? env.docNumberPrefix,
     };
   } catch {
     return env;
   }
 }
 
+/**
+ * Builds the QBO DocNumber for a record. With QBO_DOC_NUMBER_PREFIX unset the
+ * bare record number is used (legacy behavior — numbers can collide across
+ * projects in one realm). Set it to "project" to prefix with the project
+ * number, or to any literal string to use that prefix. QBO caps DocNumber at
+ * 21 characters.
+ */
+export function buildQBODocNumber(
+  number: number | string,
+  projectNumber?: string | null,
+  prefix?: string | null
+): string {
+  const base = String(number);
+  const p = (prefix ?? "").trim();
+  if (!p) return base.slice(0, 21);
+  const lead = p.toLowerCase() === "project" ? (projectNumber ?? "").trim() : p;
+  return (lead ? `${lead}-${base}` : base).slice(0, 21);
+}
+
 /** Lookup result for master-record resolution: an Id, or the reason it failed. */
 export type QBORefLookup = { id: string; error?: undefined } | { id: null; error: string };
 
-/** Resolves a Vendor by exact DisplayName → Id, creating a minimal one if absent. */
+/**
+ * Contact details used to enrich an auto-created Vendor/Customer so the
+ * accounting team gets a usable master record (email/phone/address), not just
+ * a bare display name. Sourced from the project's directory contact.
+ */
+export type QBOPartyDetails = {
+  companyName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  fax?: string | null;
+  website?: string | null;
+  addressLine1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  country?: string | null;
+};
+
+function buildPartyPayload(displayName: string, details?: QBOPartyDetails | null): Record<string, unknown> {
+  const payload: Record<string, unknown> = { DisplayName: displayName };
+  if (!details) return payload;
+  if (details.companyName) payload.CompanyName = details.companyName;
+  if (details.email) payload.PrimaryEmailAddr = { Address: details.email };
+  if (details.phone) payload.PrimaryPhone = { FreeFormNumber: details.phone };
+  if (details.fax) payload.Fax = { FreeFormNumber: details.fax };
+  if (details.website) payload.WebAddr = { URI: details.website };
+  if (details.addressLine1 || details.city || details.state || details.zip || details.country) {
+    const addr: Record<string, unknown> = {};
+    if (details.addressLine1) addr.Line1 = details.addressLine1;
+    if (details.city) addr.City = details.city;
+    if (details.state) addr.CountrySubDivisionCode = details.state;
+    if (details.zip) addr.PostalCode = details.zip;
+    if (details.country) addr.Country = details.country;
+    payload.BillAddr = addr;
+  }
+  return payload;
+}
+
+/**
+ * Looks up the directory contact matching a contract party name on a project
+ * and shapes it as QBOPartyDetails. Best-effort: returns null when there is no
+ * matching contact, so vendor/customer creation falls back to name-only.
+ */
+export async function lookupDirectoryPartyDetails(
+  projectId: string,
+  companyName: string
+): Promise<QBOPartyDetails | null> {
+  const name = (companyName ?? "").trim();
+  if (!name || !projectId) return null;
+  try {
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from("directory_contacts")
+      .select("type, company, email, phone, business_phone, business_fax, website, address, city, state, zip, country")
+      .eq("project_id", projectId)
+      .ilike("company", name)
+      .limit(10);
+    if (!data || data.length === 0) return null;
+    const row = data.find((r) => r.type === "company") ?? data[0];
+    return {
+      companyName: row.company ?? null,
+      email: row.email ?? null,
+      phone: row.business_phone || row.phone || null,
+      fax: row.business_fax ?? null,
+      website: row.website ?? null,
+      addressLine1: row.address ?? null,
+      city: row.city ?? null,
+      state: row.state ?? null,
+      zip: row.zip ?? null,
+      country: row.country ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Resolves a Vendor by exact DisplayName → Id, creating one (enriched with any
+ *  directory contact details) if absent. */
 export async function findOrCreateVendorId(
-  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, displayName: string
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, displayName: string,
+  details?: QBOPartyDetails | null
 ): Promise<QBORefLookup> {
   const name = (displayName ?? "").trim();
   if (!name) return { id: null, error: "no vendor name provided" };
@@ -540,7 +733,7 @@ export async function findOrCreateVendorId(
   );
   if (found && found.length > 0) return { id: String(found[0].Id) };
   const { status, json, rawText } = await callQBO(
-    companyId, appCreds, companyCreds, "POST", "vendor", { DisplayName: name }
+    companyId, appCreds, companyCreds, "POST", "vendor", buildPartyPayload(name, details)
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const id = status === 200 ? String((json as any)?.Vendor?.Id ?? "") : "";
@@ -548,9 +741,11 @@ export async function findOrCreateVendorId(
   return { id: null, error: extractQBOError(json, rawText) };
 }
 
-/** Resolves a Customer by exact DisplayName → Id, creating a minimal one if absent. */
+/** Resolves a Customer by exact DisplayName → Id, creating one (enriched with
+ *  any directory contact details) if absent. */
 export async function findOrCreateCustomerId(
-  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, displayName: string
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, displayName: string,
+  details?: QBOPartyDetails | null
 ): Promise<QBORefLookup> {
   const name = (displayName ?? "").trim();
   if (!name) return { id: null, error: "no customer name provided" };
@@ -560,12 +755,28 @@ export async function findOrCreateCustomerId(
   );
   if (found && found.length > 0) return { id: String(found[0].Id) };
   const { status, json, rawText } = await callQBO(
-    companyId, appCreds, companyCreds, "POST", "customer", { DisplayName: name }
+    companyId, appCreds, companyCreds, "POST", "customer", buildPartyPayload(name, details)
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const id = status === 200 ? String((json as any)?.Customer?.Id ?? "") : "";
   if (id) return { id };
   return { id: null, error: extractQBOError(json, rawText) };
+}
+
+/**
+ * Resolves a payment-terms string ("Net 30") to a QBO Term Id. No auto-create —
+ * Terms drive due-date math, so an unknown value stays as memo text instead.
+ */
+export async function findTermId(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, termName?: string | null
+): Promise<string | null> {
+  const name = (termName ?? "").trim();
+  if (!name) return null;
+  const rows = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Term WHERE Name = '${escapeQBOString(name)}' AND Active = true`, "Term"
+  );
+  return rows && rows.length > 0 ? String(rows[0].Id) : null;
 }
 
 /**
@@ -642,7 +853,8 @@ export type QBOSovLine = {
   qty?: number;
   uom?: string;
   unitCost?: number;
-  retainageAmount?: number; // withheld on this line (AR billing)
+  retainageAmount?: number;  // withheld on this line (AR billing)
+  materialsStored?: number;  // AIA G-703 stored materials (AR billing)
 };
 
 type QBOCodeRef = { accountId?: string; classId?: string; itemId?: string };
@@ -745,10 +957,14 @@ function lineDescription(line: QBOSovLine): string {
   return line.budgetCode ? `${line.budgetCode} — ${line.description}` : line.description;
 }
 
-/** Account-based expense line (Bills). */
-function buildBillLine(line: QBOSovLine, ref: QBOCodeRef, defaultAccountId: string): Record<string, unknown> {
+/** Account-based expense line (Bills). Falls back to the project Class when the
+ *  budget-code map doesn't supply one, so every cost line stays job-tracked. */
+function buildBillLine(
+  line: QBOSovLine, ref: QBOCodeRef, defaultAccountId: string, defaultClassId?: string | null
+): Record<string, unknown> {
   const detail: Record<string, unknown> = { AccountRef: { value: ref.accountId ?? defaultAccountId } };
-  if (ref.classId) detail.ClassRef = { value: ref.classId };
+  const classId = ref.classId ?? defaultClassId;
+  if (classId) detail.ClassRef = { value: classId };
   return {
     DetailType: "AccountBasedExpenseLineDetail",
     Amount: roundMoney(line.amount),
@@ -760,7 +976,8 @@ function buildBillLine(line: QBOSovLine, ref: QBOCodeRef, defaultAccountId: stri
 /** Item-based line (PurchaseOrder) or sales line (Invoice). Preserves qty/unit when consistent. */
 function buildItemLine(
   line: QBOSovLine, ref: QBOCodeRef, defaultItemId: string,
-  detailType: "ItemBasedExpenseLineDetail" | "SalesItemLineDetail"
+  detailType: "ItemBasedExpenseLineDetail" | "SalesItemLineDetail",
+  defaultClassId?: string | null
 ): Record<string, unknown> {
   const amount = roundMoney(line.amount);
   let qty = 1;
@@ -771,13 +988,42 @@ function buildItemLine(
     unitPrice = roundMoney(line.unitCost);
   }
   const detail: Record<string, unknown> = { ItemRef: { value: ref.itemId ?? defaultItemId }, Qty: qty, UnitPrice: unitPrice };
-  if (ref.classId) detail.ClassRef = { value: ref.classId };
+  const classId = ref.classId ?? defaultClassId;
+  if (classId) detail.ClassRef = { value: classId };
   return {
     DetailType: detailType,
     Amount: amount,
     Description: lineDescription(line),
     [detailType]: detail,
   };
+}
+
+/**
+ * Resolves the project's Class Id for job costing (auto-created best-effort by
+ * findOrCreateClassId; realms without class tracking return null and the
+ * ClassRef is simply omitted). Gated by QBO_PROJECT_TRACKING ("none" disables).
+ */
+async function resolveProjectClassId(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials,
+  config: QBOPostingConfig, projectName?: string | null
+): Promise<string | null> {
+  if (config.projectTracking === "none") return null;
+  const name = (projectName ?? "").trim();
+  if (!name) return null;
+  return findOrCreateClassId(companyId, appCreds, companyCreds, name);
+}
+
+/** Free-form multi-line address → QBO PhysicalAddress (Line1..Line5). */
+function parseFreeFormAddress(text?: string | null): Record<string, string> | null {
+  const lines = (text ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  if (lines.length === 0) return null;
+  const addr: Record<string, string> = {};
+  lines.forEach((l, i) => { addr[`Line${i + 1}`] = l; });
+  return addr;
 }
 
 // ── Commitment sync ───────────────────────────────────────────────────────────
@@ -791,15 +1037,33 @@ export type QBOCommitmentPayload = {
   original_contract_amount: number;
   status: string;
   project_id: string;
+  // Approved change orders (G8) — lump-sum fallback posts the revised amount.
+  approved_change_orders?: number | null;
   // Document dates (P1 G9) — fall back to today when absent.
   start_date?: string | null;
   estimated_completion?: string | null;
   contract_date?: string | null;
   issued_on_date?: string | null;
   delivery_date?: string | null;
+  // Terms & shipping (G6 / G12).
+  payment_terms?: string | null;
+  ship_to?: string | null;
+  ship_via?: string | null;
+  bill_to?: string | null;
+  // Project context (G3 class job costing, G7 DocNumber prefix).
+  project_name?: string | null;
+  project_number?: string | null;
+  // Directory contact details used to enrich an auto-created Vendor (G2).
+  vendorDetails?: QBOPartyDetails | null;
   // Schedule of Values (P1 G13) — one QBO line per item when present.
   sovLines?: QBOSovLine[];
 };
+
+/** True for statuses that should remove/close the QBO document (G11). */
+function isDeadStatus(status?: string | null): boolean {
+  const s = (status ?? "").trim().toLowerCase();
+  return s === "void" || s === "terminated";
+}
 
 /**
  * Creates or updates a Bill (subcontract) / PurchaseOrder in QuickBooks Online.
@@ -820,9 +1084,53 @@ export async function syncCommitmentToQBO(
   existingQboId?: string | null
 ): Promise<QBOResult> {
   const today = new Date().toISOString().slice(0, 10);
-  const amount = Number(commitment.original_contract_amount.toFixed(2));
+  // Lump-sum fallback posts the REVISED amount (original + approved COs) so the
+  // commitment and prime-contract syncs follow the same rule (G8).
+  const amount = Number(
+    (commitment.original_contract_amount + (commitment.approved_change_orders ?? 0)).toFixed(2)
+  );
   const entity = commitment.type === "subcontract" ? "bill" : "purchaseorder";
   const docLabel = commitment.type === "subcontract" ? "Bill" : "Purchase Order";
+
+  // ── Void / terminated (G11): remove or close the QBO doc instead of re-posting ─
+  if (isDeadStatus(commitment.status)) {
+    if (!existingQboId) {
+      // Never synced — nothing exists in QBO to remove.
+      return { ok: true, id: "", action: "skipped", rawResponse: "" };
+    }
+    try {
+      const syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, entity, existingQboId);
+      if (syncToken === null) {
+        // Already gone on the QBO side.
+        return { ok: true, id: "", action: "deleted", rawResponse: "" };
+      }
+      if (commitment.type === "subcontract") {
+        // QBO Bills cannot be voided — delete the document.
+        const { status, json, rawText } = await callQBO(
+          companyId, appCreds, companyCreds, "POST", "bill?operation=delete",
+          { Id: existingQboId, SyncToken: syncToken }
+        );
+        if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
+        return { ok: true, id: "", action: "deleted", rawResponse: rawText.slice(0, 8000) };
+      }
+      // Purchase orders are closed, not deleted, so the audit trail survives.
+      const { status, json, rawText } = await callQBO(
+        companyId, appCreds, companyCreds, "POST", "purchaseorder?operation=update",
+        { Id: existingQboId, SyncToken: syncToken, sparse: true, POStatus: "Closed" }
+      );
+      if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const po = (json as any)?.PurchaseOrder;
+      return {
+        ok: true, id: existingQboId, action: "closed",
+        syncToken: po?.SyncToken !== undefined ? String(po.SyncToken) : undefined,
+        financials: po ? extractFinancials(po) : undefined,
+        rawResponse: rawText.slice(0, 8000),
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : "Network error", rawResponse: "" };
+    }
+  }
 
   // QBO requires a vendor on every Bill / Purchase Order.
   const vendorName = (commitment.contract_company ?? "").trim();
@@ -835,12 +1143,15 @@ export async function syncCommitmentToQBO(
   }
 
   // Resolve references to QBO Ids (post by value, not name).
-  const vendor = await findOrCreateVendorId(companyId, appCreds, companyCreds, vendorName);
+  const vendor = await findOrCreateVendorId(companyId, appCreds, companyCreds, vendorName, commitment.vendorDetails);
   if (!vendor.id) {
     return { ok: false, error: `Could not resolve or create QBO vendor "${vendorName}": ${vendor.error}`, rawResponse: "" };
   }
   const vendorId = vendor.id;
   const config = await getQBOPostingConfig(companyId);
+  const docNumber = buildQBODocNumber(commitment.number, commitment.project_number, config.docNumberPrefix);
+  const projectClassId = await resolveProjectClassId(companyId, appCreds, companyCreds, config, commitment.project_name);
+  const termId = await findTermId(companyId, appCreds, companyCreds, commitment.payment_terms);
 
   // Resolve per-line cost-code refs (Account/Class/Item) for any mapped codes.
   const sovLines = commitment.sovLines ?? [];
@@ -848,6 +1159,13 @@ export async function syncCommitmentToQBO(
     ? await resolveCodeRefs(companyId, appCreds, companyCreds, sovLines.map((l) => l.budgetCode), await getQBOBudgetCodeMap(companyId))
     : {};
   const refFor = (code: string): QBOCodeRef => codeRefs[(code ?? "").trim()] ?? {};
+
+  // Free-text context QBO has no structured field for (terms kept here too when
+  // they don't match a QBO Term, so nothing the PM entered is lost).
+  const noteLines = [
+    commitment.title,
+    !termId && commitment.payment_terms ? `Payment Terms: ${commitment.payment_terms}` : null,
+  ];
 
   // For updates, fetch the latest SyncToken from QBO
   let syncToken: string | null = null;
@@ -866,16 +1184,17 @@ export async function syncCommitmentToQBO(
         return { ok: false, error: "No QBO expense account found. Set QBO_AP_EXPENSE_ACCOUNT to a valid expense or COGS account.", rawResponse: "" };
       }
       const lines = sovLines.length
-        ? sovLines.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId))
-        : [buildBillLine({ budgetCode: "", description: commitment.title, amount }, {}, expenseAccountId)];
+        ? sovLines.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId, projectClassId))
+        : [buildBillLine({ budgetCode: "", description: commitment.title, amount }, {}, expenseAccountId, projectClassId)];
       const basePayload: Record<string, unknown> = {
         VendorRef: { value: vendorId },
         TxnDate: commitment.start_date || today,
-        DocNumber: String(commitment.number),
-        PrivateNote: commitment.title,
+        DocNumber: docNumber,
+        PrivateNote: noteLines.filter(Boolean).join("\n"),
         Line: lines,
       };
       if (commitment.estimated_completion) basePayload.DueDate = commitment.estimated_completion;
+      if (termId) basePayload.SalesTermRef = { value: termId };
       const path = existingQboId ? "bill?operation=update" : "bill";
       const payload = existingQboId
         ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true }
@@ -891,7 +1210,11 @@ export async function syncCommitmentToQBO(
       const id = String(bill?.Id ?? "");
       const newSyncToken = bill?.SyncToken !== undefined ? String(bill.SyncToken) : undefined;
       if (!id) return { ok: false, error: "QBO returned no Bill Id", rawResponse: rawText.slice(0, 8000) };
-      return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
+      return {
+        ok: true, id, syncToken: newSyncToken, vendorId,
+        financials: extractFinancials(bill),
+        rawResponse: rawText.slice(0, 8000),
+      };
 
     } else {
       const itemId = await findOrCreateItemId(companyId, appCreds, companyCreds, config.itemName);
@@ -899,15 +1222,26 @@ export async function syncCommitmentToQBO(
         return { ok: false, error: "Could not resolve or create a QBO item for the purchase order line.", rawResponse: "" };
       }
       const lines = sovLines.length
-        ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "ItemBasedExpenseLineDetail"))
-        : [buildItemLine({ budgetCode: "", description: commitment.title, amount }, {}, itemId, "ItemBasedExpenseLineDetail")];
+        ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "ItemBasedExpenseLineDetail", projectClassId))
+        : [buildItemLine({ budgetCode: "", description: commitment.title, amount }, {}, itemId, "ItemBasedExpenseLineDetail", projectClassId)];
+      // Ship Via / Bill To have no structured PurchaseOrder fields — keep them
+      // in the note alongside any unmatched payment terms (G12).
+      const poNoteLines = [
+        ...noteLines,
+        commitment.ship_via ? `Ship Via: ${commitment.ship_via}` : null,
+        commitment.bill_to ? `Bill To: ${commitment.bill_to}` : null,
+      ];
       const basePayload: Record<string, unknown> = {
         VendorRef: { value: vendorId },
         TxnDate: commitment.issued_on_date || commitment.contract_date || today,
-        DocNumber: String(commitment.number),
-        PrivateNote: commitment.title,
+        DocNumber: docNumber,
+        PrivateNote: poNoteLines.filter(Boolean).join("\n"),
         Line: lines,
       };
+      const shipAddr = parseFreeFormAddress(commitment.ship_to);
+      if (shipAddr) basePayload.ShipAddr = shipAddr;
+      if (commitment.delivery_date) basePayload.DueDate = commitment.delivery_date;
+      if (termId) basePayload.SalesTermRef = { value: termId };
       const path = existingQboId ? "purchaseorder?operation=update" : "purchaseorder";
       const payload = existingQboId
         ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true }
@@ -923,7 +1257,11 @@ export async function syncCommitmentToQBO(
       const id = String(po?.Id ?? "");
       const newSyncToken = po?.SyncToken !== undefined ? String(po.SyncToken) : undefined;
       if (!id) return { ok: false, error: "QBO returned no PurchaseOrder Id", rawResponse: rawText.slice(0, 8000) };
-      return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
+      return {
+        ok: true, id, syncToken: newSyncToken, vendorId,
+        financials: extractFinancials(po),
+        rawResponse: rawText.slice(0, 8000),
+      };
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Network error";
@@ -948,6 +1286,11 @@ export type QBOPrimeContractPayload = {
   executed: boolean;
   start_date: string | null;
   estimated_completion_date: string | null;
+  // Project context (G3 class job costing, G7 DocNumber prefix).
+  project_name?: string | null;
+  project_number?: string | null;
+  // Directory contact details used to enrich an auto-created Customer (G2).
+  customerDetails?: QBOPartyDetails | null;
   // Schedule of Values (P1 G13) — one QBO line per item when present.
   sovLines?: QBOSovLine[];
 };
@@ -978,6 +1321,34 @@ export async function syncPrimeContractToQBO(
     `Status: ${contract.status}`,
   ].filter(Boolean).join("\n");
 
+  // ── Void / terminated (G11): void the AR Invoice instead of re-posting ───────
+  if (isDeadStatus(contract.status)) {
+    if (!existingQboId) {
+      return { ok: true, id: "", action: "skipped", rawResponse: "" };
+    }
+    try {
+      const syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, "invoice", existingQboId);
+      if (syncToken === null) {
+        return { ok: true, id: "", action: "deleted", rawResponse: "" }; // already gone on QBO side
+      }
+      const { status, json, rawText } = await callQBO(
+        companyId, appCreds, companyCreds, "POST", "invoice?operation=void",
+        { Id: existingQboId, SyncToken: syncToken }
+      );
+      if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const inv = (json as any)?.Invoice;
+      return {
+        ok: true, id: existingQboId, action: "voided",
+        syncToken: inv?.SyncToken !== undefined ? String(inv.SyncToken) : undefined,
+        financials: inv ? extractFinancials(inv) : undefined,
+        rawResponse: rawText.slice(0, 8000),
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : "Network error", rawResponse: "" };
+    }
+  }
+
   // QBO requires a customer on every Invoice.
   const customerName = (contract.owner_client ?? "").trim();
   if (!customerName) {
@@ -989,7 +1360,7 @@ export async function syncPrimeContractToQBO(
   }
 
   // Resolve references to QBO Ids (post by value, not name).
-  const customer = await findOrCreateCustomerId(companyId, appCreds, companyCreds, customerName);
+  const customer = await findOrCreateCustomerId(companyId, appCreds, companyCreds, customerName, contract.customerDetails);
   if (!customer.id) {
     return { ok: false, error: `Could not resolve or create QBO customer "${customerName}": ${customer.error}`, rawResponse: "" };
   }
@@ -999,6 +1370,8 @@ export async function syncPrimeContractToQBO(
   if (!itemId) {
     return { ok: false, error: "Could not resolve or create a QBO item for the invoice line.", rawResponse: "" };
   }
+  const docNumber = buildQBODocNumber(contract.contract_number, contract.project_number, config.docNumberPrefix);
+  const projectClassId = await resolveProjectClassId(companyId, appCreds, companyCreds, config, contract.project_name);
 
   // Resolve per-line cost-code refs (Class/Item) for any mapped codes.
   const sovLines = contract.sovLines ?? [];
@@ -1016,13 +1389,13 @@ export async function syncPrimeContractToQBO(
 
   try {
     const lines = sovLines.length
-      ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail"))
-      : [buildItemLine({ budgetCode: "", description: contract.title, amount: revisedAmount }, {}, itemId, "SalesItemLineDetail")];
+      ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail", projectClassId))
+      : [buildItemLine({ budgetCode: "", description: contract.title, amount: revisedAmount }, {}, itemId, "SalesItemLineDetail", projectClassId)];
     const basePayload: Record<string, unknown> = {
       CustomerRef: { value: customerId },
       TxnDate: contract.start_date ?? today,
       DueDate: contract.estimated_completion_date ?? undefined,
-      DocNumber: String(contract.contract_number),
+      DocNumber: docNumber,
       PrivateNote: privateNote,
       CustomerMemo: { value: contract.description || contract.title },
       Line: lines,
@@ -1046,7 +1419,11 @@ export async function syncPrimeContractToQBO(
     const id = String(inv?.Id ?? "");
     const newSyncToken = inv?.SyncToken !== undefined ? String(inv.SyncToken) : undefined;
     if (!id) return { ok: false, error: "QBO returned no Invoice Id", rawResponse: rawText.slice(0, 8000) };
-    return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
+    return {
+      ok: true, id, syncToken: newSyncToken, customerId,
+      financials: extractFinancials(inv),
+      rawResponse: rawText.slice(0, 8000),
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Network error";
     return { ok: false, error: msg, rawResponse: "" };
@@ -1062,6 +1439,9 @@ export type QBOAPInvoicePayload = {
   description: string;
   lineItems: QBOSovLine[];
   retainagePct?: number; // % withheld; emits a negative line when QBO_RETAINAGE_PAYABLE_ACCOUNT is set
+  projectName?: string | null;   // class job costing (G3)
+  projectNumber?: string | null; // DocNumber prefix (G7)
+  vendorDetails?: QBOPartyDetails | null;
 };
 
 export async function syncAPInvoiceToQBO(
@@ -1084,7 +1464,7 @@ export async function syncAPInvoiceToQBO(
   }
 
   // Resolve references to QBO Ids (post by value, not name).
-  const vendor = await findOrCreateVendorId(companyId, appCreds, companyCreds, vendorName);
+  const vendor = await findOrCreateVendorId(companyId, appCreds, companyCreds, vendorName, invoice.vendorDetails);
   if (!vendor.id) {
     return { ok: false, error: `Could not resolve or create QBO vendor "${vendorName}": ${vendor.error}`, rawResponse: "" };
   }
@@ -1094,6 +1474,8 @@ export async function syncAPInvoiceToQBO(
   if (!expenseAccountId) {
     return { ok: false, error: "No QBO expense account found. Set QBO_AP_EXPENSE_ACCOUNT to a valid expense or COGS account.", rawResponse: "" };
   }
+  const projectClassId = await resolveProjectClassId(companyId, appCreds, companyCreds, config, invoice.projectName);
+  const docNumber = buildQBODocNumber(invoice.commitmentNumber, invoice.projectNumber, config.docNumberPrefix);
   const codeRefs = await resolveCodeRefs(companyId, appCreds, companyCreds, invoice.lineItems.map((l) => l.budgetCode), await getQBOBudgetCodeMap(companyId));
   const refFor = (code: string): QBOCodeRef => codeRefs[(code ?? "").trim()] ?? {};
 
@@ -1104,7 +1486,7 @@ export async function syncAPInvoiceToQBO(
   }
 
   try {
-    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId));
+    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId, projectClassId));
 
     // Retainage withheld — negative line to the payable account (best-effort, config-gated).
     const pct = invoice.retainagePct ?? 0;
@@ -1125,7 +1507,7 @@ export async function syncAPInvoiceToQBO(
     const basePayload: Record<string, unknown> = {
       VendorRef: { value: vendorId },
       TxnDate: today,
-      DocNumber: String(invoice.commitmentNumber),
+      DocNumber: docNumber,
       PrivateNote: invoice.description,
       Line: lines,
     };
@@ -1144,7 +1526,11 @@ export async function syncAPInvoiceToQBO(
     const id = String(bill?.Id ?? "");
     const newSyncToken = bill?.SyncToken !== undefined ? String(bill.SyncToken) : undefined;
     if (!id) return { ok: false, error: "QBO returned no Bill Id", rawResponse: rawText.slice(0, 8000) };
-    return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
+    return {
+      ok: true, id, syncToken: newSyncToken, vendorId,
+      financials: extractFinancials(bill),
+      rawResponse: rawText.slice(0, 8000),
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Network error";
     return { ok: false, error: msg, rawResponse: "" };
@@ -1158,7 +1544,10 @@ export type QBOARInvoicePayload = {
   contractNumber: number;
   customerName: string;
   description: string;
-  lineItems: QBOSovLine[]; // per-line retainageAmount emits a negative retainage line when configured
+  lineItems: QBOSovLine[]; // per-line retainageAmount emits a negative retainage line; materialsStored adds a stored-materials line
+  projectName?: string | null;   // class job costing (G3)
+  projectNumber?: string | null; // DocNumber prefix (G7)
+  customerDetails?: QBOPartyDetails | null;
 };
 
 export async function syncARInvoiceToQBO(
@@ -1181,7 +1570,7 @@ export async function syncARInvoiceToQBO(
   }
 
   // Resolve references to QBO Ids (post by value, not name).
-  const customer = await findOrCreateCustomerId(companyId, appCreds, companyCreds, customerName);
+  const customer = await findOrCreateCustomerId(companyId, appCreds, companyCreds, customerName, invoice.customerDetails);
   if (!customer.id) {
     return { ok: false, error: `Could not resolve or create QBO customer "${customerName}": ${customer.error}`, rawResponse: "" };
   }
@@ -1191,6 +1580,8 @@ export async function syncARInvoiceToQBO(
   if (!itemId) {
     return { ok: false, error: "Could not resolve or create a QBO item for the invoice line.", rawResponse: "" };
   }
+  const projectClassId = await resolveProjectClassId(companyId, appCreds, companyCreds, config, invoice.projectName);
+  const docNumber = buildQBODocNumber(invoice.contractNumber, invoice.projectNumber, config.docNumberPrefix);
   const codeRefs = await resolveCodeRefs(companyId, appCreds, companyCreds, invoice.lineItems.map((l) => l.budgetCode), await getQBOBudgetCodeMap(companyId));
   const refFor = (code: string): QBOCodeRef => codeRefs[(code ?? "").trim()] ?? {};
 
@@ -1201,7 +1592,17 @@ export async function syncARInvoiceToQBO(
   }
 
   try {
-    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail"));
+    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail", projectClassId));
+
+    // Materials presently stored (AIA G-703 column F) — billed alongside work
+    // completed as its own line so the owner invoice matches the pay app.
+    const totalMaterialsStored = roundMoney(invoice.lineItems.reduce((s, l) => s + (l.materialsStored ?? 0), 0));
+    if (totalMaterialsStored > 0) {
+      lines.push(buildItemLine(
+        { budgetCode: "", description: "Materials presently stored", amount: totalMaterialsStored },
+        {}, itemId, "SalesItemLineDetail", projectClassId
+      ));
+    }
 
     // Retainage withheld — negative line via a "Retainage" item wired to the
     // receivable account (best-effort, config-gated).
@@ -1221,7 +1622,7 @@ export async function syncARInvoiceToQBO(
     const basePayload: Record<string, unknown> = {
       CustomerRef: { value: customerId },
       TxnDate: today,
-      DocNumber: String(invoice.contractNumber),
+      DocNumber: docNumber,
       PrivateNote: invoice.description,
       Line: lines,
     };
@@ -1240,7 +1641,11 @@ export async function syncARInvoiceToQBO(
     const id = String(inv?.Id ?? "");
     const newSyncToken = inv?.SyncToken !== undefined ? String(inv.SyncToken) : undefined;
     if (!id) return { ok: false, error: "QBO returned no Invoice Id", rawResponse: rawText.slice(0, 8000) };
-    return { ok: true, id, syncToken: newSyncToken, rawResponse: rawText.slice(0, 8000) };
+    return {
+      ok: true, id, syncToken: newSyncToken, customerId,
+      financials: extractFinancials(inv),
+      rawResponse: rawText.slice(0, 8000),
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Network error";
     return { ok: false, error: msg, rawResponse: "" };

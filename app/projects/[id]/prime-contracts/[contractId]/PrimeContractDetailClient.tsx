@@ -47,6 +47,27 @@ type Contract = {
   draft_change_orders: number;
   invoiced: number;
   payments_received: number;
+  // ERP accounting feedback (pulled back from QuickBooks / Sage 300 CRE)
+  qbo_id: string | null;
+  qbo_ar_invoice_id: string | null;
+  qbo_total_amount: number | null;
+  qbo_balance: number | null;
+  qbo_payment_status: string | null;
+  qbo_ar_invoice_total_amount: number | null;
+  qbo_ar_invoice_balance: number | null;
+  qbo_ar_invoice_payment_status: string | null;
+  qbo_payments_refreshed_at: string | null;
+  sage300cre_id: string | null;
+  sage300cre_ar_invoice_id: string | null;
+  sage300cre_total_amount: number | null;
+  sage300cre_amount_paid: number | null;
+  sage300cre_balance: number | null;
+  sage300cre_status: string | null;
+  sage300cre_ar_invoice_total_amount: number | null;
+  sage300cre_ar_invoice_amount_paid: number | null;
+  sage300cre_ar_invoice_balance: number | null;
+  sage300cre_ar_invoice_status: string | null;
+  sage300cre_payments_refreshed_at: string | null;
   sov_items: SovItem[];
 };
 
@@ -117,6 +138,36 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
       <p className="text-sm text-gray-800">{value || <span className="text-gray-400">—</span>}</p>
     </div>
   );
+}
+
+const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  paid: "Paid",
+  partially_paid: "Partially Paid",
+  unpaid: "Unpaid",
+  open: "Open",
+  closed: "Closed",
+};
+
+const PAYMENT_STATUS_COLORS: Record<string, string> = {
+  paid: "bg-green-100 text-green-700",
+  partially_paid: "bg-amber-100 text-amber-700",
+  unpaid: "bg-gray-100 text-gray-600",
+  open: "bg-blue-50 text-blue-600",
+  closed: "bg-gray-100 text-gray-500",
+};
+
+function PaymentStatusPill({ status }: { status: string | null }) {
+  if (!status) return <span className="text-gray-400">—</span>;
+  const key = status.toLowerCase();
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_COLORS[key] ?? "bg-gray-100 text-gray-600"}`}>
+      {PAYMENT_STATUS_LABELS[key] ?? status}
+    </span>
+  );
+}
+
+function fmtOrDash(n: number | null): React.ReactNode {
+  return n == null ? <span className="text-gray-400">—</span> : <span className="tabular-nums">{fmt(Number(n))}</span>;
 }
 
 function ContractSummaryTile({
@@ -245,6 +296,7 @@ export default function PrimeContractDetailClient({
   const [qbSyncMsg, setQbSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [s3Syncing, setS3Syncing] = useState(false);
   const [s3SyncMsg, setS3SyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [payRefreshing, setPayRefreshing] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
 
@@ -329,6 +381,29 @@ export default function PrimeContractDetailClient({
       setS3SyncMsg({ ok: false, text: "Network error while syncing." });
     } finally {
       setS3Syncing(false);
+    }
+  }
+
+  async function handleRefreshPayments() {
+    if (!contract) return;
+    setPayRefreshing(true);
+    try {
+      const targets: string[] = [];
+      if (contract.qbo_id || contract.qbo_ar_invoice_id) targets.push("quickbooks");
+      if (contract.sage300cre_id || contract.sage300cre_ar_invoice_id) targets.push("sage300cre");
+      await Promise.all(
+        targets.map((integration) =>
+          fetch(`/api/integrations/${integration}/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ recordType: "prime_contracts", recordId: contractId }),
+          })
+        )
+      );
+      const data = await fetch(`/api/projects/${projectId}/prime-contracts/${contractId}`).then((r) => r.json());
+      if (!data.error) setContract(data);
+    } finally {
+      setPayRefreshing(false);
     }
   }
 
@@ -726,6 +801,66 @@ export default function PrimeContractDetailClient({
                 remaining={remaining}
                 pctPaid={pctPaid}
               />
+
+              {/* Accounting (ERP feedback) */}
+              {(contract.qbo_id || contract.qbo_ar_invoice_id || contract.sage300cre_id || contract.sage300cre_ar_invoice_id) && (
+                <div id="accounting" className="scroll-mt-2 bg-white border-b border-gray-200 px-8 py-6">
+                  <div className="flex items-center justify-between mb-5">
+                    <h2 className="text-sm font-semibold text-gray-900">Accounting</h2>
+                    <button
+                      onClick={handleRefreshPayments}
+                      disabled={payRefreshing}
+                      className="px-3 py-1 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                    >
+                      {payRefreshing ? "Refreshing…" : "Refresh payment status"}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-4">
+                    Pulled from the connected accounting system
+                    {(contract.qbo_payments_refreshed_at || contract.sage300cre_payments_refreshed_at) && (
+                      <> · last refreshed {new Date(contract.qbo_payments_refreshed_at ?? contract.sage300cre_payments_refreshed_at!).toLocaleString()}</>
+                    )}
+                  </p>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {(contract.qbo_id || contract.qbo_ar_invoice_id) && (
+                      <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
+                        <p className="text-xs font-semibold text-gray-700 mb-3">QuickBooks Online</p>
+                        <div className="grid grid-cols-3 gap-4">
+                          <Field label="Invoice Total" value={fmtOrDash(contract.qbo_total_amount)} />
+                          <Field label="Open Balance" value={fmtOrDash(contract.qbo_balance)} />
+                          <Field label="Payment Status" value={<PaymentStatusPill status={contract.qbo_payment_status} />} />
+                        </div>
+                        {contract.qbo_ar_invoice_id && (
+                          <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-gray-200">
+                            <Field label="Pay App Total" value={fmtOrDash(contract.qbo_ar_invoice_total_amount)} />
+                            <Field label="Pay App Balance" value={fmtOrDash(contract.qbo_ar_invoice_balance)} />
+                            <Field label="Pay App Status" value={<PaymentStatusPill status={contract.qbo_ar_invoice_payment_status} />} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {(contract.sage300cre_id || contract.sage300cre_ar_invoice_id) && (
+                      <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
+                        <p className="text-xs font-semibold text-gray-700 mb-3">Sage 300 CRE</p>
+                        <div className="grid grid-cols-4 gap-4">
+                          <Field label="Invoice Total" value={fmtOrDash(contract.sage300cre_total_amount)} />
+                          <Field label="Amount Paid" value={fmtOrDash(contract.sage300cre_amount_paid)} />
+                          <Field label="Balance" value={fmtOrDash(contract.sage300cre_balance)} />
+                          <Field label="Status" value={<PaymentStatusPill status={contract.sage300cre_status} />} />
+                        </div>
+                        {contract.sage300cre_ar_invoice_id && (
+                          <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-200">
+                            <Field label="Pay App Total" value={fmtOrDash(contract.sage300cre_ar_invoice_total_amount)} />
+                            <Field label="Pay App Paid" value={fmtOrDash(contract.sage300cre_ar_invoice_amount_paid)} />
+                            <Field label="Pay App Balance" value={fmtOrDash(contract.sage300cre_ar_invoice_balance)} />
+                            <Field label="Pay App Status" value={<PaymentStatusPill status={contract.sage300cre_ar_invoice_status} />} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Schedule of Values */}
               <SovSection sovItems={sovItems} />

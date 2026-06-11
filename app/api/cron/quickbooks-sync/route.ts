@@ -24,10 +24,13 @@ import {
   getQBOAppCredentials,
   getQBOCompanyCredentials,
   isQBOConfigured,
+  lookupDirectoryPartyDetails,
   syncCommitmentToQBO,
   syncPrimeContractToQBO,
   syncAPInvoiceToQBO,
   syncARInvoiceToQBO,
+  fetchQBOEntityFinancials,
+  type QBOEntityFinancials,
   type QBOResult,
 } from "@/lib/quickbooks";
 
@@ -38,6 +41,21 @@ const MAX_COMMITMENTS_PER_COMPANY    = 25;
 const MAX_PRIME_CONTRACTS_PER_COMPANY = 25;
 const MAX_AP_INVOICES_PER_COMPANY     = 25;
 const MAX_AR_INVOICES_PER_COMPANY     = 25;
+const MAX_PAYMENT_REFRESHES_PER_COMPANY = 25;
+
+/** Maps QBO financial feedback onto update columns with the given prefix. */
+function financialsColumns(
+  prefix: "qbo" | "qbo_ap_invoice" | "qbo_ar_invoice",
+  fin?: QBOEntityFinancials | null
+): Record<string, unknown> {
+  if (!fin) return {};
+  return {
+    [`${prefix}_total_amount`]: fin.totalAmount,
+    [`${prefix}_balance`]: fin.balance,
+    [`${prefix}_payment_status`]: fin.paymentStatus ?? fin.docStatus?.toLowerCase() ?? null,
+    qbo_payments_refreshed_at: new Date().toISOString(),
+  };
+}
 
 type SupabaseClient = ReturnType<typeof getSupabase>;
 
@@ -87,6 +105,7 @@ export async function GET(req: NextRequest) {
     primeContractsSynced: 0,
     apInvoicesSynced: 0,
     arInvoicesSynced: 0,
+    paymentsRefreshed: 0,
     failures: 0,
     errors: [] as string[],
   };
@@ -103,11 +122,17 @@ export async function GET(req: NextRequest) {
     // ── 2. Find this company's projects ──────────────────────────────────────
     const { data: projects } = await supabase
       .from("projects")
-      .select("id")
+      .select("id, name, project_number")
       .eq("company_id", companyId);
 
     const projectIds = (projects ?? []).map((p: { id: string }) => p.id);
     if (projectIds.length === 0) continue;
+    const projectById = new Map(
+      (projects ?? []).map((p: { id: string; name: string | null; project_number: string | null }) => [
+        p.id, { name: p.name ?? null, number: p.project_number ?? null },
+      ])
+    );
+    const projectCtx = (projectId: string) => projectById.get(projectId) ?? { name: null, number: null };
 
     // ── 3. Dirty commitments ─────────────────────────────────────────────────
     // "Dirty" = never synced (last_synced_at IS NULL) OR updated since last sync.
@@ -115,7 +140,7 @@ export async function GET(req: NextRequest) {
     // set and apply the comparison in JS. Hard cap keeps the candidate set small.
     const { data: commitmentCandidates } = await supabase
       .from("commitments")
-      .select("id, type, number, title, contract_company, original_contract_amount, status, project_id, qbo_id, last_synced_at, updated_at, start_date, estimated_completion, contract_date, issued_on_date, delivery_date, default_retainage, qbo_ap_invoice_id, qbo_ap_invoice_synced_at")
+      .select("id, type, number, title, contract_company, original_contract_amount, approved_change_orders, status, project_id, qbo_id, last_synced_at, updated_at, start_date, estimated_completion, contract_date, issued_on_date, delivery_date, payment_terms, ship_to, ship_via, bill_to, default_retainage, qbo_ap_invoice_id, qbo_ap_invoice_synced_at")
       .in("project_id", projectIds)
       .is("deleted_at", null)
       .order("updated_at", { ascending: true })
@@ -140,15 +165,30 @@ export async function GET(req: NextRequest) {
         uom: r.uom || undefined,
         unitCost: Number(r.unit_cost) || undefined,
       }));
+      const project = projectCtx(commitment.project_id);
+      const vendorDetails = await lookupDirectoryPartyDetails(commitment.project_id, commitment.contract_company);
       const result = await syncCommitmentToQBO(
-        companyId, appCreds, companyCreds, { ...commitment, sovLines }, commitment.qbo_id
+        companyId, appCreds, companyCreds,
+        { ...commitment, sovLines, project_name: project.name, project_number: project.number, vendorDetails },
+        commitment.qbo_id
       );
 
       const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
       if (result.ok) {
-        update.qbo_id = result.id;
-        update.qbo_sync_token = result.syncToken ?? null;
         update.last_synced_at = new Date().toISOString();
+        if (result.action === "deleted" || result.action === "skipped") {
+          update.qbo_id = null;
+          update.qbo_sync_token = null;
+          update.erp_status = "not_synced";
+          update.qbo_total_amount = null;
+          update.qbo_balance = null;
+          update.qbo_payment_status = null;
+        } else {
+          update.qbo_id = result.id;
+          update.qbo_sync_token = result.syncToken ?? null;
+          if (result.vendorId) update.qbo_vendor_id = result.vendorId;
+          Object.assign(update, financialsColumns("qbo", result.financials));
+        }
         summary.commitmentsSynced++;
       } else {
         summary.failures++;
@@ -164,7 +204,7 @@ export async function GET(req: NextRequest) {
     // ── 4. Dirty prime contracts ─────────────────────────────────────────────
     const { data: contractCandidates } = await supabase
       .from("prime_contracts")
-      .select("id, contract_number, title, owner_client, contractor, architect_engineer, description, original_contract_amount, approved_change_orders, default_retainage, status, executed, start_date, estimated_completion_date, qbo_id, last_synced_at, updated_at")
+      .select("id, project_id, contract_number, title, owner_client, contractor, architect_engineer, description, original_contract_amount, approved_change_orders, default_retainage, status, executed, start_date, estimated_completion_date, qbo_id, qbo_ar_invoice_id, qbo_ar_invoice_synced_at, last_synced_at, updated_at")
       .in("project_id", projectIds)
       .is("deleted_at", null)
       .order("updated_at", { ascending: true })
@@ -189,15 +229,30 @@ export async function GET(req: NextRequest) {
         uom: r.uom || undefined,
         unitCost: Number(r.unit_cost) || undefined,
       }));
+      const project = projectCtx(contract.project_id);
+      const customerDetails = await lookupDirectoryPartyDetails(contract.project_id, contract.owner_client);
       const result = await syncPrimeContractToQBO(
-        companyId, appCreds, companyCreds, { ...contract, sovLines }, contract.qbo_id
+        companyId, appCreds, companyCreds,
+        { ...contract, sovLines, project_name: project.name, project_number: project.number, customerDetails },
+        contract.qbo_id
       );
 
       const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
       if (result.ok) {
-        update.qbo_id = result.id;
-        update.qbo_sync_token = result.syncToken ?? null;
         update.last_synced_at = new Date().toISOString();
+        if (result.action === "deleted" || result.action === "skipped") {
+          update.qbo_id = null;
+          update.qbo_sync_token = null;
+          update.erp_status = "not_synced";
+          update.qbo_total_amount = null;
+          update.qbo_balance = null;
+          update.qbo_payment_status = null;
+        } else {
+          update.qbo_id = result.id;
+          update.qbo_sync_token = result.syncToken ?? null;
+          if (result.customerId) update.qbo_customer_id = result.customerId;
+          Object.assign(update, financialsColumns("qbo", result.financials));
+        }
         summary.primeContractsSynced++;
       } else {
         summary.failures++;
@@ -242,6 +297,7 @@ export async function GET(req: NextRequest) {
         }
 
         const existingApId = (commitment as { qbo_ap_invoice_id?: string }).qbo_ap_invoice_id;
+        const apProject = projectCtx(commitment.project_id);
         const result = await syncAPInvoiceToQBO(
           companyId, appCreds, companyCreds,
           {
@@ -255,6 +311,9 @@ export async function GET(req: NextRequest) {
               amount: Number(item.billed_to_date),
             })),
             retainagePct: Number((commitment as { default_retainage?: number }).default_retainage) || 0,
+            projectName: apProject.name,
+            projectNumber: apProject.number,
+            vendorDetails: await lookupDirectoryPartyDetails(commitment.project_id, commitment.contract_company),
           },
           existingApId
         );
@@ -266,6 +325,8 @@ export async function GET(req: NextRequest) {
               qbo_ap_invoice_id: result.id,
               qbo_ap_invoice_sync_token: result.syncToken ?? null,
               qbo_ap_invoice_synced_at: new Date().toISOString(),
+              ...(result.vendorId ? { qbo_vendor_id: result.vendorId } : {}),
+              ...financialsColumns("qbo_ap_invoice", result.financials),
             })
             .eq("id", commitmentId);
           summary.apInvoicesSynced++;
@@ -291,7 +352,7 @@ export async function GET(req: NextRequest) {
 
         const { data: sovItems } = await supabase
           .from("prime_contract_sov_items")
-          .select("budget_code, description, work_completed_this_period, retainage_pct, updated_at")
+          .select("budget_code, description, work_completed_this_period, materials_stored, retainage_pct, updated_at")
           .eq("prime_contract_id", contractId)
           .eq("is_group_header", false)
           .gt("work_completed_this_period", 0)
@@ -308,6 +369,7 @@ export async function GET(req: NextRequest) {
         }
 
         const existingArId = (contract as { qbo_ar_invoice_id?: string }).qbo_ar_invoice_id;
+        const arProject = projectCtx(contract.project_id);
         const result = await syncARInvoiceToQBO(
           companyId, appCreds, companyCreds,
           {
@@ -323,8 +385,12 @@ export async function GET(req: NextRequest) {
                 description: item.description || contract.title,
                 amount,
                 retainageAmount: pct > 0 ? Number(((amount * pct) / 100).toFixed(2)) : 0,
+                materialsStored: Number(item.materials_stored) || 0,
               };
             }),
+            projectName: arProject.name,
+            projectNumber: arProject.number,
+            customerDetails: await lookupDirectoryPartyDetails(contract.project_id, contract.owner_client),
           },
           existingArId
         );
@@ -336,6 +402,8 @@ export async function GET(req: NextRequest) {
               qbo_ar_invoice_id: result.id,
               qbo_ar_invoice_sync_token: result.syncToken ?? null,
               qbo_ar_invoice_synced_at: new Date().toISOString(),
+              ...(result.customerId ? { qbo_customer_id: result.customerId } : {}),
+              ...financialsColumns("qbo_ar_invoice", result.financials),
             })
             .eq("id", contractId);
           summary.arInvoicesSynced++;
@@ -347,6 +415,58 @@ export async function GET(req: NextRequest) {
         await writeLog(supabase, "ar_invoice", contractId, result);
         arProcessed++;
       }
+    }
+
+    // ── 7. Payment-status refresh: pull balances back for synced records ──────
+    // Payments applied entirely inside QBO never touch updated_at here, so the
+    // dirty filters above won't see them. Walk the stalest synced records
+    // (oldest qbo_payments_refreshed_at first) and re-read their financials.
+    const { data: payCommitments } = await supabase
+      .from("commitments")
+      .select("id, type, qbo_id, qbo_ap_invoice_id")
+      .in("project_id", projectIds)
+      .is("deleted_at", null)
+      .or("qbo_id.not.is.null,qbo_ap_invoice_id.not.is.null")
+      .order("qbo_payments_refreshed_at", { ascending: true, nullsFirst: true })
+      .limit(MAX_PAYMENT_REFRESHES_PER_COMPANY);
+
+    for (const c of payCommitments ?? []) {
+      const update: Record<string, unknown> = { qbo_payments_refreshed_at: new Date().toISOString() };
+      if (c.qbo_id) {
+        const fin = await fetchQBOEntityFinancials(
+          companyId, appCreds, companyCreds, c.type === "subcontract" ? "bill" : "purchaseorder", c.qbo_id
+        );
+        Object.assign(update, financialsColumns("qbo", fin));
+      }
+      if (c.qbo_ap_invoice_id) {
+        const fin = await fetchQBOEntityFinancials(companyId, appCreds, companyCreds, "bill", c.qbo_ap_invoice_id);
+        Object.assign(update, financialsColumns("qbo_ap_invoice", fin));
+      }
+      await supabase.from("commitments").update(update).eq("id", c.id);
+      summary.paymentsRefreshed++;
+    }
+
+    const { data: payContracts } = await supabase
+      .from("prime_contracts")
+      .select("id, qbo_id, qbo_ar_invoice_id")
+      .in("project_id", projectIds)
+      .is("deleted_at", null)
+      .or("qbo_id.not.is.null,qbo_ar_invoice_id.not.is.null")
+      .order("qbo_payments_refreshed_at", { ascending: true, nullsFirst: true })
+      .limit(MAX_PAYMENT_REFRESHES_PER_COMPANY);
+
+    for (const pc of payContracts ?? []) {
+      const update: Record<string, unknown> = { qbo_payments_refreshed_at: new Date().toISOString() };
+      if (pc.qbo_id) {
+        const fin = await fetchQBOEntityFinancials(companyId, appCreds, companyCreds, "invoice", pc.qbo_id);
+        Object.assign(update, financialsColumns("qbo", fin));
+      }
+      if (pc.qbo_ar_invoice_id) {
+        const fin = await fetchQBOEntityFinancials(companyId, appCreds, companyCreds, "invoice", pc.qbo_ar_invoice_id);
+        Object.assign(update, financialsColumns("qbo_ar_invoice", fin));
+      }
+      await supabase.from("prime_contracts").update(update).eq("id", pc.id);
+      summary.paymentsRefreshed++;
     }
   }
 

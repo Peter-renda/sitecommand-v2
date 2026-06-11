@@ -29,6 +29,31 @@ gaps that must be closed for "all necessary fields" to flow correctly.
 > New config keys: `QBO_AP_EXPENSE_ACCOUNT`, `QBO_DEFAULT_ITEM`, `QBO_BUDGET_CODE_MAP`
 > (JSON), `QBO_RETAINAGE_RECEIVABLE_ACCOUNT`, `QBO_RETAINAGE_PAYABLE_ACCOUNT` (per-company
 > in `company_integrations`, or env; accounts/items auto-detected/created where safe).
+>
+> **Implemented (P1/P2 round 2 — "finish mapping"):**
+> - **G2 (rest):** auto-created Vendors/Customers are now **enriched** with the matching
+>   directory contact's company name, email, phone, fax, website, and address
+>   (`lookupDirectoryPartyDetails` → `buildPartyPayload`).
+> - **G3:** every transaction line falls back to a **Class named after the project**
+>   (auto-created best-effort; realms without class tracking are unaffected). Disable
+>   with `QBO_PROJECT_TRACKING=none`.
+> - **G6:** `payment_terms` resolves to a QBO **Term** (`SalesTermRef`) when an active
+>   Term with that exact name exists; otherwise the text is kept in `PrivateNote`.
+> - **G7:** `QBO_DOC_NUMBER_PREFIX=project` prefixes `DocNumber` with the project number
+>   (`{project_number}-{number}`, truncated to QBO's 21-char cap); any other value is a
+>   literal prefix; unset keeps the bare number.
+> - **G8:** the lump-sum fallback line on commitments now posts the **revised** amount
+>   (original + approved COs) — consistent with prime contracts.
+> - **G10 (rest):** AR invoices bill **stored materials** as a dedicated
+>   "Materials presently stored" line.
+> - **G11:** void/terminated records clean up their QBO docs: subcontract **Bill →
+>   delete**, purchase order → **POStatus=Closed**, prime contract **Invoice → void**;
+>   never-synced void records are skipped without touching QBO.
+> - **G12:** PO `ship_to` → `ShipAddr` (Line1–Line5), `delivery_date` → `DueDate`,
+>   `ship_via`/`bill_to` → `PrivateNote`.
+> - **Accounting feedback (new, see §11):** every sync response's `TotalAmt`/`Balance`
+>   (and PO `POStatus`) is parsed and stored back on the SiteCommand record, with a
+>   manual refresh endpoint and a daily cron refresh pass.
 
 ---
 
@@ -242,19 +267,19 @@ Prioritized. **P0 = blocks correct posting; P1 = completeness/accuracy; P2 = nic
 
 | ID | Pri | Gap | Recommendation |
 |---|---|---|---|
-| **G2** | ✅ done | ~~Vendor/Customer sent as `*Ref.name` only; errors when the display name doesn't exactly match.~~ | **Implemented:** `findOrCreateVendorId`/`findOrCreateCustomerId` resolve `DisplayName → Id` and auto-create a minimal record when absent; all transactions now post `*Ref.value`. *Remaining (P1):* enrich the auto-created record with address/email/phone from the directory contact. |
+| **G2** | ✅ done | ~~Vendor/Customer sent as `*Ref.name` only; errors when the display name doesn't exactly match.~~ | **Implemented:** `findOrCreateVendorId`/`findOrCreateCustomerId` resolve `DisplayName → Id` and auto-create when absent; all transactions post `*Ref.value`. Auto-created records are **enriched** with the directory contact's company name / email / phone / fax / website / address (`lookupDirectoryPartyDetails`). |
 | **G4** | ✅ done | ~~Bill line `AccountRef = "Accounts Payable (A/P)"` invalid; `ItemRef = "Services"` assumed.~~ | **Implemented:** `findExpenseAccountId` posts Bills to a configured (`QBO_AP_EXPENSE_ACCOUNT`) or auto-detected COGS/Expense account; `findOrCreateItemId` resolves/creates the PO/Invoice Item (`QBO_DEFAULT_ITEM`, default "Services"). Sync fails fast with a clear message if no valid account/item can be found. |
 | **G1** | P1 | Subcontract header → Bill *and* SOV billed-to-date → Bill double-books the liability. | Map subcontract/PO header → **PurchaseOrder** (commitment, non-posting); map the actual invoice/SOV billing → **Bill** (payable). Decision needed before changing posting behavior. |
 | **G5** | ✅ done | ~~`budget_code` / `cost_code` (WBS) not mapped → no job costing.~~ | **Implemented:** `resolveCodeRefs` maps each SOV line's budget code → `AccountRef`/`ClassRef`/`ItemRef` via the `QBO_BUDGET_CODE_MAP` JSON (Class auto-created best-effort). Unmapped codes fall back to the transaction default. *Remaining:* populate the map for each realm (chart-of-accounts data). |
 | **G13** | ✅ done | ~~Header sync sends one lump-sum line; SOV `qty/uom/unit_cost` dropped.~~ | **Implemented:** `buildBillLine`/`buildItemLine` emit one QBO line per SOV item; `Qty`/`UnitPrice` preserved when `qty*unitCost ≈ amount`. Falls back to a single lump-sum line when the SOV is empty. |
-| **G9** | ✅ done | ~~`TxnDate = today` ignores real document dates.~~ | **Implemented:** subcontract Bill `TxnDate=start_date` + `DueDate=estimated_completion`; PO `TxnDate=issued_on_date\|\|contract_date`; prime Invoice already used `start_date`/`estimated_completion_date`. |
-| **G10** | ✅ done | ~~Retainage only in `PrivateNote`.~~ | **Implemented:** AR invoices withhold per-line retainage (`work_completed_this_period × retainage_pct`) as a negative "Retainage" item line; AP bills withhold `billed × default_retainage%` as a negative account line. Emitted only when `QBO_RETAINAGE_RECEIVABLE_ACCOUNT` / `QBO_RETAINAGE_PAYABLE_ACCOUNT` is set. *Remaining:* `materials_stored` line. |
-| **G3** | P1 | Project not mapped → costs/revenue not job-tracked. | Map `projects` → **Customer:Job** (sub-customer of owner) or **Class**; set `Line…CustomerRef` + `BillableStatus` on bills and `ClassRef` on lines. |
-| **G8** | P1 | Commitments post `original_contract_amount` (no COs); prime posts revised (incl. approved COs). Inconsistent. Note: header lines now reflect the SOV total when an SOV exists (G13). | Decide one rule (recommend **revised** for both) and apply consistently. |
-| **G11** | P1 | `status` (`void`/`terminated`) doesn't void the QBO doc. | On void/terminate, issue QBO `void`/`delete`; reflect back to `erp_status`. |
-| **G6** | P2 | `payment_terms` unmapped. | Map free-text terms → `SalesTermRef`; derive `DueDate`. |
-| **G7** | P2 | `DocNumber` from per-project `number` can collide across projects in one realm. | Prefix (e.g., `SC-{projectNo}-{number}`) or disable QBO duplicate-DocNumber check. |
-| **G12** | P2 | PO `ship_to`/`ship_via`/`bill_to` unmapped. | Map to `ShipAddr`/`ShipMethodRef`. |
+| **G9** | ✅ done | ~~`TxnDate = today` ignores real document dates.~~ | **Implemented:** subcontract Bill `TxnDate=start_date` + `DueDate=estimated_completion`; PO `TxnDate=issued_on_date\|\|contract_date` + `DueDate=delivery_date`; prime Invoice already used `start_date`/`estimated_completion_date`. |
+| **G10** | ✅ done | ~~Retainage only in `PrivateNote`.~~ | **Implemented:** AR invoices withhold per-line retainage as a negative "Retainage" item line; AP bills withhold `billed × default_retainage%` as a negative account line (config-gated on the retainage accounts). **Stored materials** now bill as a dedicated "Materials presently stored" line. |
+| **G3** | ✅ done | ~~Project not mapped → costs/revenue not job-tracked.~~ | **Implemented (Class strategy):** every line falls back to a Class named after the project (auto-created best-effort; omitted in realms without class tracking). Disable with `QBO_PROJECT_TRACKING=none`. Customer:Job remains a future option. |
+| **G8** | ✅ done | ~~Commitments post original; prime posts revised. Inconsistent.~~ | **Implemented:** both post **revised** (original + approved COs) on the lump-sum fallback; SOV totals govern when an SOV exists. |
+| **G11** | ✅ done | ~~`status` (`void`/`terminated`) doesn't void the QBO doc.~~ | **Implemented:** subcontract Bill → `operation=delete` (QBO Bills can't be voided), PO → `POStatus=Closed`, prime Invoice → `operation=void`. Local refs cleared on delete; never-synced void records are skipped. |
+| **G6** | ✅ done | ~~`payment_terms` unmapped.~~ | **Implemented:** exact-name match to an active QBO **Term** → `SalesTermRef` on Bill/PO (QBO derives `DueDate` from the Term). Unmatched terms are preserved in `PrivateNote`. No auto-create. |
+| **G7** | ✅ done | ~~`DocNumber` can collide across projects in one realm.~~ | **Implemented (opt-in):** `QBO_DOC_NUMBER_PREFIX=project` → `{project_number}-{number}`; any other value is a literal prefix. 21-char cap enforced. |
+| **G12** | ✅ done | ~~PO `ship_to`/`ship_via`/`bill_to` unmapped.~~ | **Implemented:** `ship_to` → `ShipAddr` Line1–Line5; `ship_via`/`bill_to` → `PrivateNote` (no reliable structured QBO fields). |
 | **CO** | P2 | `change_orders` (`erp_status` exists) never pushed to QBO. | Post approved COs as additional Bill/PO/Invoice lines or adjust the revised total. |
 | **CUR/TAX** | P2 | No currency/tax handling. | Add `CurrencyRef` and `TxnTaxDetail`/`TaxCodeRef` for multi-currency / taxable realms. |
 | **ATT** | P2 | Attachments not synced. | Optionally push PDFs via the QBO `Attachable` API. |
@@ -286,11 +311,43 @@ Prioritized. **P0 = blocks correct posting; P1 = completeness/accuracy; P2 = nic
 ## 10. Open decisions (need product/accounting sign-off)
 
 1. **G1** — subcontract = `PurchaseOrder` (commitment) or `Bill` (payable)?
-2. **G8** — header amount = original or revised (incl. approved COs)?
+2. ~~**G8** — header amount = original or revised?~~ **Decided: revised** (original +
+   approved COs) for both commitments and prime contracts.
 3. **Config to populate per realm** — the *mechanisms* for G4/G5/G10 ship, but each realm
    must supply its own chart-of-accounts values: `QBO_AP_EXPENSE_ACCOUNT`,
    `QBO_DEFAULT_ITEM`, the `QBO_BUDGET_CODE_MAP` (budget code → account/class/item), and the
    retainage accounts. Until set, the integration uses safe auto-detected/default targets and
    omits retainage.
-4. **G3** — job costing via Customer:Job vs Class.
-5. Push vs two-way sync (today: push-only, QBO → SiteCommand not implemented).
+4. ~~**G3** — job costing via Customer:Job vs Class.~~ **Decided: Class** (project-named
+   Class fallback per line; `QBO_PROJECT_TRACKING=none` to disable). Customer:Job can be
+   layered later without schema changes.
+5. ~~Push vs two-way sync.~~ Push remains the write direction; **accounting feedback now
+   flows back** (totals / balances / payment status — see §11). Full two-way record sync
+   (QBO-originated records) is still out of scope.
+
+## 11. Accounting feedback pulled back from QBO (read direction)
+
+Migration `161_erp_accounting_feedback_columns.sql` adds columns that hold what QBO
+reports about each synced document, so accounting state is visible inside SiteCommand:
+
+| SiteCommand column | Source | Meaning |
+|---|---|---|
+| `commitments.qbo_vendor_id` / `prime_contracts.qbo_customer_id` | resolved on sync | The QBO master-record Id actually used. |
+| `…qbo_total_amount` | `TotalAmt` | Document total as QBO computed it. |
+| `…qbo_balance` | `Balance` | Open (unpaid) balance. |
+| `…qbo_payment_status` | derived | `paid` / `partially_paid` / `unpaid` (posting docs); lowercased `POStatus` (`open`/`closed`) for POs. |
+| `commitments.qbo_ap_invoice_total_amount` / `_balance` / `_payment_status` | AP Bill | Same trio for the SOV-billing Bill. |
+| `prime_contracts.qbo_ar_invoice_total_amount` / `_balance` / `_payment_status` | AR Invoice | Same trio for the SOV-billing Invoice. |
+| `…qbo_payments_refreshed_at` | — | Last time the feedback was read. |
+
+How the fields stay current:
+
+1. **Every push sync** parses the create/update response (`extractFinancials`) and stores
+   the trio alongside `qbo_id`.
+2. **Manual refresh** — `POST /api/integrations/quickbooks/refresh`
+   `{ recordType: "commitments" | "prime_contracts", recordId }` re-reads the header doc and
+   the AP/AR invoice doc via `fetchQBOEntityFinancials` (surfaced as **Refresh payment
+   status** in the Accounting section of the commitment / prime-contract detail pages).
+3. **Cron refresh pass** — the daily `quickbooks-sync` cron walks up to 25 synced
+   records per table per company (stalest `qbo_payments_refreshed_at` first) so payments
+   applied entirely inside QBO surface within a day without any local edit.

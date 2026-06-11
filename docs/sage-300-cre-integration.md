@@ -66,11 +66,28 @@ Settings → Integrations → **Sage 300 CRE** (Company Super Admin):
   (`GET /vendors`, `GET /customers`). Sage 300 CRE is the system of record for
   parties, so a sync **fails with a clear message** if the vendor/customer does
   not already exist there — SiteCommand never auto-creates GL parties.
+- **Job costing.** The SiteCommand project resolves to a Sage 300 CRE **job**
+  (`GET /jobs`, matched by project number first, then project name) and SOV
+  budget codes resolve to Sage **cost codes** (`GET /cost-codes`, exact code
+  match then name). When resolved, the header and every line item carry
+  `job_id` / `cost_code_id`; unresolved values are simply omitted (the budget
+  code stays readable in the line description either way:
+  `"03-100 — Footings"`). Like parties, jobs and cost codes are never
+  auto-created — Sage is the system of record.
+- **Line detail.** When a line's `qty × unit cost` is consistent with its
+  amount, the line item also carries `quantity`, `unit_cost`, and
+  `unit_of_measure`.
+- **Dates & amounts.** Purchase orders post the **revised** amount (original +
+  approved COs) with `due_date` from the delivery date (or estimated
+  completion); AR invoices for prime contracts carry `due_date` from the
+  estimated completion date.
+- **Retention.** AP invoices send `retention_amount` (billed × the
+  commitment's default retainage %); AR invoices roll per-line retainage up to
+  the header `retention_amount`.
 - **AR support is connector-dependent.** Agave's construction surface is
   AP-centric; if the configured Sage 300 CRE connector doesn't expose
   `/ar-invoices`, prime-contract/AR syncs surface the Agave error in the logs
   (the AP/commitment side is the primary, always-supported path).
-- Budget codes are folded into each line item's description (`"03-100 — Footings"`).
 
 ## Sync surfaces
 
@@ -96,6 +113,29 @@ QuickBooks Online and Sage 300 CRE independently. Unlike QBO there is no
 `*_sync_token` — Agave updates are `PUT /{resource}/{id}`. When an update returns
 **404** (the record was deleted on the Sage side), the sync falls back to a
 create so the record is rebuilt rather than lost.
+
+## Accounting feedback (read direction)
+
+Migration `161_erp_accounting_feedback_columns.sql` adds columns that hold what
+Sage 300 CRE reports about each synced document:
+
+- `commitments.sage300cre_vendor_id`, `sage300cre_status` (header PO status —
+  POs are non-posting so no amounts), and
+  `sage300cre_ap_invoice_total_amount` / `_amount_paid` / `_balance` / `_status`
+  for the AP invoice.
+- `prime_contracts.sage300cre_customer_id`,
+  `sage300cre_total_amount` / `_amount_paid` / `_balance` / `_status` for the
+  header AR invoice, and the same quartet under `sage300cre_ar_invoice_*` for
+  the SOV-billing invoice.
+- `…sage300cre_payments_refreshed_at` — last time the feedback was read.
+
+The fields stay current three ways: every push sync parses the Agave response
+(`amount` / `amount_paid` / `balance` / `status`, accepting both bare and
+`data`-wrapped shapes); `POST /api/integrations/sage300cre/refresh`
+`{ recordType, recordId }` re-reads on demand (the **Refresh payment status**
+button in the Accounting section of the detail pages); and the daily cron walks
+up to 25 synced records per table per company (stalest first) so payments
+entered in Sage surface within a day.
 
 ## Logs
 
