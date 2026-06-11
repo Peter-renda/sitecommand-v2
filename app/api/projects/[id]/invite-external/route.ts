@@ -95,7 +95,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     .eq("project_id", projectId)
     .eq("invitation_type", "external");
 
-  // Create the external invitation
+  // Create the external invitation. allowed_sections is stored on the
+  // invitation so the accept route can carry it onto the project membership
+  // (NULL = access to all sections).
   const { data: invite, error } = await supabase
     .from("invitations")
     .insert({
@@ -106,6 +108,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       invitation_type: "external",
       project_role: "external_viewer",
       contact_company: contact_company ?? null,
+      allowed_sections:
+        allowed_sections && allowed_sections.length > 0 ? allowed_sections : null,
     })
     .select("token")
     .single();
@@ -115,23 +119,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Failed to create invitation" }, { status: 500 });
   }
 
-  // If section restrictions were specified, pre-create the membership record now
-  // so the allowed_sections are available immediately on accept.
-  // (The accept route will also insert a membership, so we upsert here.)
-  if (allowed_sections && allowed_sections.length > 0) {
-    // Store the sections on the invitation token so the accept route can apply them
-    await supabase
-      .from("invitations")
-      .update({ project_role: "external_viewer" })
-      .eq("token", invite.token);
-    // We'll pass allowed_sections via a separate column added in migration 031
-    // For now store in a comment-friendly way by updating after insert
-  }
-
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const inviteUrl = `${appUrl}/invite/${invite.token}`;
 
-  await sendContractorInviteEmail(email, inviteUrl, project.name, contact_name ?? "");
+  await sendContractorInviteEmail(email, inviteUrl, project.name, contact_name ?? "", company?.name);
 
   return NextResponse.json({ success: true });
 }

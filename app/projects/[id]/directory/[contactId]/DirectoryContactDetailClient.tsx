@@ -63,6 +63,9 @@ export default function DirectoryContactDetailClient({ projectId, username, init
 
   const [companyTab, setCompanyTab] = useState<"general" | "users" | "bidder">("general");
   const [companyForm, setCompanyForm] = useState<Record<string, unknown>>({ ...initialContact });
+  // Every company already in the project directory (company-type contacts plus
+  // company names on user contacts), offered as suggestions on the Company field.
+  const [companyNames, setCompanyNames] = useState<string[]>([]);
   const [companyUsers, setCompanyUsers] = useState<{ onProject: Array<{ id: string; first_name: string | null; last_name: string | null; email: string | null }>; portfolio: Array<{ id: string; first_name: string | null; last_name: string | null; email: string | null }> }>({ onProject: [], portfolio: [] });
 
   const permissionRows = useMemo(() => {
@@ -77,6 +80,21 @@ export default function DirectoryContactDetailClient({ projectId, username, init
       .then((data) => setCompanyUsers({ onProject: data?.onProject ?? [], portfolio: data?.portfolio ?? [] }))
       .catch(() => {});
   }, [isCompany, projectId, initialContact.id]);
+
+  useEffect(() => {
+    if (isCompany) return;
+    fetch(`/api/projects/${projectId}/directory`)
+      .then((r) => r.json())
+      .then((data: Contact[]) => {
+        if (!Array.isArray(data)) return;
+        const names = new Set<string>();
+        for (const c of data) {
+          if (typeof c.company === "string" && c.company.trim()) names.add(c.company.trim());
+        }
+        setCompanyNames([...names].sort((a, b) => a.localeCompare(b)));
+      })
+      .catch(() => {});
+  }, [isCompany, projectId]);
 
   function setUserField(field: keyof UserFormData, value: string) {
     setSaved(false);

@@ -270,11 +270,16 @@ function UserModal({
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Permission Template</label>
-              <select value={form.permission} onChange={(e) => set("permission", e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
-                <option value="">— None —</option>
-                {PERMISSIONS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
+              <div className="relative">
+                <select value={form.permission} onChange={(e) => set("permission", e.target.value)}
+                  className="w-full appearance-none px-3 py-2 pr-8 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+                  <option value="">— None —</option>
+                  {PERMISSIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
             </div>
           </div>
           <div>

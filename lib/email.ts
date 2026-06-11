@@ -57,13 +57,87 @@ async function sendEmail(label: string, args: SendArgs, opts: { throwOnError?: b
   }
 }
 
+// Shared invitation layout matching the Documents-tool notification style:
+// dark header bar with the company name, a gray "More details: View online"
+// strip, an orange heading, and a bordered table of the invite's fields.
+function buildInviteEmailHtml({
+  companyName,
+  inviteUrl,
+  heading,
+  columns,
+  values,
+  footerNote,
+}: {
+  companyName: string;
+  inviteUrl: string;
+  heading: string;
+  columns: string[];
+  values: string[]; // already-escaped HTML cells, aligned with columns
+  footerNote: string;
+}) {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return `
+      <div style="font-family:Helvetica,Arial,sans-serif;max-width:720px;margin:0 auto;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+          <tr>
+            <td style="background:#3b3b3b;color:#fff;padding:18px 24px;font-size:22px;font-weight:600;">
+              ${escape(companyName)}
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#d8d8d8;margin-bottom:16px;">
+          <tr>
+            <td style="padding:8px 16px;font-size:13px;color:#333;">
+              More details: <a href="${escape(inviteUrl)}" style="color:#1d6fa5;text-decoration:underline;">View online</a>
+            </td>
+          </tr>
+        </table>
+        <h2 style="color:#d76027;font-weight:400;font-size:22px;line-height:1.3;margin:0 0 16px;">
+          ${escape(heading)}
+        </h2>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#eee;color:#333;">
+              ${columns.map((c) => `<th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">${escape(c)}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              ${values.map((v) => `<td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${v}</td>`).join("")}
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin:20px 0 0;">
+          <a href="${escape(inviteUrl)}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Accept Invitation</a>
+        </p>
+        <p style="color:#888;font-size:11px;margin-top:18px;">${escape(footerNote)}</p>
+      </div>
+    `;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 export async function sendInviteEmail(to: string, inviteUrl: string, companyName: string) {
   await sendEmail(
     "invite",
     {
       to,
       subject: `You've been invited to join ${companyName} on SiteCommand`,
-      html: `<p>You've been invited to join <strong>${companyName}</strong> on SiteCommand.</p><p><a href="${inviteUrl}">Accept invitation</a></p><p>This link expires in 7 days.</p>`,
+      html: buildInviteEmailHtml({
+        companyName,
+        inviteUrl,
+        heading: `You have been invited to join ${companyName} on SiteCommand.`,
+        columns: ["Company", "Invitation", "Expires"],
+        values: [
+          escapeHtml(companyName),
+          `<a href="${escapeHtml(inviteUrl)}" style="color:#1d6fa5;text-decoration:underline;">Accept invitation</a>`,
+          "In 7 days",
+        ],
+        footerNote: "You are receiving this because you were invited to join this company on SiteCommand.",
+      }),
     },
     { throwOnError: true },
   );
@@ -82,13 +156,21 @@ export async function sendProjectMemberInviteEmail(
     {
       to,
       subject: `${companyName} invited you to collaborate on ${projectName} in SiteCommand`,
-      html: `
-        <p style="font-size:14px;">Hi ${recipientName || "there"},</p>
-        <p style="font-size:14px;"><strong>${companyName}</strong> has invited you to collaborate on <strong>${projectName}</strong> in SiteCommand.</p>
-        <p style="font-size:14px;">SiteCommand is ${companyName}'s online project management system. Click the link below to log in:</p>
-        <p><a href="${acceptInviteUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Accept Invitation</a></p>
-        <p style="font-size:13px;">Need help? <a href="${supportUrl}">Visit SiteCommand Support</a></p>
-      `,
+      html:
+        buildInviteEmailHtml({
+          companyName,
+          inviteUrl: acceptInviteUrl,
+          heading: `${companyName} has invited you to collaborate on ${projectName}.`,
+          columns: ["Project", "Invited By", "Recipient", "Expires"],
+          values: [
+            escapeHtml(projectName),
+            escapeHtml(companyName),
+            escapeHtml(recipientName || to),
+            "In 7 days",
+          ],
+          footerNote: `SiteCommand is ${companyName}'s online project management system.`,
+        }) +
+        `<p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;max-width:720px;margin:8px auto 0;">Need help? <a href="${escapeHtml(supportUrl)}">Visit SiteCommand Support</a></p>`,
     },
   );
 }
@@ -482,18 +564,26 @@ export async function sendContractorInviteEmail(
   inviteUrl: string,
   projectName: string,
   contactName: string,
+  companyName?: string,
 ) {
   await sendEmail(
     "contractor-invite",
     {
       to,
       subject: `You've been invited to access ${projectName} on SiteCommand`,
-      html: `
-      <p>Hi${contactName ? ` ${contactName}` : ""},</p>
-      <p>You've been invited to access <strong>${projectName}</strong> on SiteCommand.</p>
-      <p><a href="${inviteUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Accept Invitation</a></p>
-      <p style="color:#888;font-size:12px;">This link expires in 7 days.</p>
-    `,
+      html: buildInviteEmailHtml({
+        companyName: companyName || projectName,
+        inviteUrl,
+        heading: `You have been invited to access ${projectName} on SiteCommand.`,
+        columns: ["Project", "Recipient", "Invited As", "Expires"],
+        values: [
+          escapeHtml(projectName),
+          escapeHtml(contactName || to),
+          "External Collaborator",
+          "In 7 days",
+        ],
+        footerNote: "You are receiving this because you were invited to collaborate on this project on SiteCommand.",
+      }),
     },
     { throwOnError: true },
   );

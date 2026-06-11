@@ -1,10 +1,18 @@
 "use client";
 
-import { Fragment, useState, useEffect, useRef, useMemo } from "react";
+import { Fragment, useState, useEffect, useRef, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { ChevronDown, ChevronRight, Home, Search } from "lucide-react";
 import ProjectNav from "@/components/ProjectNav";
 import { SkeletonTable } from "@/app/components/Skeleton";
+import {
+  COST_CODE_CATEGORIES,
+  COST_TYPES,
+  costTypeLabel,
+  subcategoryLabel,
+  type CostCodeCategory,
+} from "@/lib/cost-codes";
 import * as XLSX from "xlsx";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -479,6 +487,59 @@ function MoneyInput({
   );
 }
 
+// ── Hierarchical select (same control as Change Events → budget code create) ──
+
+function HierSelect({
+  placeholder,
+  valueLabel,
+  children,
+}: {
+  placeholder: string;
+  valueLabel: string | null;
+  children: (close: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white text-left"
+      >
+        <span className={valueLabel ? "text-gray-800 truncate" : "text-gray-400"}>
+          {valueLabel || placeholder}
+        </span>
+        <ChevronDown className="w-4 h-4 text-gray-400 shrink-0 ml-1" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-[60] bg-white border border-gray-200 rounded shadow-lg w-full">
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Resolves a stored cost code (e.g. "01-030") back to its catalog name. */
+function costCodeName(code: string): string | null {
+  for (const cat of COST_CODE_CATEGORIES) {
+    const sub = cat.subcategories.find((s) => s.code === code);
+    if (sub) return sub.name;
+  }
+  return null;
+}
+
 function LineItemModal({
   initial,
   defaults,
@@ -521,6 +582,14 @@ function LineItemModal({
 
   const ref = useRef<HTMLDivElement>(null);
 
+  // Drill-down state for the cost code picker (same UX as Change Events →
+  // line items → budget code → Create). Description auto-populates from the
+  // selected code/type names unless the user has typed their own.
+  const [activeCategory, setActiveCategory] = useState<CostCodeCategory | null>(null);
+  const [codeSearch, setCodeSearch] = useState("");
+  const [typeSearch, setTypeSearch] = useState("");
+  const descEdited = useRef(Boolean(initial?.description || defaults?.description));
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onCancel();
@@ -532,6 +601,51 @@ function LineItemModal({
   function set(key: keyof LineItemFormData, val: string | boolean) {
     setForm((f) => ({ ...f, [key]: val }));
   }
+
+  /** Concatenated "<code name> - <type name>" description, mirroring Change Events. */
+  function autoDescription(codeName: string | null, typeName: string): string {
+    if (!codeName) return typeName;
+    return typeName ? `${codeName} - ${typeName}` : codeName;
+  }
+
+  function selectCostCode(code: string, name: string) {
+    setForm((f) => ({
+      ...f,
+      cost_code: code,
+      description: descEdited.current ? f.description : autoDescription(name, f.cost_type),
+    }));
+  }
+
+  function selectCostType(typeName: string) {
+    setForm((f) => ({
+      ...f,
+      cost_type: typeName,
+      description: descEdited.current
+        ? f.description
+        : autoDescription(costCodeName(f.cost_code), typeName),
+    }));
+  }
+
+  const filteredCategories = COST_CODE_CATEGORIES.filter(
+    (c) =>
+      !codeSearch ||
+      c.code.includes(codeSearch) ||
+      c.name.toLowerCase().includes(codeSearch.toLowerCase())
+  );
+  const filteredSubcategories = (activeCategory?.subcategories ?? []).filter(
+    (s) =>
+      !codeSearch ||
+      s.code.includes(codeSearch) ||
+      s.name.toLowerCase().includes(codeSearch.toLowerCase())
+  );
+  const filteredTypes = COST_TYPES.filter(
+    (t) =>
+      !typeSearch ||
+      t.code.toLowerCase().includes(typeSearch.toLowerCase()) ||
+      t.name.toLowerCase().includes(typeSearch.toLowerCase())
+  );
+
+  const selectedCodeName = form.cost_code ? costCodeName(form.cost_code) : null;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -555,22 +669,116 @@ function LineItemModal({
         <form onSubmit={handleSubmit} className="overflow-y-auto p-6 space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <Field label="Cost Code">
-              <input
-                type="text"
-                value={form.cost_code}
-                onChange={(e) => set("cost_code", e.target.value)}
-                placeholder="e.g. 01-030.C"
-                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
+              <HierSelect
+                placeholder="Select an item"
+                valueLabel={form.cost_code ? (selectedCodeName ? `${form.cost_code} - ${selectedCodeName}` : form.cost_code) : null}
+              >
+                {(close) => (
+                  <div>
+                    <div className="flex items-center border-b border-gray-100 px-3 py-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="Search"
+                        value={codeSearch}
+                        onChange={(e) => setCodeSearch(e.target.value)}
+                        className="flex-1 text-sm focus:outline-none"
+                      />
+                      <Search className="w-4 h-4 text-gray-400 ml-2 shrink-0" />
+                    </div>
+                    {activeCategory ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => { setActiveCategory(null); setCodeSearch(""); }}
+                          className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 border-b border-gray-100"
+                        >
+                          <Home className="w-3.5 h-3.5" />
+                          <ChevronRight className="w-3 h-3 text-gray-400" />
+                          <span className="font-medium">{activeCategory.code} - {activeCategory.name}</span>
+                        </button>
+                        <div className="max-h-60 overflow-y-auto">
+                          {filteredSubcategories.length === 0 ? (
+                            <p className="text-sm text-gray-400 px-3 py-3 text-center">No items found</p>
+                          ) : (
+                            filteredSubcategories.map((s) => (
+                              <button
+                                key={s.code}
+                                type="button"
+                                onClick={() => {
+                                  selectCostCode(s.code, s.name);
+                                  setActiveCategory(null);
+                                  setCodeSearch("");
+                                  close();
+                                }}
+                                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                              >
+                                {subcategoryLabel(s)}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="max-h-60 overflow-y-auto">
+                        {filteredCategories.length === 0 ? (
+                          <p className="text-sm text-gray-400 px-3 py-3 text-center">No items found</p>
+                        ) : (
+                          filteredCategories.map((c) => (
+                            <button
+                              key={c.code}
+                              type="button"
+                              onClick={() => { setActiveCategory(c); setCodeSearch(""); }}
+                              className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                            >
+                              <span>{c.code} - {c.name}</span>
+                              <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </HierSelect>
             </Field>
             <Field label="Cost Type">
-              <input
-                type="text"
-                value={form.cost_type}
-                onChange={(e) => set("cost_type", e.target.value)}
-                placeholder="e.g. Labor or Other"
-                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
+              <HierSelect
+                placeholder="Select an item"
+                valueLabel={form.cost_type || null}
+              >
+                {(close) => (
+                  <div>
+                    <div className="flex items-center border-b border-gray-100 px-3 py-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="Search"
+                        value={typeSearch}
+                        onChange={(e) => setTypeSearch(e.target.value)}
+                        className="flex-1 text-sm focus:outline-none"
+                      />
+                      <Search className="w-4 h-4 text-gray-400 ml-2 shrink-0" />
+                    </div>
+                    <div className="max-h-60 overflow-y-auto">
+                      {filteredTypes.length === 0 ? (
+                        <p className="text-sm text-gray-400 px-3 py-3 text-center">No items found</p>
+                      ) : (
+                        filteredTypes.map((t) => (
+                          <button
+                            key={t.code}
+                            type="button"
+                            onClick={() => { selectCostType(t.name); setTypeSearch(""); close(); }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                          >
+                            {costTypeLabel(t)}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </HierSelect>
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -578,8 +786,8 @@ function LineItemModal({
               <input
                 type="text"
                 value={form.description}
-                onChange={(e) => set("description", e.target.value)}
-                placeholder="e.g. Workmen's Facility.Contract"
+                onChange={(e) => { descEdited.current = e.target.value.trim().length > 0; set("description", e.target.value); }}
+                placeholder="Auto-fills from cost code + cost type"
                 className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
               />
             </Field>

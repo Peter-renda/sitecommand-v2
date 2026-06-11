@@ -57,7 +57,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     .from("invitations")
     .select(`
       id, email, company_id, accepted_at, expires_at,
-      invitation_type, project_id, project_role, invited_role,
+      invitation_type, project_id, project_role, invited_role, allowed_sections,
       companies(name, seat_limit)
     `)
     .eq("token", token)
@@ -115,7 +115,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
     }
 
-    // Grant project access
+    // Grant project access. For external invites, any allowed_sections list on
+    // the invitation scopes which tools the collaborator may see (NULL = all).
     if (invite.project_id) {
       const projectRole = invite.project_role ?? "external_viewer";
       await supabase.from("project_memberships").upsert(
@@ -125,6 +126,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
           company_id: invite.company_id,
           role: projectRole,
           permission: projectRole === "external_viewer" ? "read_only" : "write",
+          allowed_sections: isExternal ? (invite.allowed_sections ?? null) : null,
         },
         { onConflict: "project_id,user_id" }
       );
@@ -223,7 +225,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       return NextResponse.json({ error: "Failed to create account" }, { status: 500 });
     }
 
-    // Grant scoped read access to exactly the invited project
+    // Grant scoped read access to exactly the invited project. Any
+    // allowed_sections list on the invitation restricts which tools the
+    // collaborator may see (NULL = all sections).
     if (invite.project_id) {
       const projectRole = invite.project_role ?? "external_viewer";
       await supabase.from("project_memberships").insert({
@@ -232,7 +236,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
         company_id: invite.company_id,
         role: projectRole,
         permission: projectRole === "external_viewer" ? "read_only" : "write",
-        // allowed_sections defaults to NULL = access to all sections
+        allowed_sections: invite.allowed_sections ?? null,
       });
       await addUserToDirectory(supabase, invite.project_id, newUser.id);
       await applyDirectoryTemplateForInvite(
