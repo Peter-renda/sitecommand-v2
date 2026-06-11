@@ -527,35 +527,32 @@ function SovTable({
                               </option>
                             ))}
                           </select>
-                          <select
-                            value={line.change_event_line_item_id}
-                            onChange={(e) => {
-                              const selectedEvent = changeEvents.find(
-                                (event) => event.id === line.change_event_id
-                              );
-                              const selectedLineItem = selectedEvent?.lineItems.find(
-                                (item) => item.id === e.target.value
-                              );
-                              onUpdate(line._key, "change_event_line_item_id", e.target.value);
-                              if (!selectedLineItem) return;
-                              onUpdate(line._key, "change_event_line_item", selectedLineItem.label);
-                              onUpdate(line._key, "budget_code", selectedLineItem.budget_code);
-                              onUpdate(line._key, "description", selectedLineItem.description);
-                              onUpdate(line._key, "qty", selectedLineItem.qty);
-                              onUpdate(line._key, "uom", selectedLineItem.uom);
-                              onUpdate(line._key, "unit_cost", selectedLineItem.unit_cost);
-                              onUpdate(line._key, "amount", selectedLineItem.amount);
-                            }}
-                            className="w-full border border-gray-200 rounded px-1.5 py-1 bg-white focus:outline-none"
-                            disabled={!line.change_event_id}
-                          >
-                            <option value="">Select SOV line item…</option>
-                            {(changeEvents.find((event) => event.id === line.change_event_id)?.lineItems ?? []).map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.label}
-                              </option>
-                            ))}
-                          </select>
+                          {line.change_event_id && (
+                            <select
+                              value={line.change_event_line_item_id}
+                              onChange={(e) => {
+                                const selectedEvent = changeEvents.find(
+                                  (event) => event.id === line.change_event_id
+                                );
+                                const selectedLineItem = selectedEvent?.lineItems.find(
+                                  (item) => item.id === e.target.value
+                                );
+                                onUpdate(line._key, "change_event_line_item_id", e.target.value);
+                                if (!selectedLineItem) return;
+                                onUpdate(line._key, "change_event_line_item", selectedLineItem.label);
+                                onUpdate(line._key, "budget_code", selectedLineItem.budget_code);
+                                onUpdate(line._key, "description", selectedLineItem.description);
+                              }}
+                              className="w-full border border-gray-200 rounded px-1.5 py-1 bg-white focus:outline-none"
+                            >
+                              <option value="">Select SOV line item…</option>
+                              {(changeEvents.find((event) => event.id === line.change_event_id)?.lineItems ?? []).map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </div>
                       </td>
                       <td className={cellCls}>
@@ -771,7 +768,7 @@ export default function NewCommitmentClient({
 
   // SOV
   const [sovMethod, setSovMethod] = useState<"unit_quantity" | "amount">(
-    "unit_quantity"
+    "amount"
   );
   const [sovLines, setSovLines] = useState<SovLine[]>([]);
 

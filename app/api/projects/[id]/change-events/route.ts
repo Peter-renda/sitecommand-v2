@@ -133,6 +133,22 @@ export async function POST(
     `Change Event #${String(data.number).padStart(3, "0")}`
   );
 
+  // Log individual field history entries for fields set at creation
+  const fieldLogs: Array<[string, string]> = [];
+  if (data.title) fieldLogs.push(["Title", data.title]);
+  if (data.status) fieldLogs.push(["Status", data.status]);
+  if (data.origin) fieldLogs.push(["Origin", data.origin]);
+  if (data.type) fieldLogs.push(["Type", data.type]);
+  if (data.change_reason) fieldLogs.push(["Change Reason", data.change_reason]);
+  if (data.scope) fieldLogs.push(["Scope", data.scope]);
+  fieldLogs.push(["Expecting Revenue", data.expecting_revenue ? "Yes" : "No"]);
+  if (data.revenue_source) fieldLogs.push(["Revenue Source", data.revenue_source]);
+  if (data.prime_contract) fieldLogs.push(["Prime Contract", data.prime_contract]);
+
+  for (const [action, toValue] of fieldLogs) {
+    await logChangeEventHistory(supabase, session, data.id, projectId, action, "(None)", toValue);
+  }
+
   if (lineItems.length > 0) {
     await logChangeEventHistory(
       supabase,
