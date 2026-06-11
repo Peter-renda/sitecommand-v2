@@ -1247,6 +1247,35 @@ Change event line items cannot be added to a commitment when:
 - Migration: `101_commitment_ssov_approved_at.sql` adds `commitments.ssov_approved_at` TIMESTAMPTZ.
 - SiteCommand uses a single **invoice contact** on the commitment (`subcontractor_contact`) rather than a distribution list; notifications are sent to that contact only.
 
+## Emails – "New Emails" Triage Deck (AI Link Suggestions)
+
+### Overview
+The project Emails page shows a **New Emails** box above the linked-threads table. It is a card deck of the user's inbox conversations that they have **neither linked to the project nor declined**. One card shows at a time (with the next cards peeking out behind); each card displays the email (subject, sender, date, preview) and a **Suggested actions** section where Gemini proposes executable follow-ups grounded in project records — e.g. "Add to RFI #4 — Window head detail" or 'Create task "Order roof curbs"'. The user ticks the actions they want, clicks **Link to Project** (label becomes **Link + N Actions**), the email is linked, the actions run, and the next card pops up. **Decline** hides the conversation from that user's deck for that project permanently.
+
+### Behavior
+- Candidates come from the user's own connected Outlook/Gmail inbox (same `fetchActiveInbox` as the link modal), deduped to one card per conversation (most recent message wins), excluding conversations already in `project_email_threads` for the project and conversations in `project_email_triage_dismissals` for this user+project. Capped to the **30 newest** threads per load.
+- Suggestions load lazily per card and are cached client-side by conversation id. The suggest endpoint fetches the full thread text from the user's mailbox when possible (falls back to the inbox preview), then asks Gemini `gemini-2.5-flash` (structured output) for at most 4 actions of two executable types:
+  - `rfi_comment` — the email is relevant to a specific project RFI; on link, the email text is inserted as an `rfi_responses` row (body prefixed `Linked email from … : "subject"`, ≤2000 chars) and an `rfi_change_history` entry ("Added Response from linked email") is written.
+  - `create_task` — the email contains an action item; on link, a task is created (`status: "initiated"`, AI title/description, optional YYYY-MM-DD due date, no assignees).
+- Empty suggestions are a normal state — the card still offers plain Link/Decline. Missing `GEMINI_API_KEY` degrades to no suggestions.
+- The link endpoint **re-validates every action server-side** (RFI must belong to the project; task title required) — AI suggestions are advisory only. Action failures don't roll back the link; per-action results come back and the UI shows an amber notice listing the failed action labels.
+- Linking through the deck also persists the thread's messages (`persistThreadMessages`) best-effort, same as the modal flow. Declined threads can still be linked manually via the **Link Emails to Project** modal.
+- Manual flipping: prev/next chevrons cycle the deck (wrap-around) without acting on a card; per-card checkbox state is kept while flipping.
+
+### API
+- `GET /api/projects/[id]/emails/triage` — candidate list `{ connected, messages }`; `connected: false` (200) when no email connection so the UI hides the box.
+- `POST /api/projects/[id]/emails/triage/suggest` — body `{ conversationId, subject?, fromName?, fromAddress?, preview?, receivedAt? }` → `{ suggestions: TriageSuggestion[] }` (`maxDuration = 60`).
+- `POST /api/projects/[id]/emails/triage/link` — body `{ conversationId, subject, participants, latestMessagePreview, latestReceivedAt, messageCount, actions[] }` → upserts the thread (same shape as `POST /emails`), executes ≤6 actions sequentially (task numbers allocated without racing), returns `{ thread, results: [{ id, ok, error? }] }` (`maxDuration = 60`).
+- `POST /api/projects/[id]/emails/triage/decline` — body `{ conversationId }` → upserts a dismissal row.
+- All four require a session **and** `canAccessProject` (stricter than the older email routes, which only check the session).
+
+### Schema
+- `project_email_triage_dismissals` (migration `162_project_email_triage_dismissals.sql`): `project_id`, `user_id`, `graph_conversation_id`, `dismissed_at`, `UNIQUE(project_id, user_id, graph_conversation_id)`. Per-user because inboxes are personal — a decline only hides the thread for that user on that project.
+
+### Implementation Notes (SiteCommand)
+- Suggestion engine: `lib/email-triage.ts` → `suggestEmailTriageActions(supabase, projectId, email)`. Context = project RFIs (id/number/subject/question/status, RFI numbers resolved server-side back to ids), submittals (context only — no comment mechanism exists), and open tasks (to avoid duplicate task suggestions).
+- UI: `TriageDeck` component in `EmailsClient.tsx`, mounted between the connection banner and the thread table (only when an email account is connected). State: `deck`, `index`, `suggestionsByConv`, `checkedByConv`, `busy`, `notice`, `actedCount`. Cards animate in via the global `animate-scale-in`; threads linked elsewhere (e.g. the modal) drop out of the deck via the parent's `linkedConvIds`. After the last card is actioned the box shows "All caught up"; if the deck is empty on load and nothing was actioned, the section renders nothing.
+
 ## Specifications – Spec Book PDF Storage
 
 ### Overview

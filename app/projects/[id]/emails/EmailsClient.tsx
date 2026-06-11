@@ -41,6 +41,18 @@ type LinkedThread = {
   linked_at: string;
 };
 
+type TriageSuggestion = {
+  id: string;
+  type: "rfi_comment" | "create_task";
+  label: string;
+  reason: string;
+  rfiId?: string;
+  rfiNumber?: number;
+  taskTitle?: string;
+  taskDescription?: string;
+  taskDueDate?: string | null;
+};
+
 const PROVIDER_LABEL: Record<EmailProvider, string> = {
   outlook: "Outlook",
   gmail: "Gmail",
@@ -523,6 +535,15 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
           </div>
         )}
 
+        {/* New Emails triage deck */}
+        {active && (
+          <TriageDeck
+            projectId={projectId}
+            linkedConvIds={linkedConvIds}
+            onLinked={loadThreads}
+          />
+        )}
+
         {/* Thread table */}
         {loadingThreads ? (
           <SkeletonTable rows={5} cols={4} />
@@ -963,6 +984,383 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── New Emails Triage Deck ────────────────────────────────────────────────────
+//
+// A card deck of inbox emails the user has neither linked to this project nor
+// declined. One card shows at a time; AI-suggested actions (e.g. "Add to RFI
+// #4", "Create task …") load lazily per card and can be ticked before linking.
+// Link/Decline removes the card and the next one pops up.
+
+function TriageDeck({
+  projectId,
+  linkedConvIds,
+  onLinked,
+}: {
+  projectId: string;
+  linkedConvIds: Set<string>;
+  onLinked: () => void;
+}) {
+  const [deck, setDeck] = useState<InboxMessage[] | null>(null);
+  const [index, setIndex] = useState(0);
+  const [suggestionsByConv, setSuggestionsByConv] = useState<
+    Record<string, TriageSuggestion[] | "loading" | "error">
+  >({});
+  const [checkedByConv, setCheckedByConv] = useState<Record<string, string[]>>({});
+  const [busy, setBusy] = useState<"link" | "decline" | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [actedCount, setActedCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/projects/${projectId}/emails/triage`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        setDeck(data?.connected && Array.isArray(data.messages) ? data.messages : []);
+      })
+      .catch(() => {
+        if (!cancelled) setDeck([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // Threads linked elsewhere (e.g. via the modal) drop out of the deck too.
+  const visible = (deck ?? []).filter((m) => !linkedConvIds.has(m.conversationId));
+  const safeIndex = visible.length === 0 ? 0 : Math.min(index, visible.length - 1);
+  const current: InboxMessage | undefined = visible[safeIndex];
+  const suggestions = current ? suggestionsByConv[current.conversationId] : undefined;
+  const checked = current ? checkedByConv[current.conversationId] ?? [] : [];
+
+  // Lazily fetch AI suggestions for the card in view (cached per conversation).
+  useEffect(() => {
+    if (!current) return;
+    const convId = current.conversationId;
+    if (suggestionsByConv[convId] !== undefined) return;
+    setSuggestionsByConv((prev) => ({ ...prev, [convId]: "loading" }));
+    fetch(`/api/projects/${projectId}/emails/triage/suggest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversationId: convId,
+        subject: current.subject,
+        fromName: current.from.emailAddress.name,
+        fromAddress: current.from.emailAddress.address,
+        preview: current.bodyPreview,
+        receivedAt: current.receivedDateTime,
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) =>
+        setSuggestionsByConv((prev) => ({
+          ...prev,
+          [convId]: Array.isArray(data?.suggestions) ? data.suggestions : [],
+        }))
+      )
+      .catch(() =>
+        setSuggestionsByConv((prev) => ({ ...prev, [convId]: "error" }))
+      );
+  }, [current, suggestionsByConv, projectId]);
+
+  const toggleAction = (convId: string, suggestionId: string) => {
+    setCheckedByConv((prev) => {
+      const cur = prev[convId] ?? [];
+      return {
+        ...prev,
+        [convId]: cur.includes(suggestionId)
+          ? cur.filter((x) => x !== suggestionId)
+          : [...cur, suggestionId],
+      };
+    });
+  };
+
+  const flip = (dir: 1 | -1) => {
+    if (visible.length < 2 || busy) return;
+    setNotice(null);
+    setIndex((safeIndex + dir + visible.length) % visible.length);
+  };
+
+  const removeCurrent = () => {
+    if (!current) return;
+    const convId = current.conversationId;
+    setDeck((prev) => (prev ?? []).filter((m) => m.conversationId !== convId));
+    setIndex(safeIndex);
+    setActedCount((c) => c + 1);
+  };
+
+  const decline = async () => {
+    if (!current || busy) return;
+    setBusy("decline");
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/emails/triage/decline`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: current.conversationId }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Failed to decline this email.");
+      }
+      removeCurrent();
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Failed to decline this email.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const link = async () => {
+    if (!current || busy) return;
+    const convId = current.conversationId;
+    const actions = Array.isArray(suggestions)
+      ? suggestions.filter((s) => checked.includes(s.id))
+      : [];
+    setBusy("link");
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/emails/triage/link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: convId,
+          subject: current.subject || "(no subject)",
+          fromName: current.from.emailAddress.name,
+          fromAddress: current.from.emailAddress.address,
+          participants: [
+            current.from.emailAddress.address,
+            ...current.toRecipients.map((r) => r.emailAddress.address),
+          ].filter(Boolean),
+          latestMessagePreview: current.bodyPreview,
+          latestReceivedAt: current.receivedDateTime,
+          messageCount: 1,
+          actions: actions.map((a) => ({
+            id: a.id,
+            type: a.type,
+            rfiId: a.rfiId,
+            taskTitle: a.taskTitle,
+            taskDescription: a.taskDescription,
+            taskDueDate: a.taskDueDate,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Failed to link this email.");
+      }
+      const data = await res.json();
+      const failed: { id: string }[] = (data?.results ?? []).filter(
+        (r: { ok: boolean }) => !r.ok
+      );
+      if (failed.length > 0) {
+        const labelById = new Map(actions.map((a) => [a.id, a.label]));
+        setNotice(
+          `Email linked, but ${failed.length} action${failed.length > 1 ? "s" : ""} failed: ${failed
+            .map((f) => labelById.get(f.id) ?? "unknown action")
+            .join("; ")}`
+        );
+      }
+      removeCurrent();
+      onLinked();
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Failed to link this email.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Nothing to review and nothing happened this session — stay out of the way.
+  if (deck !== null && visible.length === 0 && actedCount === 0 && !notice) return null;
+
+  const checkedCount = Array.isArray(suggestions)
+    ? checked.filter((id) => suggestions.some((s) => s.id === id)).length
+    : 0;
+
+  return (
+    <section className="mb-6">
+      <div className="flex items-end justify-between mb-3 gap-4">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">New Emails</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Review inbox emails you haven&apos;t linked or declined yet. Tick any suggested
+            actions, then link — the next email pops up.
+          </p>
+        </div>
+        {visible.length > 0 && (
+          <span className="text-xs text-gray-500 shrink-0">
+            {safeIndex + 1} of {visible.length}
+          </span>
+        )}
+      </div>
+
+      {notice && (
+        <div className="mb-3 px-4 py-2.5 rounded-lg border bg-amber-50 border-amber-200 text-amber-800 text-xs flex items-start justify-between gap-3">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="shrink-0 underline hover:opacity-80">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {deck === null ? (
+        <div className="px-5 py-4 bg-white border border-dashed border-gray-300 rounded-xl text-sm text-gray-400 flex items-center gap-2.5">
+          <span className="inline-block w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-500 rounded-full animate-spin" />
+          Checking your inbox for new emails…
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="px-5 py-5 bg-white border border-gray-200 rounded-xl text-center text-sm text-gray-500">
+          All caught up — no new emails to review.
+        </div>
+      ) : (
+        <div className="relative pb-3">
+          {/* Cards peeking out behind the active one to suggest a deck */}
+          {visible.length > 2 && (
+            <div
+              className="absolute inset-x-4 top-4 bottom-0 bg-white border border-gray-200 rounded-xl"
+              aria-hidden
+            />
+          )}
+          {visible.length > 1 && (
+            <div
+              className="absolute inset-x-2 top-2 bottom-1.5 bg-white border border-gray-200 rounded-xl"
+              aria-hidden
+            />
+          )}
+
+          <div
+            key={current!.conversationId}
+            className="relative bg-white border border-gray-200 rounded-xl shadow-sm animate-scale-in"
+          >
+            {/* Email */}
+            <div className="px-5 pt-4 pb-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3
+                    className={`text-sm truncate ${
+                      current!.isRead ? "font-medium text-gray-900" : "font-semibold text-gray-900"
+                    }`}
+                  >
+                    {current!.subject || "(no subject)"}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                    {current!.from.emailAddress.name || current!.from.emailAddress.address}
+                    {current!.from.emailAddress.name && (
+                      <span className="text-gray-400"> &lt;{current!.from.emailAddress.address}&gt;</span>
+                    )}
+                  </p>
+                </div>
+                <span className="text-xs text-gray-400 shrink-0">
+                  {formatDate(current!.receivedDateTime)}
+                </span>
+              </div>
+              {current!.bodyPreview && (
+                <p className="text-sm text-gray-600 mt-3 line-clamp-4 whitespace-pre-wrap">
+                  {current!.bodyPreview}
+                </p>
+              )}
+            </div>
+
+            {/* Suggested actions */}
+            <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/70">
+              <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                Suggested actions
+              </p>
+              {suggestions === undefined || suggestions === "loading" ? (
+                <p className="text-xs text-gray-400 py-1 flex items-center gap-2">
+                  <span className="inline-block w-3 h-3 border-2 border-gray-300 border-t-gray-500 rounded-full animate-spin" />
+                  Analyzing email…
+                </p>
+              ) : suggestions === "error" ? (
+                <p className="text-xs text-gray-400 py-1">
+                  Couldn&apos;t load suggestions — you can still link this email.
+                </p>
+              ) : suggestions.length === 0 ? (
+                <p className="text-xs text-gray-400 py-1">
+                  No suggested actions — linking will attach this thread to the project.
+                </p>
+              ) : (
+                <div className="space-y-0.5">
+                  {suggestions.map((s) => (
+                    <label key={s.id} className="flex items-start gap-2.5 py-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked.includes(s.id)}
+                        onChange={() => toggleAction(current!.conversationId, s.id)}
+                        disabled={!!busy}
+                        className="mt-0.5 w-4 h-4 rounded border-gray-300 accent-gray-900 shrink-0"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900">{s.label}</span>
+                        {s.reason && (
+                          <span className="block text-xs text-gray-500 mt-0.5">{s.reason}</span>
+                        )}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-1">
+                {visible.length > 1 && (
+                  <>
+                    <button
+                      onClick={() => flip(-1)}
+                      disabled={!!busy}
+                      title="Previous email"
+                      className="p-1.5 rounded-md border border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => flip(1)}
+                      disabled={!!busy}
+                      title="Next email"
+                      className="p-1.5 rounded-md border border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={decline}
+                  disabled={!!busy}
+                  className="px-4 py-2 text-sm font-medium border border-gray-300 text-gray-600 rounded-md hover:bg-gray-50 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {busy === "decline" ? "Declining…" : "Decline"}
+                </button>
+                <button
+                  onClick={link}
+                  disabled={!!busy}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  {busy === "link"
+                    ? "Linking…"
+                    : checkedCount > 0
+                    ? `Link + ${checkedCount} Action${checkedCount > 1 ? "s" : ""}`
+                    : "Link to Project"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
