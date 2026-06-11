@@ -8,18 +8,21 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getSubmittals } from '../../../../lib/api';
-import { LoadingSpinner } from '../../../../components/ui/LoadingSpinner';
-import { EmptyState } from '../../../../components/ui/EmptyState';
-import { submittalStatusBadge } from '../../../../components/ui/Badge';
-import { Colors } from '../../../../constants/colors';
-import type { Submittal } from '../../../../types';
+import { getSubmittals } from '../../../../../lib/api';
+import { LoadingSpinner } from '../../../../../components/ui/LoadingSpinner';
+import { EmptyState } from '../../../../../components/ui/EmptyState';
+import { submittalStatusBadge } from '../../../../../components/ui/Badge';
+import { Colors } from '../../../../../constants/colors';
+import type { Submittal } from '../../../../../types';
+
+type FilterStatus = 'all' | 'draft' | 'submitted' | 'under_review' | 'approved' | 'revise_resubmit' | 'rejected';
 
 export default function SubmittalsScreen() {
   const { id: projectId } = useLocalSearchParams<{ id: string }>();
   const [submittals, setSubmittals] = useState<Submittal[]>([]);
+  const [filter, setFilter] = useState<FilterStatus>('all');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -37,20 +40,44 @@ export default function SubmittalsScreen() {
 
   useEffect(() => { load(); }, [load]);
 
+  const filtered = filter === 'all' ? submittals : submittals.filter((s) => s.status === filter);
+
   if (loading) return <LoadingSpinner />;
 
   return (
     <>
       <Stack.Screen options={{ title: 'Submittals' }} />
       <View style={styles.root}>
+        {/* Quick filter row */}
+        <View style={styles.filterRow}>
+          {(['all', 'submitted', 'under_review', 'approved', 'revise_resubmit'] as FilterStatus[]).map((f) => {
+            const label = f === 'all' ? 'All' : f === 'under_review' ? 'In Review' : f === 'revise_resubmit' ? 'Revise' : f.charAt(0).toUpperCase() + f.slice(1);
+            const count = f === 'all' ? submittals.length : submittals.filter((s) => s.status === f).length;
+            return (
+              <TouchableOpacity
+                key={f}
+                style={[styles.filterTab, filter === f && styles.filterTabActive]}
+                onPress={() => setFilter(f)}
+              >
+                <Text style={[styles.filterLabel, filter === f && styles.filterLabelActive]}>
+                  {label} ({count})
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         <FlatList
-          data={submittals}
+          data={filtered}
           keyExtractor={(s) => s.id}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.primary} />
           }
           renderItem={({ item: sub }) => (
-            <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.card}
+              onPress={() => router.push(`/(app)/projects/${projectId}/submittals/${sub.id}`)}
+            >
               <View style={styles.cardTop}>
                 <Text style={styles.number}>
                   #{sub.submittal_number}
@@ -81,12 +108,12 @@ export default function SubmittalsScreen() {
                   </View>
                 )}
               </View>
-            </View>
+            </TouchableOpacity>
           )}
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListEmptyComponent={
-            <EmptyState title="No submittals" message="No submittals have been created for this project." />
+            <EmptyState title="No submittals" message={filter !== 'all' ? `No ${filter.replace('_', ' ')} submittals.` : 'No submittals have been created for this project.'} />
           }
         />
       </View>
@@ -96,6 +123,25 @@ export default function SubmittalsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
+  filterRow: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  filterTab: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: Colors.background,
+  },
+  filterTabActive: { backgroundColor: Colors.primary + '22' },
+  filterLabel: { color: Colors.textMuted, fontSize: 12, fontWeight: '500' },
+  filterLabelActive: { color: Colors.primary, fontWeight: '600' },
   list: { padding: 16, flexGrow: 1 },
   card: {
     backgroundColor: Colors.surface,

@@ -23,20 +23,48 @@ const STATUS_COLOR: Record<string, 'blue' | 'green' | 'yellow' | 'gray' | 'red'>
   on_hold: 'red',
 };
 
-const FEATURES: {
-  key: string;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  route: string;
-  color: string;
-}[] = [
-  { key: 'rfis', label: 'RFIs', icon: 'help-circle-outline', route: 'rfis', color: '#3b82f6' },
-  { key: 'tasks', label: 'Tasks', icon: 'checkmark-circle-outline', route: 'tasks', color: '#8b5cf6' },
-  { key: 'submittals', label: 'Submittals', icon: 'document-text-outline', route: 'submittals', color: '#06b6d4' },
-  { key: 'daily-log', label: 'Daily Log', icon: 'journal-outline', route: 'daily-log', color: '#f59e0b' },
-  { key: 'photos', label: 'Photos', icon: 'camera-outline', route: 'photos', color: '#ec4899' },
-  { key: 'budget', label: 'Budget', icon: 'bar-chart-outline', route: 'budget', color: '#22c55e' },
-  { key: 'directory', label: 'Directory', icon: 'people-outline', route: 'directory', color: '#f97316' },
+type FeatureSection = {
+  title: string;
+  items: {
+    key: string;
+    label: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    route: string;
+    color: string;
+  }[];
+};
+
+const FEATURE_SECTIONS: FeatureSection[] = [
+  {
+    title: 'Field',
+    items: [
+      { key: 'rfis', label: 'RFIs', icon: 'help-circle-outline', route: 'rfis', color: '#3b82f6' },
+      { key: 'submittals', label: 'Submittals', icon: 'document-text-outline', route: 'submittals', color: '#06b6d4' },
+      { key: 'punch-list', label: 'Punch List', icon: 'checkmark-done-outline', route: 'punch-list', color: '#ef4444' },
+      { key: 'daily-log', label: 'Daily Log', icon: 'journal-outline', route: 'daily-log', color: '#f59e0b' },
+      { key: 'photos', label: 'Photos', icon: 'camera-outline', route: 'photos', color: '#ec4899' },
+      { key: 'drawings', label: 'Drawings', icon: 'map-outline', route: 'drawings', color: '#8b5cf6' },
+    ],
+  },
+  {
+    title: 'Project Management',
+    items: [
+      { key: 'tasks', label: 'Tasks', icon: 'checkmark-circle-outline', route: 'tasks', color: '#8b5cf6' },
+      { key: 'meetings', label: 'Meetings', icon: 'people-circle-outline', route: 'meetings', color: '#06b6d4' },
+      { key: 'transmittals', label: 'Transmittals', icon: 'send-outline', route: 'transmittals', color: '#f97316' },
+      { key: 'specifications', label: 'Specs', icon: 'book-outline', route: 'specifications', color: '#22c55e' },
+      { key: 'directory', label: 'Directory', icon: 'people-outline', route: 'directory', color: '#f97316' },
+    ],
+  },
+  {
+    title: 'Financials',
+    items: [
+      { key: 'budget', label: 'Budget', icon: 'bar-chart-outline', route: 'budget', color: '#22c55e' },
+      { key: 'commitments', label: 'Commitments', icon: 'document-attach-outline', route: 'commitments', color: '#f59e0b' },
+      { key: 'change-events', label: 'Change Events', icon: 'git-pull-request-outline', route: 'change-events', color: '#f97316' },
+      { key: 'change-orders', label: 'Change Orders', icon: 'swap-horizontal-outline', route: 'change-orders', color: '#ef4444' },
+    ],
+  },
 ];
 
 function formatCurrency(value: number) {
@@ -64,11 +92,13 @@ export default function ProjectScreen() {
   useEffect(() => { load(); }, [id]);
 
   if (loading) return <LoadingSpinner />;
-  if (!project) return (
-    <View style={styles.root}>
-      <Text style={{ color: Colors.text, padding: 24 }}>Project not found.</Text>
-    </View>
-  );
+  if (!project) {
+    return (
+      <View style={styles.root}>
+        <Text style={{ color: Colors.text, padding: 24 }}>Project not found.</Text>
+      </View>
+    );
+  }
 
   const statusColor = STATUS_COLOR[project.status] ?? 'gray';
 
@@ -121,27 +151,31 @@ export default function ProjectScreen() {
           </View>
 
           {project.description && (
-            <Text style={styles.description}>{project.description}</Text>
+            <Text style={styles.description} numberOfLines={3}>{project.description}</Text>
           )}
         </View>
 
-        {/* Feature Grid */}
-        <Text style={styles.sectionTitle}>Project Features</Text>
-        <View style={styles.featureGrid}>
-          {FEATURES.map((f) => (
-            <TouchableOpacity
-              key={f.key}
-              style={styles.featureCard}
-              onPress={() => router.push(`/(app)/projects/${id}/${f.route}`)}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.featureIcon, { backgroundColor: f.color + '22' }]}>
-                <Ionicons name={f.icon} size={24} color={f.color} />
-              </View>
-              <Text style={styles.featureLabel}>{f.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* Feature Sections */}
+        {FEATURE_SECTIONS.map((section) => (
+          <View key={section.title} style={styles.sectionBlock}>
+            <Text style={styles.sectionTitle}>{section.title}</Text>
+            <View style={styles.featureGrid}>
+              {section.items.map((f) => (
+                <TouchableOpacity
+                  key={f.key}
+                  style={styles.featureCard}
+                  onPress={() => router.push(`/(app)/projects/${id}/${f.route}`)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.featureIcon, { backgroundColor: f.color + '22' }]}>
+                    <Ionicons name={f.icon} size={22} color={f.color} />
+                  </View>
+                  <Text style={styles.featureLabel}>{f.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ))}
       </ScrollView>
     </>
   );
@@ -173,30 +207,22 @@ const styles = StyleSheet.create({
   infoHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 16 },
   projectName: { color: Colors.text, fontSize: 18, fontWeight: '700' },
   projectNumber: { color: Colors.textMuted, fontSize: 13, marginTop: 2 },
-  infoGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 12,
-  },
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 12 },
   infoCell: { minWidth: '45%', flex: 1 },
   infoCellHeader: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
   infoCellLabel: { color: Colors.textMuted, fontSize: 11, fontWeight: '500', textTransform: 'uppercase', letterSpacing: 0.3 },
   infoCellValue: { color: Colors.text, fontSize: 14, fontWeight: '500' },
   description: { color: Colors.textMuted, fontSize: 14, lineHeight: 20, marginTop: 8 },
+  sectionBlock: { marginBottom: 20 },
   sectionTitle: {
     color: Colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 12,
+    letterSpacing: 0.8,
+    marginBottom: 10,
   },
-  featureGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
+  featureGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   featureCard: {
     width: '30%',
     flex: 1,
@@ -210,11 +236,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   featureIcon: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  featureLabel: { color: Colors.text, fontSize: 13, fontWeight: '500', textAlign: 'center' },
+  featureLabel: { color: Colors.text, fontSize: 12, fontWeight: '500', textAlign: 'center' },
 });

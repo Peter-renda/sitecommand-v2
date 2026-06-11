@@ -102,6 +102,7 @@ export interface Submittal {
   issue_date: string | null;
   final_due_date: string | null;
   ball_in_court_id: string | null;
+  description: string | null;
   created_at: string;
 }
 
@@ -200,4 +201,234 @@ export interface PhotoAlbum {
   cover_url: string | null;
   photo_count: number;
   created_at: string;
+}
+
+// ─── Punch List ──────────────────────────────────────────────────────────────
+
+export type PunchListStatus = 'initiated' | 'ready_for_review' | 'not_accepted' | 'complete';
+export type PunchListPriority = 'low' | 'medium' | 'high';
+
+export interface PunchListItem {
+  id: string;
+  project_id: string;
+  item_number: number;
+  title: string;
+  status: PunchListStatus;
+  type: string | null;
+  assignees: string[];
+  due_date: string | null;
+  priority: PunchListPriority | null;
+  punch_item_manager_id: string | null;
+  final_approver_id: string | null;
+  location: string | null;
+  trade: string | null;
+  reference: string | null;
+  description: string | null;
+  attachments: Attachment[];
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Drawings ────────────────────────────────────────────────────────────────
+
+export interface Drawing {
+  id: string;
+  project_id: string;
+  upload_id: string;
+  page_number: number;
+  storage_path: string;
+  viewer_page: number | null;
+  filename: string;
+  uploaded_by_name: string | null;
+  uploaded_at: string;
+  drawing_date: string | null;
+  received_date: string | null;
+  revision: string | null;
+  drawing_no: string | null;
+  title: string | null;
+}
+
+export interface DrawingUpload {
+  id: string;
+  project_id: string;
+  storage_path: string;
+  filename: string;
+  page_count: number;
+  uploaded_by_name: string | null;
+  uploaded_at: string;
+}
+
+// ─── Specifications ───────────────────────────────────────────────────────────
+
+export interface Specification {
+  id: string;
+  project_id: string;
+  spec_number: string | null;
+  title: string;
+  description: string | null;
+  created_at: string;
+}
+
+// ─── Meetings ────────────────────────────────────────────────────────────────
+
+export type MeetingStatus = 'draft' | 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface Meeting {
+  id: string;
+  project_id: string;
+  meeting_number: number;
+  title: string;
+  date: string | null;
+  status: MeetingStatus;
+  location: string | null;
+  series: string | null;
+  overview: string | null;
+  meeting_link: string | null;
+  timezone: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  is_private: boolean;
+  is_draft: boolean;
+  attendees: MeetingAttendee[];
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface MeetingAttendee {
+  contact_id: string;
+  name: string;
+  email: string | null;
+  present: boolean;
+}
+
+// ─── Transmittals ─────────────────────────────────────────────────────────────
+
+export interface Transmittal {
+  id: string;
+  project_id: string;
+  transmittal_number: number;
+  subject: string | null;
+  to_id: string | null;
+  to_name: string | null;
+  cc_contacts: string[];
+  sent_via: string | null;
+  status: string;
+  private: boolean;
+  due_by: string | null;
+  sent_date: string | null;
+  items: TransmittalItem[];
+  comments: string | null;
+  attachments: Attachment[];
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface TransmittalItem {
+  description: string;
+  quantity: number | null;
+  type: string | null;
+  action: string | null;
+}
+
+// ─── Commitments ─────────────────────────────────────────────────────────────
+
+export type CommitmentStatus = 'draft' | 'out_for_bid' | 'out_for_signature' | 'approved' | 'complete' | 'void' | 'terminated';
+export type CommitmentType = 'subcontract' | 'purchase_order';
+
+export interface Commitment {
+  id: string;
+  project_id: string;
+  number: string | null;
+  type: CommitmentType;
+  contract_company: string | null;
+  title: string | null;
+  status: CommitmentStatus;
+  executed: boolean;
+  original_contract_amount: number | null;
+  approved_change_orders: number | null;
+  pending_change_orders: number | null;
+  trades: string[];
+  start_date: string | null;
+  estimated_completion: string | null;
+  actual_completion: string | null;
+  is_private: boolean;
+  payment_terms: string | null;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+  sov_accounting_method: string | null;
+}
+
+export interface CommitmentSOVLine {
+  id?: string;
+  line_number: number;
+  budget_code: string | null;
+  description: string;
+  amount: number;
+  quantity: number | null;
+  unit_of_measure: string | null;
+  unit_cost: number | null;
+  billed_to_date: number | null;
+  amount_remaining: number | null;
+}
+
+// ─── Change Events ────────────────────────────────────────────────────────────
+
+export interface ChangeEvent {
+  id: string;
+  project_id: string;
+  number: number;
+  title: string;
+  status: string;
+  origin: string | null;
+  type: string | null;
+  change_reason: string | null;
+  scope: string | null;
+  description: string | null;
+  line_items: ChangeEventLineItem[];
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChangeEventLineItem {
+  id: string;
+  budget_code: string | null;
+  description: string | null;
+  unit_qty: number | null;
+  unit_cost: number | null;
+  rom: number | null;
+  amount: number | null;
+}
+
+// ─── Change Orders ────────────────────────────────────────────────────────────
+
+export type ChangeOrderType = 'prime' | 'commitment';
+
+export interface ChangeOrder {
+  id: string;
+  project_id: string;
+  number: number;
+  type: ChangeOrderType;
+  contract_name: string | null;
+  title: string | null;
+  amount: number | null;
+  status: string;
+  revision: string | null;
+  date_initiated: string | null;
+  due_date: string | null;
+  is_locked: boolean;
+  change_reason: string | null;
+  description: string | null;
+  is_private: boolean;
+  executed: boolean;
+  schedule_of_values: ChangeOrderSOVLine[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChangeOrderSOVLine {
+  budget_code: string | null;
+  description: string;
+  amount: number;
 }

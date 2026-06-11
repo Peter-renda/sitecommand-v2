@@ -10,11 +10,12 @@ import {
   Image,
   Modal,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { getPhotos } from '../../../../lib/api';
+import { getPhotos, uploadPhotos } from '../../../../lib/api';
 import { LoadingSpinner } from '../../../../components/ui/LoadingSpinner';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { Colors } from '../../../../constants/colors';
@@ -28,6 +29,7 @@ export default function PhotosScreen() {
   const [photos, setPhotos] = useState<ProjectPhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<ProjectPhoto | null>(null);
 
   const load = useCallback(async () => {
@@ -55,11 +57,26 @@ export default function PhotosScreen() {
       allowsMultipleSelection: true,
     });
 
-    if (!result.canceled && result.assets.length > 0) {
+    if (result.canceled || result.assets.length === 0) return;
+
+    setUploading(true);
+    try {
+      const assets = result.assets.map((a) => ({
+        uri: a.uri,
+        name: a.fileName ?? `photo-${Date.now()}.jpg`,
+        type: a.mimeType ?? 'image/jpeg',
+      }));
+
+      const newPhotos = await uploadPhotos(projectId, assets);
+      setPhotos((prev) => [...newPhotos, ...prev]);
       Alert.alert(
-        `${result.assets.length} photo${result.assets.length > 1 ? 's' : ''} selected`,
-        'Photo upload to the server is coming soon. Photos are selected and ready.',
+        'Uploaded',
+        `${newPhotos.length} photo${newPhotos.length !== 1 ? 's' : ''} uploaded successfully.`,
       );
+    } catch {
+      Alert.alert('Error', 'Failed to upload photos. Please try again.');
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -71,8 +88,16 @@ export default function PhotosScreen() {
         options={{
           title: 'Photos',
           headerRight: () => (
-            <TouchableOpacity onPress={handleAddPhoto} style={{ marginRight: 4 }}>
-              <Ionicons name="add-circle-outline" size={26} color={Colors.primary} />
+            <TouchableOpacity
+              onPress={handleAddPhoto}
+              style={{ marginRight: 4 }}
+              disabled={uploading}
+            >
+              {uploading ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <Ionicons name="add-circle-outline" size={26} color={Colors.primary} />
+              )}
             </TouchableOpacity>
           ),
         }}
@@ -115,7 +140,7 @@ export default function PhotosScreen() {
                     <Text style={styles.lightboxCaptionText}>{selected.caption}</Text>
                   </View>
                 )}
-                <Text style={styles.lightboxDate}>
+                <Text style={styles.lightboxMeta}>
                   {new Date(selected.created_at).toLocaleDateString()}
                   {selected.uploader_name ? ` · ${selected.uploader_name}` : ''}
                 </Text>
@@ -149,5 +174,5 @@ const styles = StyleSheet.create({
   lightboxImg: { width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.2 },
   lightboxCaption: { marginTop: 16, paddingHorizontal: 24 },
   lightboxCaptionText: { color: Colors.white, fontSize: 14, textAlign: 'center' },
-  lightboxDate: { color: Colors.textMuted, fontSize: 12, marginTop: 8 },
+  lightboxMeta: { color: Colors.textMuted, fontSize: 12, marginTop: 8 },
 });
