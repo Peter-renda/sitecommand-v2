@@ -43,6 +43,7 @@ const scenario = {
   vendorExists: false,
   failFirstQboCallWith401: false,
   classExists: false,
+  customerExists: false,
 };
 
 function json(status: number, body: unknown): Response {
@@ -95,6 +96,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
           : json(200, { QueryResponse: {} });
       }
       if (q.includes("FROM Customer")) {
+        if (scenario.customerExists) {
+          return json(200, { QueryResponse: { Customer: [{ Id: "501", DisplayName: "EH Sitework" }] } });
+        }
         return json(200, { QueryResponse: { Customer: [{ Id: "55", DisplayName: "Owner LLC" }] } });
       }
       if (q.includes("FROM Account") && q.includes("Cost of Goods Sold")) {
@@ -121,6 +125,41 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
           : json(200, { QueryResponse: {} }); // no existing class → create
       }
       return json(200, { QueryResponse: {} });
+    }
+
+    // Profit & Loss DETAIL report (Items-based job-to-date pull). Includes the
+    // item_name column so the pull can sum each Item's transactions for the
+    // requested Customer:Job. Section + summary rows are present to verify
+    // group subtotals are NOT double-counted.
+    if (path.endsWith("/reports/ProfitAndLossDetail") && method === "GET") {
+      return json(200, {
+        Header: { ReportName: "ProfitAndLossDetail" },
+        Columns: {
+          Column: [
+            { ColTitle: "Date", ColType: "tx_date" },
+            { ColTitle: "Name", ColType: "name" },
+            { ColTitle: "Memo", ColType: "memo" },
+            { ColTitle: "Product/Service", ColType: "item_name" },
+            { ColTitle: "Amount", ColType: "Amount" },
+          ],
+        },
+        Rows: {
+          Row: [
+            {
+              type: "Section",
+              Header: { ColData: [{ value: "Expenses" }] },
+              Rows: {
+                Row: [
+                  { type: "Data", ColData: [{ value: "2026-05-01" }, { value: "Acme Concrete" }, { value: "Footings" }, { value: "02-310.C", id: "i1" }, { value: "20000.00" }] },
+                  { type: "Data", ColData: [{ value: "2026-05-15" }, { value: "Acme Concrete" }, { value: "Slabs" }, { value: "02-310.C", id: "i1" }, { value: "15500.00" }] },
+                  { type: "Data", ColData: [{ value: "2026-05-20" }, { value: "Vendor X" }, { value: "Materials" }, { value: "01-030.M", id: "i2" }, { value: "768.66" }] },
+                ],
+              },
+              Summary: { ColData: [{ value: "Total Expenses" }, { value: "" }, { value: "" }, { value: "" }, { value: "36268.66" }] },
+            },
+          ],
+        },
+      });
     }
 
     // Profit & Loss report (job-to-date cost pull). Section + summary present to
@@ -536,6 +575,63 @@ async function main() {
   assert.ok(reportCall, "must request the ProfitAndLoss report");
   assert.match(reportCall!.url, /classid=44/, "P&L must be scoped to the project's Class id");
   pass("pulls job-to-date costs by budget code, scoped to project Class, skipping unmapped codes");
+
+  // ── 11. Items-based job-to-date pull (Customer:Job + PnLDetail by item_name) ─
+  console.log("\n[11] Items-based job-to-date pull");
+  process.env.QBO_BUDGET_CODE_MAP = JSON.stringify({
+    "02-310.C": { item: "02-310.C" },
+    "01-030.M": { item: "01-030.M" },
+    "09-925.L": { item: "09-925.L" }, // mapped but not present in the mock report
+  });
+  scenario.customerExists = true;
+  calls.length = 0;
+  const jtdItems = await fetchQBOJobToDateCosts("co-1", appCreds, prodCreds, {
+    projectName: "EH Sitework",
+    budgetCodes: ["02-310.C", "01-030.M", "09-925.L"],
+  });
+  scenario.customerExists = false;
+  delete process.env.QBO_BUDGET_CODE_MAP;
+
+  assert.ok(jtdItems.ok, `items-based pull failed: ${!jtdItems.ok ? jtdItems.error : ""}`);
+  assert.equal(jtdItems.ok && jtdItems.costs["02-310.C"], 35500, "two posted lines on 02-310.C should sum to 35,500");
+  assert.equal(jtdItems.ok && jtdItems.costs["01-030.M"], 768.66, "single posted line on 01-030.M should map through");
+  assert.ok(jtdItems.ok && jtdItems.costs["09-925.L"] === undefined, "code mapped to an item with no postings is omitted (not zeroed)");
+  const customerLookup = calls.find((c) => c.url.includes("FROM%20Customer"));
+  assert.ok(customerLookup, "must look up the Customer:Job for the project");
+  const detailReport = calls.find((c) => c.url.includes("/reports/ProfitAndLossDetail"));
+  assert.ok(detailReport, "must request ProfitAndLossDetail for the items-based pull");
+  assert.match(detailReport!.url, /customer=501/, "PnLDetail must be scoped to the resolved customer id");
+  assert.match(detailReport!.url, /columns=tx_date,name,memo,item_name,subt_nat_amount/, "must request the item_name column");
+  // The legacy account-based P&L must NOT be called when every code is item-mapped.
+  const accountReport = calls.find((c) => /reports\/ProfitAndLoss\?/.test(c.url));
+  assert.equal(accountReport, undefined, "items-only mapping should not trigger the account-based P&L");
+  pass("items-based pull resolves Customer:Job, reads PnLDetail by item_name, and aggregates correctly");
+
+  // ── 12. Mixed mapping: some codes by Item, others by Account (legacy) ───────
+  console.log("\n[12] Mixed (items + accounts) pull");
+  process.env.QBO_BUDGET_CODE_MAP = JSON.stringify({
+    "02-310.C": { item: "02-310.C" },         // items path
+    "10-100.M": { account: "Job Materials" }, // legacy account path
+  });
+  scenario.customerExists = true;
+  scenario.classExists = true;
+  calls.length = 0;
+  const jtdMixed = await fetchQBOJobToDateCosts("co-1", appCreds, prodCreds, {
+    projectName: "EH Sitework",
+    budgetCodes: ["02-310.C", "10-100.M"],
+  });
+  scenario.customerExists = false;
+  scenario.classExists = false;
+  delete process.env.QBO_BUDGET_CODE_MAP;
+
+  assert.ok(jtdMixed.ok, `mixed pull failed: ${!jtdMixed.ok ? jtdMixed.error : ""}`);
+  assert.equal(jtdMixed.ok && jtdMixed.costs["02-310.C"], 35500, "items-mapped code resolved via PnLDetail");
+  assert.equal(jtdMixed.ok && jtdMixed.costs["10-100.M"], 30000, "account-mapped code resolved via PnL by Class");
+  const detailCall = calls.find((c) => c.url.includes("/reports/ProfitAndLossDetail"));
+  const summaryCall = calls.find((c) => /reports\/ProfitAndLoss\?/.test(c.url));
+  assert.ok(detailCall, "items path still runs");
+  assert.ok(summaryCall, "legacy account path still runs in parallel");
+  pass("mixed mapping merges item-based and account-based costs in one resync");
 
   console.log(`\nAll ${passed} QBO integration checks passed.`);
 }
