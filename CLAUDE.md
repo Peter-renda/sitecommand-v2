@@ -1634,6 +1634,7 @@ The Budget tool's ERP button is **Resync with ERP** (formerly the placeholder "R
 
 ### UI (SiteCommand)
 - `BudgetClient.tsx`: **Resync with ERP** button (top-right actions). `ErpConfirmModal` reads `/api/integrations/erp/status`, names the connected ERP, warns when none/both are connected, runs the pull, then refetches `/api/projects/[id]/budget` so updated Job to Date Costs render immediately. The Job to Date Costs column tooltip notes it is pulled via Resync with ERP.
+- Settings → Integrations → QuickBooks Online has a **Step 3 — Budget code map** editor (`QuickBooksSection` in `IntegrationsClient.tsx`): a table of budget code → QBO Account (Class/Item optional for pushes), Add row / Remove / Save. The Account column is a `datalist`-backed picker populated from `GET /api/integrations/quickbooks/accounts` (active Expense / COGS / Other Expense accounts, via `fetchQBOAccounts`), so users select the exact account name instead of retyping. The settings PATCH whitelists `QBO_BUDGET_CODE_MAP` and validates the JSON shape (`{ "<code>": { account?, class?, item? } }`) server-side before upserting.
 
 ### Verification
 - Both offline checks cover the pull: `fetchQBOJobToDateCosts` (P&L report parse, Class scoping, account→code reverse-map, unmapped codes skipped) and `fetchSage300CreJobToDateCosts` (job-scoped cost-code actuals, code/name match, unmatched skipped).

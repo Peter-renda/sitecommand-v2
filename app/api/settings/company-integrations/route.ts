@@ -31,7 +31,46 @@ const QBO_KEYS = [
   "QBO_ACCESS_TOKEN",
   "QBO_REFRESH_TOKEN",
   "QBO_ENVIRONMENT",
+  "QBO_BUDGET_CODE_MAP",
 ] as const;
+
+/**
+ * Validates QBO_BUDGET_CODE_MAP. Shape: { "<budget code>": { account?: string, class?: string, item?: string } }
+ * Returns the canonicalized JSON string to store, or an error message.
+ */
+function validateBudgetCodeMap(raw: string): { ok: true; value: string } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: "Budget code map must be valid JSON." };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: "Budget code map must be a JSON object keyed by budget code." };
+  }
+  const out: Record<string, { account?: string; class?: string; item?: string }> = {};
+  for (const [code, entryRaw] of Object.entries(parsed as Record<string, unknown>)) {
+    const codeKey = code.trim();
+    if (!codeKey) return { ok: false, error: "Budget codes cannot be blank." };
+    if (!entryRaw || typeof entryRaw !== "object" || Array.isArray(entryRaw)) {
+      return { ok: false, error: `Entry for "${codeKey}" must be an object.` };
+    }
+    const entry = entryRaw as Record<string, unknown>;
+    const clean: { account?: string; class?: string; item?: string } = {};
+    for (const field of ["account", "class", "item"] as const) {
+      const v = entry[field];
+      if (v == null || v === "") continue;
+      if (typeof v !== "string") {
+        return { ok: false, error: `"${codeKey}".${field} must be a string.` };
+      }
+      const trimmed = v.trim();
+      if (trimmed) clean[field] = trimmed;
+    }
+    if (!clean.account && !clean.class && !clean.item) continue; // drop empty rows
+    out[codeKey] = clean;
+  }
+  return { ok: true, value: JSON.stringify(out) };
+}
 
 const XERO_KEYS = [
   "XERO_CLIENT_ID",
@@ -112,13 +151,18 @@ export async function PATCH(req: NextRequest) {
   const upserts: { company_id: string; key: string; value: string; updated_at: string }[] = [];
   for (const key of ALL_KEYS) {
     if (typeof body[key as AllKey] === "string") {
-      const val = (body[key as AllKey] as string).trim();
+      let val = (body[key as AllKey] as string).trim();
       if (val) {
         if (key === "QBO_ENVIRONMENT" && val !== "sandbox" && val !== "production") {
           return NextResponse.json(
             { error: "QBO_ENVIRONMENT must be 'sandbox' or 'production'" },
             { status: 400 }
           );
+        }
+        if (key === "QBO_BUDGET_CODE_MAP") {
+          const validated = validateBudgetCodeMap(val);
+          if (!validated.ok) return NextResponse.json({ error: validated.error }, { status: 400 });
+          val = validated.value;
         }
         upserts.push({ company_id: session.company_id!, key, value: val, updated_at: now });
       }

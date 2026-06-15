@@ -264,6 +264,45 @@ const QBO_ERROR_MESSAGES: Record<string, string> = {
   qbo_other_erp_connected: "Sage 300 CRE is already connected. Only one ERP integration may be connected at a time — disconnect Sage 300 CRE first.",
 };
 
+type BudgetCodeMapRow = { code: string; account: string; class: string; item: string };
+
+function parseBudgetCodeMap(raw: string | null | undefined): BudgetCodeMapRow[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+    return Object.entries(parsed as Record<string, { account?: string; class?: string; item?: string }>)
+      .map(([code, v]) => ({
+        code,
+        account: v?.account ?? "",
+        class: v?.class ?? "",
+        item: v?.item ?? "",
+      }))
+      .sort((a, b) => a.code.localeCompare(b.code));
+  } catch {
+    return [];
+  }
+}
+
+function serializeBudgetCodeMap(rows: BudgetCodeMapRow[]): { ok: true; value: string } | { ok: false; error: string } {
+  const out: Record<string, { account?: string; class?: string; item?: string }> = {};
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const code = row.code.trim();
+    if (!code) continue;
+    if (seen.has(code)) return { ok: false, error: `Budget code "${code}" is mapped more than once.` };
+    seen.add(code);
+    const entry: { account?: string; class?: string; item?: string } = {};
+    if (row.account.trim()) entry.account = row.account.trim();
+    if (row.class.trim()) entry.class = row.class.trim();
+    if (row.item.trim()) entry.item = row.item.trim();
+    if (!entry.account && !entry.class && !entry.item) continue;
+    if (!entry.account) return { ok: false, error: `"${code}" needs an Account to be useful (Class/Item alone won't pull costs).` };
+    out[code] = entry;
+  }
+  return { ok: true, value: JSON.stringify(out) };
+}
+
 function QuickBooksSection() {
   const [data, setData] = useState<Record<string, string | null>>({});
   const [form, setForm] = useState({ QBO_CLIENT_ID: "", QBO_CLIENT_SECRET: "" });
@@ -277,6 +316,15 @@ function QuickBooksSection() {
   const connected = !!(data.QBO_REALM_ID && data.QBO_ACCESS_TOKEN);
   const appConfigured = !!(data.QBO_CLIENT_ID && data.QBO_CLIENT_SECRET);
 
+  // Budget code map editor state.
+  const [mapRows, setMapRows] = useState<BudgetCodeMapRow[]>([]);
+  const [mapSaving, setMapSaving] = useState(false);
+  const [mapSaved, setMapSaved] = useState(false);
+  const [mapError, setMapError] = useState("");
+  const [qboAccounts, setQboAccounts] = useState<{ name: string; type: string }[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsError, setAccountsError] = useState("");
+
   useEffect(() => {
     fetch("/api/settings/company-integrations?integration=quickbooks")
       .then((r) => r.json())
@@ -287,9 +335,25 @@ function QuickBooksSection() {
           QBO_CLIENT_SECRET: d.QBO_CLIENT_SECRET ?? "",
         });
         setEnvironment(d.QBO_ENVIRONMENT === "sandbox" ? "sandbox" : "production");
+        setMapRows(parseBudgetCodeMap(d.QBO_BUDGET_CODE_MAP));
       })
       .finally(() => setLoading(false));
   }, []);
+
+  // Load QBO accounts for the picker once we're connected.
+  useEffect(() => {
+    if (!connected) return;
+    setAccountsLoading(true);
+    setAccountsError("");
+    fetch("/api/integrations/quickbooks/accounts")
+      .then(async (r) => ({ ok: r.ok, body: await r.json().catch(() => ({})) }))
+      .then(({ ok, body }) => {
+        if (!ok) setAccountsError(body?.error ?? "Failed to load accounts from QuickBooks.");
+        else setQboAccounts((body?.accounts ?? []).map((a: { name: string; type: string }) => ({ name: a.name, type: a.type })));
+      })
+      .catch(() => setAccountsError("Network error while loading QuickBooks accounts."))
+      .finally(() => setAccountsLoading(false));
+  }, [connected]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -331,6 +395,52 @@ function QuickBooksSection() {
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
     setData((prev) => ({ ...prev, ...payload }));
+  }
+
+  async function handleSaveMap() {
+    setMapSaving(true);
+    setMapSaved(false);
+    setMapError("");
+    const serialized = serializeBudgetCodeMap(mapRows);
+    if (!serialized.ok) {
+      setMapError(serialized.error);
+      setMapSaving(false);
+      return;
+    }
+    try {
+      const res = await fetch("/api/settings/company-integrations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        // Send "{}" when cleared so the API still accepts the request (it drops
+        // empty trimmed strings, so we send the canonical empty object).
+        body: JSON.stringify({ QBO_BUDGET_CODE_MAP: serialized.value || "{}" }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMapError(result?.error ?? "Failed to save the budget code map.");
+        return;
+      }
+      setData((prev) => ({ ...prev, QBO_BUDGET_CODE_MAP: serialized.value }));
+      setMapRows(parseBudgetCodeMap(serialized.value));
+      setMapSaved(true);
+      setTimeout(() => setMapSaved(false), 3000);
+    } catch {
+      setMapError("Network error while saving the budget code map.");
+    } finally {
+      setMapSaving(false);
+    }
+  }
+
+  function addMapRow() {
+    setMapRows((prev) => [...prev, { code: "", account: "", class: "", item: "" }]);
+  }
+
+  function updateMapRow(index: number, patch: Partial<BudgetCodeMapRow>) {
+    setMapRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  }
+
+  function removeMapRow(index: number) {
+    setMapRows((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleDisconnect() {
@@ -476,6 +586,152 @@ function QuickBooksSection() {
           <br />
           Register it under the same key set (Development vs Production) as the Client ID/Secret you saved above.
           Required scope: <code className="font-mono bg-gray-100 px-1 rounded">com.intuit.quickbooks.accounting</code>.
+        </p>
+      </div>
+
+      {/* Step 3 — Budget Code Map */}
+      <div className="mt-5 pt-5 border-t border-gray-100">
+        <div className="flex items-start justify-between gap-3 mb-1">
+          <p className="text-xs font-medium text-gray-700">
+            Step 3 — Budget code map
+            <span className="ml-1 font-normal text-gray-400">
+              (used by <strong>Resync with ERP</strong> on the Budget page)
+            </span>
+          </p>
+        </div>
+        <p className="text-xs text-gray-500 mb-3">
+          Map each SiteCommand budget code to the QuickBooks <strong>Account</strong> that holds
+          its costs. <em>Resync with ERP</em> reads the Profit &amp; Loss for the project&apos;s
+          Class, sums each mapped account, and writes the total back into the budget line&apos;s
+          Job to Date Costs. Class and Item are optional and only used when pushing to QBO.
+        </p>
+
+        {!connected && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-3 py-2 mb-3">
+            Connect QuickBooks above before mapping codes — the Account picker needs to read your
+            chart of accounts.
+          </p>
+        )}
+
+        {connected && accountsError && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mb-3">
+            {accountsError}
+          </p>
+        )}
+
+        <datalist id="qbo-accounts-list">
+          {qboAccounts.map((a) => (
+            <option key={a.name} value={a.name}>{a.type}</option>
+          ))}
+        </datalist>
+
+        {mapRows.length === 0 ? (
+          <p className="text-xs text-gray-400 mb-3">No mappings yet.</p>
+        ) : (
+          <div className="overflow-x-auto mb-3">
+            <table className="w-full text-xs border border-gray-200 rounded-md">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[22%]">Budget code</th>
+                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[30%]">QBO Account</th>
+                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[22%]">Class (optional)</th>
+                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[20%]">Item (optional)</th>
+                  <th className="w-[6%] border-b border-gray-200" />
+                </tr>
+              </thead>
+              <tbody>
+                {mapRows.map((row, i) => (
+                  <tr key={i} className="border-b border-gray-100 last:border-b-0">
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="text"
+                        value={row.code}
+                        onChange={(e) => updateMapRow(i, { code: e.target.value })}
+                        placeholder="e.g. 01-030.M"
+                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs font-mono focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="text"
+                        list={connected ? "qbo-accounts-list" : undefined}
+                        value={row.account}
+                        onChange={(e) => updateMapRow(i, { account: e.target.value })}
+                        placeholder={accountsLoading ? "Loading accounts…" : "Job Materials"}
+                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="text"
+                        value={row.class}
+                        onChange={(e) => updateMapRow(i, { class: e.target.value })}
+                        placeholder="—"
+                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="text"
+                        value={row.item}
+                        onChange={(e) => updateMapRow(i, { item: e.target.value })}
+                        placeholder="—"
+                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <button
+                        type="button"
+                        onClick={() => removeMapRow(i)}
+                        className="text-red-600 hover:text-red-800 text-xs"
+                        aria-label={`Remove ${row.code || "row"}`}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            type="button"
+            onClick={addMapRow}
+            className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors"
+          >
+            + Add row
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveMap}
+            disabled={mapSaving}
+            className="flex items-center gap-2 px-4 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-md hover:bg-gray-700 disabled:opacity-50 transition-colors"
+          >
+            {mapSaved ? (
+              <>
+                <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                Saved
+              </>
+            ) : (
+              <>
+                <Save className="w-3.5 h-3.5" />
+                {mapSaving ? "Saving…" : "Save map"}
+              </>
+            )}
+          </button>
+          {mapError && (
+            <span className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-1.5">
+              {mapError}
+            </span>
+          )}
+        </div>
+
+        <p className="text-xs text-gray-400 mt-3">
+          Tip: don&apos;t map two budget codes to the same Account — the resync treats shared
+          accounts as ambiguous and skips them.
         </p>
       </div>
     </div>

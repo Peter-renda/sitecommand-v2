@@ -532,6 +532,50 @@ export async function fetchQBOCustomers(
   }
 }
 
+// ── Account list (used by the Budget Code Map editor) ────────────────────────
+
+export type QBOAccount = { id: string; name: string; type: string };
+
+export type QBOAccountResult =
+  | { ok: true; accounts: QBOAccount[] }
+  | { ok: false; error: string };
+
+/**
+ * Reads active expense/COGS accounts from the company's QBO chart of accounts.
+ * Used by the in-app Budget Code Map editor so users pick the account name
+ * verbatim (it has to match exactly when posting back) instead of typing it.
+ */
+export async function fetchQBOAccounts(
+  companyId: string,
+  appCreds: QBOAppCredentials,
+  companyCreds: QBOCompanyCredentials
+): Promise<QBOAccountResult> {
+  try {
+    const query = encodeURIComponent(
+      "SELECT Id, Name, AccountType FROM Account " +
+      "WHERE Active = true AND AccountType IN ('Expense','Cost of Goods Sold','Other Expense') " +
+      "MAXRESULTS 500"
+    );
+    const { status, json, rawText } = await callQBO(
+      companyId, appCreds, companyCreds, "GET", `query?query=${query}`
+    );
+    if (status !== 200) {
+      return { ok: false, error: extractQBOError(json, rawText) };
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = (json as any)?.QueryResponse?.Account ?? [];
+    const accounts: QBOAccount[] = (Array.isArray(rows) ? rows : [rows])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((a: any) => ({ id: String(a.Id), name: String(a.Name ?? ""), type: String(a.AccountType ?? "") }))
+      .filter((a) => a.name);
+    // Stable alphabetical for the picker.
+    accounts.sort((a, b) => a.name.localeCompare(b.name));
+    return { ok: true, accounts };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
 // ── Reference resolution (P0: post with Ref.value, not Ref.name) ───────────────
 //
 // QBO *Ref fields resolve most reliably by Id (`value`). Posting by `name`
