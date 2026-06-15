@@ -297,7 +297,11 @@ function serializeBudgetCodeMap(rows: BudgetCodeMapRow[]): { ok: true; value: st
     if (row.class.trim()) entry.class = row.class.trim();
     if (row.item.trim()) entry.item = row.item.trim();
     if (!entry.account && !entry.class && !entry.item) continue;
-    if (!entry.account) return { ok: false, error: `"${code}" needs an Account to be useful (Class/Item alone won't pull costs).` };
+    // Either Item (preferred) or Account is required for the resync to pull costs.
+    // Class alone doesn't drive any cost pull and would be useless.
+    if (!entry.item && !entry.account) {
+      return { ok: false, error: `"${code}" needs either an Item or an Account (Class alone won't pull costs).` };
+    }
     out[code] = entry;
   }
   return { ok: true, value: JSON.stringify(out) };
@@ -324,6 +328,9 @@ function QuickBooksSection() {
   const [qboAccounts, setQboAccounts] = useState<{ name: string; type: string }[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [accountsError, setAccountsError] = useState("");
+  const [qboItems, setQboItems] = useState<{ name: string; type: string }[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState("");
 
   useEffect(() => {
     fetch("/api/settings/company-integrations?integration=quickbooks")
@@ -340,7 +347,7 @@ function QuickBooksSection() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Load QBO accounts for the picker once we're connected.
+  // Load QBO accounts + items for the pickers once we're connected.
   useEffect(() => {
     if (!connected) return;
     setAccountsLoading(true);
@@ -353,6 +360,17 @@ function QuickBooksSection() {
       })
       .catch(() => setAccountsError("Network error while loading QuickBooks accounts."))
       .finally(() => setAccountsLoading(false));
+
+    setItemsLoading(true);
+    setItemsError("");
+    fetch("/api/integrations/quickbooks/items")
+      .then(async (r) => ({ ok: r.ok, body: await r.json().catch(() => ({})) }))
+      .then(({ ok, body }) => {
+        if (!ok) setItemsError(body?.error ?? "Failed to load items from QuickBooks.");
+        else setQboItems((body?.items ?? []).map((i: { name: string; type: string }) => ({ name: i.name, type: i.type })));
+      })
+      .catch(() => setItemsError("Network error while loading QuickBooks items."))
+      .finally(() => setItemsLoading(false));
   }, [connected]);
 
   useEffect(() => {
@@ -600,28 +618,40 @@ function QuickBooksSection() {
           </p>
         </div>
         <p className="text-xs text-gray-500 mb-3">
-          Map each SiteCommand budget code to the QuickBooks <strong>Account</strong> that holds
-          its costs. <em>Resync with ERP</em> reads the Profit &amp; Loss for the project&apos;s
-          Class, sums each mapped account, and writes the total back into the budget line&apos;s
-          Job to Date Costs. Class and Item are optional and only used when pushing to QBO.
+          Map each SiteCommand budget code to the matching QuickBooks{" "}
+          <strong>Item</strong> (Product/Service) — the GC-standard QBO pattern, one Item per
+          (cost code × cost type). <em>Resync with ERP</em> resolves the project to a
+          Customer:Job, reads the Profit &amp; Loss Detail for that customer, and writes each
+          Item&apos;s total back into the budget line&apos;s Job to Date Costs.
+          <br />
+          <span className="text-gray-400">
+            Use <strong>Account</strong> instead only if your CoA has a separate account per cost
+            code (legacy P&amp;L-by-Class pull). <strong>Class</strong> is optional and only used
+            when pushing to QBO.
+          </span>
         </p>
 
         {!connected && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-3 py-2 mb-3">
-            Connect QuickBooks above before mapping codes — the Account picker needs to read your
-            chart of accounts.
+            Connect QuickBooks above before mapping codes — the Item and Account pickers need to
+            read from your QBO file.
           </p>
         )}
 
-        {connected && accountsError && (
+        {connected && (accountsError || itemsError) && (
           <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mb-3">
-            {accountsError}
+            {itemsError || accountsError}
           </p>
         )}
 
         <datalist id="qbo-accounts-list">
           {qboAccounts.map((a) => (
             <option key={a.name} value={a.name}>{a.type}</option>
+          ))}
+        </datalist>
+        <datalist id="qbo-items-list">
+          {qboItems.map((i) => (
+            <option key={i.name} value={i.name}>{i.type}</option>
           ))}
         </datalist>
 
@@ -632,11 +662,11 @@ function QuickBooksSection() {
             <table className="w-full text-xs border border-gray-200 rounded-md">
               <thead className="bg-gray-50 text-gray-600">
                 <tr>
-                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[22%]">Budget code</th>
-                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[30%]">QBO Account</th>
-                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[22%]">Class (optional)</th>
-                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[20%]">Item (optional)</th>
-                  <th className="w-[6%] border-b border-gray-200" />
+                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[20%]">Budget code</th>
+                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[28%]">QBO Item (recommended)</th>
+                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[24%]">QBO Account (legacy)</th>
+                  <th className="text-left font-medium px-2 py-1.5 border-b border-gray-200 w-[18%]">Class (optional)</th>
+                  <th className="w-[10%] border-b border-gray-200" />
                 </tr>
               </thead>
               <tbody>
@@ -654,10 +684,20 @@ function QuickBooksSection() {
                     <td className="px-2 py-1.5">
                       <input
                         type="text"
+                        list={connected ? "qbo-items-list" : undefined}
+                        value={row.item}
+                        onChange={(e) => updateMapRow(i, { item: e.target.value })}
+                        placeholder={itemsLoading ? "Loading items…" : "01-030.M"}
+                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs font-mono focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="text"
                         list={connected ? "qbo-accounts-list" : undefined}
                         value={row.account}
                         onChange={(e) => updateMapRow(i, { account: e.target.value })}
-                        placeholder={accountsLoading ? "Loading accounts…" : "Job Materials"}
+                        placeholder={accountsLoading ? "Loading…" : "—"}
                         className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-gray-900"
                       />
                     </td>
@@ -666,15 +706,6 @@ function QuickBooksSection() {
                         type="text"
                         value={row.class}
                         onChange={(e) => updateMapRow(i, { class: e.target.value })}
-                        placeholder="—"
-                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-gray-900"
-                      />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        type="text"
-                        value={row.item}
-                        onChange={(e) => updateMapRow(i, { item: e.target.value })}
                         placeholder="—"
                         className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-gray-900"
                       />
@@ -730,8 +761,9 @@ function QuickBooksSection() {
         </div>
 
         <p className="text-xs text-gray-400 mt-3">
-          Tip: don&apos;t map two budget codes to the same Account — the resync treats shared
-          accounts as ambiguous and skips them.
+          Tip: don&apos;t map two budget codes to the same Item (or the same Account) — the
+          resync treats shared targets as ambiguous and skips them. For Items-based pulls, the
+          project must also match a QuickBooks Customer or Customer:Job name.
         </p>
       </div>
     </div>

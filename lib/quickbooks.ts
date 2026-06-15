@@ -576,6 +576,46 @@ export async function fetchQBOAccounts(
   }
 }
 
+// ── Item list (used by the Budget Code Map editor — Items-based mapping) ─────
+
+export type QBOItem = { id: string; name: string; type: string };
+
+export type QBOItemResult =
+  | { ok: true; items: QBOItem[] }
+  | { ok: false; error: string };
+
+/**
+ * Reads active Items (Products & Services) from the company's QBO file.
+ * Used by the Budget Code Map editor's Item picker — the canonical GC pattern
+ * is one Item per (cost code × cost type), so users pick the matching Item
+ * (e.g. "02-310.C") rather than typing it.
+ */
+export async function fetchQBOItems(
+  companyId: string,
+  appCreds: QBOAppCredentials,
+  companyCreds: QBOCompanyCredentials
+): Promise<QBOItemResult> {
+  try {
+    const query = encodeURIComponent(
+      "SELECT Id, Name, Type FROM Item WHERE Active = true MAXRESULTS 1000"
+    );
+    const { status, json, rawText } = await callQBO(
+      companyId, appCreds, companyCreds, "GET", `query?query=${query}`
+    );
+    if (status !== 200) return { ok: false, error: extractQBOError(json, rawText) };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = (json as any)?.QueryResponse?.Item ?? [];
+    const items: QBOItem[] = (Array.isArray(rows) ? rows : [rows])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((i: any) => ({ id: String(i.Id), name: String(i.Name ?? ""), type: String(i.Type ?? "") }))
+      .filter((i) => i.name);
+    items.sort((a, b) => a.name.localeCompare(b.name));
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
 // ── Reference resolution (P0: post with Ref.value, not Ref.name) ───────────────
 //
 // QBO *Ref fields resolve most reliably by Id (`value`). Posting by `name`
@@ -948,6 +988,37 @@ export async function findOrCreateClassId(
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return status === 200 ? (String((json as any)?.Class?.Id ?? "") || null) : null;
+}
+
+/**
+ * Resolves a Customer by name → Id WITHOUT creating it. Used by the
+ * Items-based job-to-date pull — the project name is matched against the
+ * Customer:Job hierarchy:
+ *   1. exact DisplayName match (top-level customer named exactly that)
+ *   2. exact Name match (the leaf segment on a sub-customer, e.g. the
+ *      "EH Sitework" portion of "Owner LLC:EH Sitework")
+ *   3. DisplayName ending in ":<name>" (sub-customer of any parent)
+ * Returns null when nothing matches — the pull warns rather than erroring so
+ * an account-mapped fallback can still run.
+ */
+export async function findCustomerIdByName(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, name?: string | null
+): Promise<string | null> {
+  const n = (name ?? "").trim();
+  if (!n) return null;
+  const esc = escapeQBOString(n);
+  // Try exact DisplayName then exact Name.
+  const exact = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Customer WHERE Active = true AND (DisplayName = '${esc}' OR Name = '${esc}')`, "Customer"
+  );
+  if (exact && exact.length > 0) return String(exact[0].Id);
+  // Try sub-customer of any parent: "Anything:EH Sitework"
+  const subLike = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Customer WHERE Active = true AND DisplayName LIKE '%:${esc}'`, "Customer"
+  );
+  return subLike && subLike.length > 0 ? String(subLike[0].Id) : null;
 }
 
 /**
@@ -1714,14 +1785,24 @@ export async function syncARInvoiceToQBO(
 
 // ── Job-to-date costs (PULL: ERP → SiteCommand budget) ─────────────────────────
 //
-// The reverse direction of the pushes above. For each SiteCommand budget code we
-// want the actual cost posted in QBO. QBO has no native "cost code", so we reuse
-// the same QBO_BUDGET_CODE_MAP that drives pushes: a budget code maps to an
-// expense/COGS Account name. We pull a Profit & Loss report scoped to the
-// project's Class (the same Class every pushed cost line is tagged with), read
-// each account's total, and attribute it back to the budget code that maps to
-// that account. Codes with no account mapping — or whose account is shared by
-// more than one code (ambiguous) — are left untouched.
+// The reverse direction of the pushes above. Two paths coexist so users can run
+// either the GC-standard Items pattern, the legacy Account-by-Class pattern, or
+// both at once (per-code):
+//
+//   1. ITEMS-BASED (recommended for QBO GC files):
+//      One QBO Product/Service Item per budget code (e.g. "02-310.C"). The pull
+//      resolves the project to a Customer (or Customer:Job), reads the
+//      ProfitAndLossDetail report scoped to that customer, and sums each Item's
+//      amount. This is the canonical construction-industry pattern in QBO.
+//
+//   2. ACCOUNT-BASED (legacy):
+//      Budget code maps to a QBO Account. The pull reads a ProfitAndLoss summary
+//      scoped to the project's Class and sums each Account. Works for the
+//      minority of GCs whose CoA carries a separate account per cost code.
+//
+// Per-code decision: if the QBO_BUDGET_CODE_MAP entry has `item`, that code is
+// pulled via path 1; if it has only `account`, it's pulled via path 2. Codes
+// with neither are skipped.
 
 export type QBOJobToDateResult =
   | { ok: true; costs: Record<string, number>; warning?: string }
@@ -1757,12 +1838,41 @@ function collectReportAccountAmounts(node: any, byId: Map<string, number>, byNam
 }
 
 /**
- * Pulls job-to-date (actual) costs from QuickBooks for the given budget codes.
- * Returns a map of `budgetCode → cost`. Best-effort and non-destructive:
- *  - codes without an account mapping in QBO_BUDGET_CODE_MAP are omitted;
- *  - when no Class matches the project, costs aren't project-scoped and an empty
- *    map + warning is returned rather than company-wide totals.
+ * Walks a ProfitAndLossDetail-style report and sums each leaf row's amount by
+ * the value of a target column (e.g. "item_name"). The column indices come
+ * from the report's Columns header; only leaf rows (no nested Rows) are
+ * counted so group/section subtotals are never double-added.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function collectDetailReportByColumn(json: any, columnType: string): Map<string, number> {
+  const byKey = new Map<string, number>();
+  const cols = Array.isArray(json?.Columns?.Column) ? json.Columns.Column : [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const keyIdx = cols.findIndex((c: any) =>
+    String(c?.ColType ?? "").toLowerCase() === columnType.toLowerCase() ||
+    String(c?.MetaData?.find?.((m: any) => m?.Name === "ColKey")?.Value ?? "").toLowerCase() === columnType.toLowerCase()
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const amtIdx = cols.findIndex((c: any) => String(c?.ColType ?? "").toLowerCase() === "amount");
+  if (keyIdx < 0 || amtIdx < 0) return byKey;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function visit(node: any): void {
+    if (!node || typeof node !== "object") return;
+    const nested = node?.Rows?.Row;
+    if (Array.isArray(nested)) for (const c of nested) visit(c);
+    const col = node?.ColData;
+    const hasNested = Array.isArray(nested) && nested.length > 0;
+    if (Array.isArray(col) && !hasNested && col.length > Math.max(keyIdx, amtIdx)) {
+      const key = String(col[keyIdx]?.value ?? "").trim().toLowerCase();
+      const amount = Number(col[amtIdx]?.value);
+      if (key && Number.isFinite(amount)) byKey.set(key, (byKey.get(key) ?? 0) + amount);
+    }
+  }
+  visit(json);
+  return byKey;
+}
+
+/** Public result shape — main entry point that delegates to the two paths and merges. */
 export async function fetchQBOJobToDateCosts(
   companyId: string,
   appCreds: QBOAppCredentials,
@@ -1773,24 +1883,129 @@ export async function fetchQBOJobToDateCosts(
   if (codes.length === 0) return { ok: true, costs: {} };
 
   const map = await getQBOBudgetCodeMap(companyId);
-  // accountName(lower) → budget codes that map to it.
-  const accountToCodes = new Map<string, string[]>();
+  const itemMapped: string[] = [];
+  const accountOnlyMapped: string[] = [];
   for (const code of codes) {
-    const account = (map[code]?.account ?? "").trim();
-    if (!account) continue;
-    const key = account.toLowerCase();
-    const list = accountToCodes.get(key) ?? [];
-    list.push(code);
-    accountToCodes.set(key, list);
+    const entry = map[code];
+    if (!entry) continue;
+    if ((entry.item ?? "").trim()) itemMapped.push(code);
+    else if ((entry.account ?? "").trim()) accountOnlyMapped.push(code);
   }
-  if (accountToCodes.size === 0) {
+
+  if (itemMapped.length === 0 && accountOnlyMapped.length === 0) {
     return {
       ok: true,
       costs: {},
       warning:
-        "No QuickBooks budget-code → account mappings are configured (QBO_BUDGET_CODE_MAP), so no job-to-date costs could be pulled. Map your budget codes to QuickBooks accounts in the integration settings.",
+        "No QuickBooks budget-code mappings are configured. Map your budget codes to QuickBooks Items (preferred) or Accounts in Settings → Integrations → QuickBooks Online.",
     };
   }
+
+  const warnings: string[] = [];
+  const merged: Record<string, number> = {};
+
+  if (itemMapped.length > 0) {
+    const r = await pullByItem(companyId, appCreds, companyCreds, { projectName: opts.projectName, codes: itemMapped, map });
+    if (!r.ok) return r;
+    Object.assign(merged, r.costs);
+    if (r.warning) warnings.push(r.warning);
+  }
+
+  if (accountOnlyMapped.length > 0) {
+    const r = await pullByAccount(companyId, appCreds, companyCreds, { projectName: opts.projectName, codes: accountOnlyMapped, map });
+    if (!r.ok) return r;
+    Object.assign(merged, r.costs);
+    if (r.warning) warnings.push(r.warning);
+  }
+
+  return { ok: true, costs: merged, ...(warnings.length ? { warning: warnings.join(" ") } : {}) };
+}
+
+/**
+ * Items-based pull: groups item-mapped codes by their target Item, resolves the
+ * project to a Customer (or Customer:Job), reads ProfitAndLossDetail scoped to
+ * that customer with `item_name` surfaced, and attributes each Item's total back
+ * to the code that maps to it. Codes whose Item is shared by >1 code are
+ * skipped (ambiguous).
+ */
+async function pullByItem(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials,
+  opts: { projectName?: string | null; codes: string[]; map: Record<string, { account?: string; class?: string; item?: string }> }
+): Promise<QBOJobToDateResult> {
+  // itemName(lower) → budget codes that map to it.
+  const itemToCodes = new Map<string, string[]>();
+  for (const code of opts.codes) {
+    const item = (opts.map[code]?.item ?? "").trim();
+    if (!item) continue;
+    const k = item.toLowerCase();
+    const list = itemToCodes.get(k) ?? [];
+    list.push(code);
+    itemToCodes.set(k, list);
+  }
+  if (itemToCodes.size === 0) return { ok: true, costs: {} };
+
+  const customerId = await findCustomerIdByName(companyId, appCreds, companyCreds, opts.projectName);
+  if (!customerId) {
+    return {
+      ok: true, costs: {},
+      warning: `No QuickBooks Customer (or Customer:Job) matching "${(opts.projectName ?? "").trim()}" was found, so Items-based costs could not be pulled.`,
+    };
+  }
+
+  const path =
+    `reports/ProfitAndLossDetail?customer=${encodeURIComponent(customerId)}` +
+    `&accounting_method=Accrual&columns=tx_date,name,memo,item_name,subt_nat_amount` +
+    `&start_date=1900-01-01&end_date=2100-12-31`;
+
+  let status: number;
+  let json: unknown;
+  let rawText: string;
+  try {
+    ({ status, json, rawText } = await callQBO(companyId, appCreds, companyCreds, "GET", path));
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Network error" };
+  }
+  if (status !== 200) return { ok: false, error: extractQBOError(json, rawText) };
+
+  const byItem = collectDetailReportByColumn(json, "item_name");
+  if (byItem.size === 0) {
+    return {
+      ok: true, costs: {},
+      warning: "QuickBooks did not return item-level detail for this project. Confirm that costs on this Customer:Job are coded via Items (not just Accounts).",
+    };
+  }
+
+  const costs: Record<string, number> = {};
+  for (const [itemNameLower, codeList] of itemToCodes.entries()) {
+    if (codeList.length !== 1) continue; // shared item → can't attribute
+    const total = byItem.get(itemNameLower);
+    if (total == null) continue;
+    // Expense detail rows can present as positive (Bill) or as negative on
+    // contra-postings; abs() normalizes to "total cost posted to this item".
+    costs[codeList[0]] = roundMoney(Math.abs(total));
+  }
+  return { ok: true, costs };
+}
+
+/**
+ * Legacy Account-based pull: groups codes by their target Account, reads a P&L
+ * summary scoped to the project's Class, and attributes each Account's total
+ * back. Kept for GCs with deep CoAs that map one account per cost code.
+ */
+async function pullByAccount(
+  companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials,
+  opts: { projectName?: string | null; codes: string[]; map: Record<string, { account?: string; class?: string; item?: string }> }
+): Promise<QBOJobToDateResult> {
+  const accountToCodes = new Map<string, string[]>();
+  for (const code of opts.codes) {
+    const account = (opts.map[code]?.account ?? "").trim();
+    if (!account) continue;
+    const k = account.toLowerCase();
+    const list = accountToCodes.get(k) ?? [];
+    list.push(code);
+    accountToCodes.set(k, list);
+  }
+  if (accountToCodes.size === 0) return { ok: true, costs: {} };
 
   const config = await getQBOPostingConfig(companyId);
   let classId: string | null = null;
@@ -1798,7 +2013,6 @@ export async function fetchQBOJobToDateCosts(
     classId = await findClassIdByName(companyId, appCreds, companyCreds, opts.projectName);
   }
 
-  // P&L summary by account (accrual), scoped to the project Class when resolvable.
   const reportPath = classId
     ? `reports/ProfitAndLoss?accounting_method=Accrual&classid=${encodeURIComponent(classId)}`
     : `reports/ProfitAndLoss?accounting_method=Accrual`;
@@ -1819,18 +2033,17 @@ export async function fetchQBOJobToDateCosts(
 
   const costs: Record<string, number> = {};
   for (const [accountNameLower, codeList] of accountToCodes.entries()) {
-    if (codeList.length !== 1) continue; // shared account → can't attribute to one code
+    if (codeList.length !== 1) continue;
     const amount = byName.get(accountNameLower);
     if (amount == null) continue;
-    // Expenses report as positive; abs() guards against credit-normal presentation.
     costs[codeList[0]] = roundMoney(Math.abs(amount));
   }
 
   const warning =
     !classId && config.projectTracking !== "none"
-      ? "No QuickBooks Class matching this project was found, so costs could not be scoped to this project and were skipped."
+      ? "No QuickBooks Class matching this project was found, so account-based costs could not be scoped to this project."
       : undefined;
-  return { ok: true, costs, warning };
+  return { ok: true, costs, ...(warning ? { warning } : {}) };
 }
 
 // ── Error extraction ──────────────────────────────────────────────────────────

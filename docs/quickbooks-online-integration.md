@@ -22,17 +22,24 @@ For the full field-by-field crosswalk between SiteCommand and the QBO object mod
 The integration is two-way for budget actuals. The Budget tool's **Resync with ERP**
 button (`POST /api/integrations/erp/resync-budget`) pulls **job-to-date (actual)
 costs** out of QuickBooks and writes them into each budget line's **Job to Date
-Costs** column, matched by budget code.
+Costs** column, matched by budget code. Two paths coexist (per-code, decided by
+the budget code map):
 
-- QBO has no native cost code, so the pull reuses **`QBO_BUDGET_CODE_MAP`** (budget
-  code → QBO account name). It runs a **Profit & Loss** report scoped to the
-  project's **Class** (`reports/ProfitAndLoss?accounting_method=Accrual&classid=…`),
-  sums each account, and attributes it back to the mapped budget code.
-- Budget codes with no account mapping, or whose account is shared by more than one
-  code, are skipped. If no project Class matches, nothing is written (costs are
-  never pulled company-wide).
-- A company may connect **only one** ERP (QuickBooks **or** Sage 300 CRE).
-  Connecting QuickBooks is blocked while Sage 300 CRE is connected, and vice versa.
+- **Items-based (recommended, GC-standard)** — one QBO **Item** (Product/Service)
+  per budget code, e.g. `02-310.C`. The pull resolves the project to a QBO
+  **Customer (or Customer:Job)**, reads `reports/ProfitAndLossDetail` scoped to
+  that customer with `item_name` surfaced, and sums each Item's amount.
+  Mirrors how most construction QBO files are structured: a flat CoA + Items as
+  cost codes + Customer:Job as project.
+- **Account-based (legacy)** — budget code maps to a QBO **Account**. The pull
+  reads a P&L summary scoped to the project's **Class**, sums each Account, and
+  attributes back. Use only when your CoA carries a separate account per cost
+  code.
+
+Per-code: if the map entry sets `item`, the code is pulled via the Items path; if
+it sets only `account`, via the Account path. Shared targets (one Item or Account
+mapped to >1 code) are skipped as ambiguous. Both paths can run in the same
+resync. A company may connect **only one** ERP (QuickBooks **or** Sage 300 CRE).
 
 ## Setup (company super admin)
 
