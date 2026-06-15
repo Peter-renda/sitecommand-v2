@@ -1,5 +1,6 @@
 import { getSupabase } from "./supabase";
 import type { ThreadMessage } from "./email-types";
+import { isInvalidGrant, reconnectRequiredError } from "./email-errors";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 const TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
@@ -51,6 +52,9 @@ export async function getValidToken(userId: string): Promise<string> {
 
   if (!res.ok) {
     const body = await res.text();
+    // invalid_grant (incl. AADSTS700082/50173/etc.) means the refresh token
+    // is permanently dead — flag it so callers can prompt a reconnect.
+    if (isInvalidGrant(body)) throw reconnectRequiredError("outlook");
     throw new Error(`Token refresh failed: ${body}`);
   }
 

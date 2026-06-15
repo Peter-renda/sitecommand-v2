@@ -15,6 +15,7 @@ import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
 import { canAccessProject } from "@/lib/project-access";
 import { getActiveEmailConnection, fetchActiveInbox } from "@/lib/email-connection";
+import { isReconnectRequired } from "@/lib/email-errors";
 import type { GraphMessage } from "@/lib/microsoft-graph";
 
 // Newest-first cap so the card deck stays manageable on mailboxes with a
@@ -41,7 +42,10 @@ export async function GET(
     inbox = await fetchActiveInbox(session.id);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("connection found")) {
+    // No connection, or a revoked/expired token: hide the triage deck rather
+    // than erroring. The connection's reconnect prompt is surfaced elsewhere
+    // (the Link Emails modal) where it's actionable.
+    if (message.includes("connection found") || isReconnectRequired(message)) {
       return NextResponse.json({ connected: false, messages: [] });
     }
     return NextResponse.json({ error: message }, { status: 500 });

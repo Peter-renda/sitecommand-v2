@@ -119,6 +119,9 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [inbox, setInbox] = useState<InboxMessage[]>([]);
   const [loadingInbox, setLoadingInbox] = useState(false);
+  const [inboxError, setInboxError] = useState<
+    { message: string; reconnect: boolean; provider?: EmailProvider } | null
+  >(null);
   const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set());
   const [linking, setLinking] = useState(false);
   const [search, setSearch] = useState("");
@@ -166,12 +169,34 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
     setShowLinkModal(true);
     setSelectedConvIds(new Set());
     setSearch("");
+    setInboxError(null);
     if (inbox.length === 0) {
       setLoadingInbox(true);
       fetch("/api/emails/inbox")
-        .then((r) => r.json())
-        .then((data) => setInbox(data.messages ?? []))
-        .catch(() => setInbox([]))
+        .then(async (r) => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            // Surface the real failure instead of collapsing it into an empty
+            // inbox (which read as the misleading "No messages found").
+            setInboxError({
+              message:
+                data.error && data.error !== "not_connected"
+                  ? data.error
+                  : "Couldn't load your inbox. Please try again.",
+              reconnect: Boolean(data.reconnect),
+              provider: data.provider ?? undefined,
+            });
+            setInbox([]);
+            return;
+          }
+          setInbox(data.messages ?? []);
+        })
+        .catch(() =>
+          setInboxError({
+            message: "Network error loading your inbox. Please try again.",
+            reconnect: false,
+          })
+        )
         .finally(() => setLoadingInbox(false));
     }
   };
@@ -685,6 +710,18 @@ export default function EmailsClient({ projectId }: { projectId: string }) {
             <div className="flex-1 overflow-y-auto">
               {loadingInbox ? (
                 <div className="px-6 py-12 text-center text-sm text-gray-400">Loading inbox…</div>
+              ) : inboxError ? (
+                <div className="px-6 py-12 text-center">
+                  <p className="text-sm text-red-600">{inboxError.message}</p>
+                  {inboxError.reconnect && (
+                    <a
+                      href={`/api/auth/${inboxError.provider ?? active?.provider ?? "gmail"}/connect?projectId=${projectId}`}
+                      className="inline-block mt-3 px-3 py-1.5 text-xs font-medium bg-gray-900 text-white rounded hover:bg-gray-700 transition-colors"
+                    >
+                      Reconnect {PROVIDER_LABEL[inboxError.provider ?? active?.provider ?? "gmail"]}
+                    </a>
+                  )}
+                </div>
               ) : filteredInbox.length === 0 ? (
                 <div className="px-6 py-12 text-center text-sm text-gray-400">
                   {inbox.length === 0 ? "No messages found in inbox." : "No matching messages."}

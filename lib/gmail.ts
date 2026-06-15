@@ -1,5 +1,6 @@
 import { getSupabase } from "./supabase";
 import type { ThreadMessage } from "./email-types";
+import { isInvalidGrant, reconnectRequiredError } from "./email-errors";
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -54,6 +55,11 @@ export async function getValidGmailToken(userId: string): Promise<string> {
 
   if (!res.ok) {
     const body = await res.text();
+    // invalid_grant means the refresh token is permanently dead (revoked,
+    // password change, inactivity, or a Testing-mode OAuth app's 7-day
+    // expiry). Flag it so callers can prompt the user to reconnect instead
+    // of surfacing a raw error / silently showing an empty inbox.
+    if (isInvalidGrant(body)) throw reconnectRequiredError("gmail");
     throw new Error(`Gmail token refresh failed: ${body}`);
   }
 
