@@ -175,6 +175,137 @@ function BudgetCodeDropdown({
   );
 }
 
+function OwnerClientDropdown({
+  value,
+  companies,
+  onSelect,
+  onCreateNew,
+}: {
+  value: string;
+  companies: string[];
+  onSelect: (name: string) => void;
+  onCreateNew: (name: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setCreating(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const filtered = companies.filter((c) => !search || c.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => { setOpen((o) => !o); setSearch(""); setCreating(false); }}
+        className="w-full flex items-center justify-between px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white text-left"
+      >
+        <span className={value ? "text-gray-800 truncate" : "text-gray-400"}>{value || "Select owner or client"}</span>
+        <ChevronDown className="w-4 h-4 text-gray-400 shrink-0 ml-1" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded shadow-lg w-full min-w-[240px]">
+          {/* Search */}
+          <div className="flex items-center border-b border-gray-100 px-2 py-1.5">
+            <Search className="w-3.5 h-3.5 text-gray-400 mr-1.5 shrink-0" />
+            <input
+              autoFocus
+              type="text"
+              placeholder="Search directory"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 text-xs focus:outline-none"
+            />
+          </div>
+
+          {/* List of directory companies */}
+          <div className="max-h-52 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="text-xs text-gray-400 px-3 py-3 text-center">No companies in directory</p>
+            ) : (
+              filtered.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => { onSelect(c); setOpen(false); }}
+                  className="w-full text-left px-3 py-2 text-xs text-gray-800 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-b-0"
+                >
+                  {c}
+                </button>
+              ))
+            )}
+          </div>
+
+          {/* Create section — adds a new company to the directory */}
+          {creating ? (
+            <div className="border-t border-gray-100 px-3 py-2.5 space-y-1.5">
+              <input
+                autoFocus
+                type="text"
+                placeholder="New company name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+              <div className="flex gap-1.5 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => setCreating(false)}
+                  className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!newName.trim() || saving}
+                  onClick={async () => {
+                    const name = newName.trim();
+                    if (!name) return;
+                    setSaving(true);
+                    await onCreateNew(name);
+                    onSelect(name);
+                    setSaving(false);
+                    setCreating(false);
+                    setOpen(false);
+                    setNewName("");
+                  }}
+                  className="flex-1 px-2 py-1 text-xs bg-gray-900 hover:bg-gray-700 text-white rounded font-medium disabled:opacity-50"
+                >
+                  {saving ? "Saving…" : "Create"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setCreating(true); setNewName(search); }}
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 bg-gray-900 hover:bg-gray-700 text-white text-xs font-medium transition-colors rounded-b"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Create new company
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolBtn({ children }: { children: React.ReactNode }) {
   return (
     <button type="button" className="flex items-center px-1.5 py-1 text-gray-600 hover:bg-gray-100 rounded text-sm">
@@ -278,12 +409,28 @@ export default function CreatePrimeContractClient({ projectId, username }: { pro
   const [attachments, setAttachments] = useState<File[]>([]);
   const [sovItems, setSovItems] = useState<SOVItem[]>([]);
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
+  const [companies, setCompanies] = useState<string[]>([]);
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}/budget`)
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) setBudgetItems(data);
+      })
+      .catch(() => {});
+
+    fetch(`/api/projects/${projectId}/directory`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!Array.isArray(data)) return;
+        const names = Array.from(
+          new Set(
+            data
+              .filter((c: { type?: string; company?: string }) => c.type === "company" && c.company)
+              .map((c: { company?: string }) => (c.company as string).trim())
+          )
+        ).sort((a, b) => a.localeCompare(b));
+        setCompanies(names);
       })
       .catch(() => {});
   }, [projectId]);
@@ -297,6 +444,18 @@ export default function CreatePrimeContractClient({ projectId, username }: { pro
     if (res.ok) {
       const created = await res.json();
       setBudgetItems((prev) => [...prev, created]);
+    }
+  }
+
+  // Creating a new owner/client also adds the company to the project directory.
+  async function handleCreateCompany(name: string) {
+    const res = await fetch(`/api/projects/${projectId}/directory`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "company", company: name }),
+    });
+    if (res.ok) {
+      setCompanies((prev) => (prev.includes(name) ? prev : [...prev, name].sort((a, b) => a.localeCompare(b))));
     }
   }
 
@@ -402,11 +561,11 @@ export default function CreatePrimeContractClient({ projectId, username }: { pro
               </div>
               <div>
                 <Label>Owner/Client</Label>
-                <Input
-                  type="text"
+                <OwnerClientDropdown
                   value={formData.owner_client}
-                  onChange={(e) => set("owner_client", e.target.value)}
-                  placeholder="Enter owner or client"
+                  companies={companies}
+                  onSelect={(name) => set("owner_client", name)}
+                  onCreateNew={handleCreateCompany}
                 />
               </div>
               <div>

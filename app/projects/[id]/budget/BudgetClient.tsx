@@ -52,39 +52,40 @@ type BudgetSnapshot = {
   snapshot_data?: BudgetLineItem[];
 };
 
-type CommitmentSovRow = {
-  id: string;
+// Source-column drill-down: clicking a source/calculated-source budget cell
+// opens a popup listing the records that make up the value (each hyperlinked).
+type BreakdownColumn =
+  | "approved_cos"
+  | "pending_budget_changes"
+  | "committed_costs"
+  | "pending_cost_changes"
+  | "job_to_date_costs";
+
+type BreakdownRow = {
   description: string;
-  qty: number;
-  uom: string;
-  unit_cost: number;
+  source_label: string | null;
+  source_href: string | null;
   amount: number;
 };
 
-type CommitmentSummary = {
-  id: string;
-  type: "subcontract" | "purchase_order";
-  number: number;
-  title: string;
-  contract_company: string;
-  total_amount: number;
-  lines: CommitmentSovRow[];
+type BreakdownGroup = {
+  label: string;
+  rows: BreakdownRow[];
 };
 
-type CommitmentChangeOrderSummary = {
-  id: string;
-  number: string;
-  title: string;
-  contract_company: string;
-  amount: number;
-  commitment_id: string | null;
-};
-
-type CommittedCostsDetail = {
+type BreakdownData = {
   cost_code: string;
-  subcontracts: CommitmentSummary[];
-  purchase_orders: CommitmentSummary[];
-  commitment_change_orders: CommitmentChangeOrderSummary[];
+  column: BreakdownColumn;
+  groups: BreakdownGroup[];
+};
+
+// Human-readable column labels used in the popup title + balancing row.
+const BREAKDOWN_LABELS: Record<BreakdownColumn, string> = {
+  approved_cos: "Approved COs",
+  pending_budget_changes: "Pending Budget Changes",
+  committed_costs: "Committed Costs",
+  pending_cost_changes: "Pending Cost Changes",
+  job_to_date_costs: "Job to Date Costs",
 };
 
 type ForecastMethod = "automatic" | "manual" | "lump_sum" | "monitored_resources";
@@ -1380,10 +1381,12 @@ export default function BudgetClient({
   const [erpStatus, setErpStatus] = useState<{ connected: "quickbooks" | "sage300cre" | "multiple" | null }>({ connected: null });
   const [erpBusy, setErpBusy] = useState(false);
   const [erpResult, setErpResult] = useState<{ kind: "success" | "error"; message: string } | null>(null);
-  const [showCommittedCostsModal, setShowCommittedCostsModal] = useState(false);
-  const [committedCostsLoading, setCommittedCostsLoading] = useState(false);
-  const [committedCostsError, setCommittedCostsError] = useState<string | null>(null);
-  const [committedCostsData, setCommittedCostsData] = useState<CommittedCostsDetail | null>(null);
+  const [breakdownModal, setBreakdownModal] = useState<
+    { column: BreakdownColumn; costCode: string; cellValue: number } | null
+  >(null);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const [breakdownError, setBreakdownError] = useState<string | null>(null);
+  const [breakdownData, setBreakdownData] = useState<BreakdownData | null>(null);
   const [forecastEdits, setForecastEdits] = useState<Record<string, ForecastEdit>>({});
   const [selectedForecastItemId, setSelectedForecastItemId] = useState<string | null>(null);
   const [isBudgetLocked, setIsBudgetLocked] = useState(false);
@@ -1920,22 +1923,22 @@ export default function BudgetClient({
     }
   }
 
-  async function openCommittedCostsModal(item: BudgetLineItem) {
-    setShowCommittedCostsModal(true);
-    setCommittedCostsLoading(true);
-    setCommittedCostsError(null);
-    setCommittedCostsData(null);
+  async function openBreakdownModal(item: BudgetLineItem, column: BreakdownColumn, cellValue: number) {
+    setBreakdownModal({ column, costCode: item.cost_code, cellValue });
+    setBreakdownLoading(true);
+    setBreakdownError(null);
+    setBreakdownData(null);
     try {
       const res = await fetch(
-        `/api/projects/${projectId}/budget/committed-costs?costCode=${encodeURIComponent(item.cost_code)}`
+        `/api/projects/${projectId}/budget/breakdown?column=${encodeURIComponent(column)}&costCode=${encodeURIComponent(item.cost_code)}`
       );
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Failed to load committed costs");
-      setCommittedCostsData(data);
+      if (!res.ok) throw new Error(data?.error || "Failed to load breakdown");
+      setBreakdownData(data);
     } catch (err) {
-      setCommittedCostsError(err instanceof Error ? err.message : "Failed to load committed costs");
+      setBreakdownError(err instanceof Error ? err.message : "Failed to load breakdown");
     } finally {
-      setCommittedCostsLoading(false);
+      setBreakdownLoading(false);
     }
   }
 
@@ -2001,9 +2004,6 @@ export default function BudgetClient({
     tooltip?: ColTooltip;
   }> = [
     { key: "description", label: "Description", width: "min-w-[180px]" },
-    { key: "unit_qty", label: "Budget Unit Qty", width: "min-w-[110px]" },
-    { key: "unit_of_measure", label: "UOM", width: "min-w-[90px]" },
-    { key: "unit_cost", label: "Unit Cost", width: "min-w-[100px]" },
     { key: "original_budget_amount", label: "Original Budget Amount", width: "min-w-[130px]" },
     { key: "budget_modifications", label: "Budget Modifications", width: "min-w-[120px]" },
     {
@@ -2108,6 +2108,18 @@ export default function BudgetClient({
     { key: "forecast_to_complete", label: "Forecast To Complete", width: "min-w-[130px]" },
   ];
 
+  function breakdownButton(item: BudgetLineItem, column: BreakdownColumn, value: number) {
+    return (
+      <button
+        type="button"
+        onClick={() => openBreakdownModal(item, column, value)}
+        className="text-blue-600 hover:text-blue-800 underline underline-offset-2 decoration-blue-200"
+      >
+        {fmt(value)}
+      </button>
+    );
+  }
+
   function renderCell(item: BudgetLineItem | null, key: string) {
     if (item === null) {
       // Totals row
@@ -2171,23 +2183,14 @@ export default function BudgetClient({
       case "unit_cost": return fmt(item!.unit_cost || 0);
       case "original_budget_amount": return <span className="text-blue-600">{fmt(item!.original_budget_amount)}</span>;
       case "budget_modifications": return fmt(item!.budget_modifications);
-      case "approved_cos": return fmt(item!.approved_cos);
+      case "approved_cos": return breakdownButton(item, "approved_cos", item!.approved_cos);
       case "revised_budget": return fmt(c.revisedBudget);
-      case "pending_budget_changes": return fmt(item!.pending_budget_changes);
+      case "pending_budget_changes": return breakdownButton(item, "pending_budget_changes", item!.pending_budget_changes);
       case "projected_budget": return fmt(c.projectedBudget);
-      case "committed_costs":
-        return (
-          <button
-            type="button"
-            onClick={() => openCommittedCostsModal(item)}
-            className="text-blue-600 hover:text-blue-800 underline underline-offset-2 decoration-blue-200"
-          >
-            {fmt(item!.committed_costs)}
-          </button>
-        );
+      case "committed_costs": return breakdownButton(item, "committed_costs", item!.committed_costs);
       case "direct_costs": return fmt(c.directCosts);
-      case "job_to_date_costs": return <span className="text-blue-600">{fmt(item!.job_to_date_costs)}</span>;
-      case "pending_cost_changes": return fmt(item!.pending_cost_changes);
+      case "job_to_date_costs": return breakdownButton(item, "job_to_date_costs", item!.job_to_date_costs);
+      case "pending_cost_changes": return breakdownButton(item, "pending_cost_changes", item!.pending_cost_changes);
       case "projected_costs": return fmt(c.projectedCosts);
       case "forecast_to_complete":
         return (
@@ -3914,16 +3917,19 @@ export default function BudgetClient({
           onCancel={() => { if (!erpBusy) { setShowErpModal(false); setErpResult(null); } }}
         />
       )}
-      {showCommittedCostsModal && (
-        <CommittedCostsModal
-          projectId={projectId}
-          loading={committedCostsLoading}
-          error={committedCostsError}
-          data={committedCostsData}
+      {breakdownModal && (
+        <BreakdownModal
+          columnLabel={BREAKDOWN_LABELS[breakdownModal.column]}
+          column={breakdownModal.column}
+          costCode={breakdownModal.costCode}
+          cellValue={breakdownModal.cellValue}
+          loading={breakdownLoading}
+          error={breakdownError}
+          data={breakdownData}
           onClose={() => {
-            setShowCommittedCostsModal(false);
-            setCommittedCostsData(null);
-            setCommittedCostsError(null);
+            setBreakdownModal(null);
+            setBreakdownData(null);
+            setBreakdownError(null);
           }}
         />
       )}
@@ -3947,27 +3953,67 @@ export default function BudgetClient({
   );
 }
 
-function CommittedCostsModal({
-  projectId,
+function BreakdownModal({
+  columnLabel,
+  column,
+  costCode,
+  cellValue,
   loading,
   error,
   data,
   onClose,
 }: {
-  projectId: string;
+  columnLabel: string;
+  column: BreakdownColumn;
+  costCode: string;
+  cellValue: number;
   loading: boolean;
   error: string | null;
-  data: CommittedCostsDetail | null;
+  data: BreakdownData | null;
   onClose: () => void;
 }) {
-  const sectionTitleClass = "text-sm font-semibold text-gray-900";
-  const sectionCountClass = "text-xs text-gray-500";
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const groups = data?.groups ?? [];
+  const sourceSum = groups.reduce((s, g) => s + g.rows.reduce((t, r) => t + r.amount, 0), 0);
+  const delta = Math.round((cellValue - sourceSum) * 100) / 100;
+
+  // A balancing row so the listed sources always tie back to the value shown in
+  // the budget table: any remainder is an amount entered directly on the budget
+  // line item (or, for ERP actuals, the full pulled-in value).
+  const displayGroups: BreakdownGroup[] = [...groups];
+  if (Math.abs(delta) >= 0.005) {
+    displayGroups.push({
+      label: column === "job_to_date_costs" ? "ERP Job to Date Costs" : "Direct budget entry",
+      rows: [
+        {
+          description:
+            column === "job_to_date_costs"
+              ? "Actual costs pulled from your connected ERP"
+              : "Entered directly on the budget line item",
+          source_label: null,
+          source_href: null,
+          amount: delta,
+        },
+      ],
+    });
+  }
+
+  let rowNum = 0;
+  const hasRows = displayGroups.some((g) => g.rows.length > 0);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-5xl max-h-[90vh] bg-white rounded-xl shadow-xl overflow-hidden">
+      <div className="w-full max-w-3xl max-h-[90vh] bg-white rounded-xl shadow-xl overflow-hidden flex flex-col">
         <div className="bg-gray-800 text-white px-4 py-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">
-            Committed Costs {data?.cost_code ? `for ${data.cost_code}` : ""}
+            {columnLabel} for {costCode}
           </h2>
           <button
             type="button"
@@ -3979,131 +4025,78 @@ function CommittedCostsModal({
           </button>
         </div>
 
-        <div className="p-4 overflow-auto max-h-[calc(90vh-58px)]">
-          {loading && <p className="text-sm text-gray-500">Loading committed cost details…</p>}
+        <div className="p-4 overflow-auto">
+          {loading && <p className="text-sm text-gray-500">Loading details…</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
           {!loading && !error && data && (
-            <div className="space-y-6">
-              <CommitmentSection
-                projectId={projectId}
-                title="Approved Subcontracts"
-                items={data.subcontracts}
-                sectionTitleClass={sectionTitleClass}
-                sectionCountClass={sectionCountClass}
-              />
-              <CommitmentSection
-                projectId={projectId}
-                title="Approved Purchase Order Contracts"
-                items={data.purchase_orders}
-                sectionTitleClass={sectionTitleClass}
-                sectionCountClass={sectionCountClass}
-              />
-              <div>
-                <div className="flex items-baseline justify-between mb-2">
-                  <h3 className={sectionTitleClass}>Approved Commitment Change Orders</h3>
-                  <span className={sectionCountClass}>{data.commitment_change_orders.length} items</span>
-                </div>
-                {data.commitment_change_orders.length === 0 ? (
-                  <p className="text-xs text-gray-500">No approved commitment change orders for this cost code.</p>
-                ) : (
-                  <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
-                    <thead className="bg-gray-50 text-gray-700">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-semibold">Change Order</th>
-                        <th className="px-3 py-2 text-left font-semibold">Company</th>
-                        <th className="px-3 py-2 text-left font-semibold">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.commitment_change_orders.map((co) => (
-                        <tr key={co.id} className="border-t border-gray-100">
-                          <td className="px-3 py-2">
-                            <Link
-                              href={`/projects/${projectId}/change-orders/${co.id}`}
-                              className="text-blue-700 hover:text-blue-900 hover:underline"
-                            >
-                              {co.number} - {co.title || "Untitled"}
-                            </Link>
-                          </td>
-                          <td className="px-3 py-2">{co.contract_company || "—"}</td>
-                          <td className="px-3 py-2">{fmt(co.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CommitmentSection({
-  projectId,
-  title,
-  items,
-  sectionTitleClass,
-  sectionCountClass,
-}: {
-  projectId: string;
-  title: string;
-  items: CommitmentSummary[];
-  sectionTitleClass: string;
-  sectionCountClass: string;
-}) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between mb-2">
-        <h3 className={sectionTitleClass}>{title}</h3>
-        <span className={sectionCountClass}>{items.length} items</span>
-      </div>
-      {items.length === 0 ? (
-        <p className="text-xs text-gray-500">No matching approved commitments for this cost code.</p>
-      ) : (
-        <div className="space-y-3">
-          {items.map((commitment) => (
-            <div key={commitment.id} className="border border-gray-200 rounded-lg overflow-hidden">
-              <div className="bg-gray-50 px-3 py-2 flex items-center justify-between gap-3 text-xs">
-                <div className="min-w-0">
-                  <Link
-                    href={`/projects/${projectId}/commitments/${commitment.id}`}
-                    className="text-blue-700 hover:text-blue-900 hover:underline"
-                  >
-                    #{commitment.number} - {commitment.title || "Untitled Commitment"}
-                  </Link>
-                  <p className="text-gray-500 truncate">{commitment.contract_company || "—"}</p>
-                </div>
-                <div className="font-semibold text-gray-900 whitespace-nowrap">{fmt(commitment.total_amount)}</div>
-              </div>
-              <table className="w-full text-xs">
-                <thead className="bg-white text-gray-700">
-                  <tr className="border-t border-gray-200">
+            <>
+              <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold w-12">No.</th>
                     <th className="px-3 py-2 text-left font-semibold">Description</th>
-                    <th className="px-3 py-2 text-left font-semibold">QTY</th>
-                    <th className="px-3 py-2 text-left font-semibold">UOM</th>
-                    <th className="px-3 py-2 text-left font-semibold">Unit Cost</th>
-                    <th className="px-3 py-2 text-left font-semibold">Amount</th>
+                    <th className="px-3 py-2 text-left font-semibold">Source</th>
+                    <th className="px-3 py-2 text-right font-semibold w-36">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {commitment.lines.map((line) => (
-                    <tr key={line.id} className="border-t border-gray-100">
-                      <td className="px-3 py-2">{line.description || "—"}</td>
-                      <td className="px-3 py-2">{line.qty}</td>
-                      <td className="px-3 py-2">{line.uom || "—"}</td>
-                      <td className="px-3 py-2">{fmt(line.unit_cost)}</td>
-                      <td className="px-3 py-2">{fmt(line.amount)}</td>
+                  {!hasRows ? (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-6 text-center text-gray-500">
+                        No contributing records for this cost code.
+                      </td>
                     </tr>
-                  ))}
+                  ) : (
+                    displayGroups.map((group) =>
+                      group.rows.length === 0 ? null : (
+                        <Fragment key={group.label}>
+                          <tr className="bg-gray-100/70">
+                            <td colSpan={4} className="px-3 py-1.5 font-semibold text-gray-700">
+                              {group.label}
+                            </td>
+                          </tr>
+                          {group.rows.map((row, i) => {
+                            rowNum += 1;
+                            return (
+                              <tr key={`${group.label}-${i}`} className="border-t border-gray-100">
+                                <td className="px-3 py-2 text-gray-500">{rowNum}</td>
+                                <td className="px-3 py-2">{row.description || "—"}</td>
+                                <td className="px-3 py-2">
+                                  {row.source_href ? (
+                                    <Link
+                                      href={row.source_href}
+                                      className="text-blue-700 hover:text-blue-900 hover:underline"
+                                    >
+                                      {row.source_label}
+                                    </Link>
+                                  ) : (
+                                    <span className="text-gray-400">{row.source_label || "—"}</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(row.amount)}</td>
+                              </tr>
+                            );
+                          })}
+                        </Fragment>
+                      )
+                    )
+                  )}
+                  <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+                    <td className="px-3 py-2" colSpan={3}>
+                      Total:
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(cellValue)}</td>
+                  </tr>
                 </tbody>
               </table>
-            </div>
-          ))}
+              <p className="mt-3 text-[11px] text-gray-400">
+                Sources are matched to this budget code. Amounts entered directly on the budget line
+                item appear under “Direct budget entry” so the breakdown totals to the column value.
+              </p>
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
