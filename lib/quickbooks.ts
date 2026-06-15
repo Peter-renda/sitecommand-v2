@@ -992,14 +992,15 @@ export async function findOrCreateClassId(
 
 /**
  * Resolves a Customer by name → Id WITHOUT creating it. Used by the
- * Items-based job-to-date pull — the project name is matched against the
- * Customer:Job hierarchy:
- *   1. exact DisplayName match (top-level customer named exactly that)
- *   2. exact Name match (the leaf segment on a sub-customer, e.g. the
- *      "EH Sitework" portion of "Owner LLC:EH Sitework")
- *   3. DisplayName ending in ":<name>" (sub-customer of any parent)
- * Returns null when nothing matches — the pull warns rather than erroring so
- * an account-mapped fallback can still run.
+ * Items-based job-to-date pull as a *fallback* when no explicit QBO Customer
+ * has been pinned on the project. Prefers QBO **Projects** (the modern
+ * construction entity — Customer rows with `IsProject = true`) over plain
+ * Customers, then falls back to Customer:Job sub-customer matching:
+ *   1. Project: exact `DisplayName` or `Name`
+ *   2. Customer (non-Project): exact `DisplayName` or `Name`
+ *   3. Customer: `DisplayName LIKE '%:<name>'` (sub-customer of any parent)
+ * Returns null when nothing matches — the pull then warns rather than
+ * erroring so an account-mapped fallback can still run.
  */
 export async function findCustomerIdByName(
   companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials, name?: string | null
@@ -1007,18 +1008,92 @@ export async function findCustomerIdByName(
   const n = (name ?? "").trim();
   if (!n) return null;
   const esc = escapeQBOString(n);
-  // Try exact DisplayName then exact Name.
+  // 1. QBO Projects first (capital-P Projects — the modern construction pattern).
+  const project = await queryQBO(
+    companyId, appCreds, companyCreds,
+    `SELECT Id FROM Customer WHERE Active = true AND IsProject = true AND (DisplayName = '${esc}' OR Name = '${esc}')`, "Customer"
+  );
+  if (project && project.length > 0) return String(project[0].Id);
+  // 2. Plain Customers (top-level or sub-customer leaf).
   const exact = await queryQBO(
     companyId, appCreds, companyCreds,
     `SELECT Id FROM Customer WHERE Active = true AND (DisplayName = '${esc}' OR Name = '${esc}')`, "Customer"
   );
   if (exact && exact.length > 0) return String(exact[0].Id);
-  // Try sub-customer of any parent: "Anything:EH Sitework"
+  // 3. Legacy Customer:Job naming — sub-customer of any parent.
   const subLike = await queryQBO(
     companyId, appCreds, companyCreds,
     `SELECT Id FROM Customer WHERE Active = true AND DisplayName LIKE '%:${esc}'`, "Customer"
   );
   return subLike && subLike.length > 0 ? String(subLike[0].Id) : null;
+}
+
+// ── QBO Project / Customer list (for the project-admin picker) ───────────────
+
+/**
+ * Returned to the project-admin "QBO Project" picker. `kind` lets the UI badge
+ * each option as a Project, a sub-customer (Customer:Job), or a plain Customer
+ * so users pick the right one without guessing.
+ */
+export type QBOProjectOption = {
+  id: string;
+  /** Friendly label: a Project's name, or a Customer:Job hierarchical name. */
+  label: string;
+  kind: "project" | "subcustomer" | "customer";
+  /** Parent Customer name when the option is a Project or sub-customer. */
+  parentName: string | null;
+};
+
+export type QBOProjectListResult =
+  | { ok: true; options: QBOProjectOption[] }
+  | { ok: false; error: string };
+
+/**
+ * Lists active QBO Projects + Customers (including sub-customers / Customer:Job)
+ * so the project-admin UI can pin a specific QBO record to a SiteCommand
+ * project. Projects appear first (the recommended choice for GC files), then
+ * sub-customers, then top-level customers.
+ */
+export async function fetchQBOProjectsAndCustomers(
+  companyId: string,
+  appCreds: QBOAppCredentials,
+  companyCreds: QBOCompanyCredentials
+): Promise<QBOProjectListResult> {
+  try {
+    const query = encodeURIComponent(
+      "SELECT Id, DisplayName, FullyQualifiedName, IsProject, ParentRef FROM Customer " +
+      "WHERE Active = true MAXRESULTS 1000"
+    );
+    const { status, json, rawText } = await callQBO(
+      companyId, appCreds, companyCreds, "GET", `query?query=${query}`
+    );
+    if (status !== 200) return { ok: false, error: extractQBOError(json, rawText) };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = (json as any)?.QueryResponse?.Customer ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const all = (Array.isArray(rows) ? rows : [rows]).filter((r: any) => r?.Id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const options: QBOProjectOption[] = all.map((r: any) => {
+      const isProject = !!r.IsProject;
+      const hasParent = !!r.ParentRef?.value;
+      const display = String(r.DisplayName ?? "");
+      // QBO uses ":" between parent and child in FullyQualifiedName.
+      const fqn = String(r.FullyQualifiedName ?? display);
+      const parentName = hasParent && fqn.includes(":")
+        ? fqn.slice(0, fqn.lastIndexOf(":"))
+        : null;
+      const kind: QBOProjectOption["kind"] =
+        isProject ? "project" : hasParent ? "subcustomer" : "customer";
+      const label = isProject ? display : fqn;
+      return { id: String(r.Id), label, kind, parentName };
+    });
+    // Sort: Projects → sub-customers → customers, then alphabetically by label.
+    const rank = (k: QBOProjectOption["kind"]) => k === "project" ? 0 : k === "subcustomer" ? 1 : 2;
+    options.sort((a, b) => rank(a.kind) - rank(b.kind) || a.label.localeCompare(b.label));
+    return { ok: true, options };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
 }
 
 /**
@@ -1877,7 +1952,12 @@ export async function fetchQBOJobToDateCosts(
   companyId: string,
   appCreds: QBOAppCredentials,
   companyCreds: QBOCompanyCredentials,
-  opts: { projectName?: string | null; budgetCodes: string[] }
+  opts: {
+    projectName?: string | null;
+    budgetCodes: string[];
+    /** Explicit QBO Customer/Project Id pinned on the project. Skips name lookup. */
+    qboCustomerId?: string | null;
+  }
 ): Promise<QBOJobToDateResult> {
   const codes = Array.from(new Set(opts.budgetCodes.map((c) => (c ?? "").trim()).filter(Boolean)));
   if (codes.length === 0) return { ok: true, costs: {} };
@@ -1905,7 +1985,12 @@ export async function fetchQBOJobToDateCosts(
   const merged: Record<string, number> = {};
 
   if (itemMapped.length > 0) {
-    const r = await pullByItem(companyId, appCreds, companyCreds, { projectName: opts.projectName, codes: itemMapped, map });
+    const r = await pullByItem(companyId, appCreds, companyCreds, {
+      projectName: opts.projectName,
+      qboCustomerId: opts.qboCustomerId,
+      codes: itemMapped,
+      map,
+    });
     if (!r.ok) return r;
     Object.assign(merged, r.costs);
     if (r.warning) warnings.push(r.warning);
@@ -1930,7 +2015,12 @@ export async function fetchQBOJobToDateCosts(
  */
 async function pullByItem(
   companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials,
-  opts: { projectName?: string | null; codes: string[]; map: Record<string, { account?: string; class?: string; item?: string }> }
+  opts: {
+    projectName?: string | null;
+    qboCustomerId?: string | null;
+    codes: string[];
+    map: Record<string, { account?: string; class?: string; item?: string }>;
+  }
 ): Promise<QBOJobToDateResult> {
   // itemName(lower) → budget codes that map to it.
   const itemToCodes = new Map<string, string[]>();
@@ -1944,11 +2034,18 @@ async function pullByItem(
   }
   if (itemToCodes.size === 0) return { ok: true, costs: {} };
 
-  const customerId = await findCustomerIdByName(companyId, appCreds, companyCreds, opts.projectName);
+  // Prefer the explicit per-project QBO id (pinned in Project Admin). Fall back
+  // to a Projects-first name lookup only when no override is set.
+  const pinned = (opts.qboCustomerId ?? "").trim();
+  const customerId = pinned
+    ? pinned
+    : await findCustomerIdByName(companyId, appCreds, companyCreds, opts.projectName);
   if (!customerId) {
     return {
       ok: true, costs: {},
-      warning: `No QuickBooks Customer (or Customer:Job) matching "${(opts.projectName ?? "").trim()}" was found, so Items-based costs could not be pulled.`,
+      warning:
+        `No QuickBooks Project or Customer matching "${(opts.projectName ?? "").trim()}" was found. ` +
+        `Pin the right QBO Project/Customer in Project Admin → ERP Integration so the pull doesn't depend on a name match.`,
     };
   }
 

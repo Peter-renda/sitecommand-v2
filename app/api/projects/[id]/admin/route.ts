@@ -11,7 +11,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data, error } = await supabase
     .from("projects")
-    .select("id, name, description, address, zip_code, status, project_number, sector, work_scope, city, state, county, start_date, actual_start_date, completion_date, projected_finish_date, warranty_start_date, warranty_end_date, erp_sync, erp_job_cost_sync, prevent_overbilling, non_commitment_costs, test_project, labor_productivity, sage_300_id")
+    .select("id, name, description, address, zip_code, status, project_number, sector, work_scope, city, state, county, start_date, actual_start_date, completion_date, projected_finish_date, warranty_start_date, warranty_end_date, erp_sync, erp_job_cost_sync, prevent_overbilling, non_commitment_costs, test_project, labor_productivity, sage_300_id, qbo_customer_id, qbo_customer_name")
     .eq("id", id)
     .single();
 
@@ -37,6 +37,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     "projected_finish_date", "warranty_start_date", "warranty_end_date",
     "erp_sync", "erp_job_cost_sync", "prevent_overbilling",
     "non_commitment_costs", "test_project", "labor_productivity", "sage_300_id",
+    "qbo_customer_id", "qbo_customer_name",
     "report_fields",
   ];
 

@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   // ERP data is company-scoped, so the project must belong to the caller's company.
   const { data: project } = await supabase
     .from("projects")
-    .select("id, company_id, name, project_number")
+    .select("id, company_id, name, project_number, qbo_customer_id")
     .eq("id", projectId)
     .single();
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -107,6 +107,7 @@ export async function POST(req: NextRequest) {
     const qboApp = await getQBOAppCredentials(session.company_id);
     outcome = await fetchQBOJobToDateCosts(session.company_id, qboApp, qboCo, {
       projectName: project.name,
+      qboCustomerId: project.qbo_customer_id ?? null,
       budgetCodes,
     });
   } else {

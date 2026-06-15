@@ -34,6 +34,8 @@ type ProjectAdmin = {
   test_project: boolean | null;
   labor_productivity: boolean | null;
   sage_300_id: string | null;
+  qbo_customer_id: string | null;
+  qbo_customer_name: string | null;
   report_fields: ReportFieldValues | null;
 };
 
@@ -244,6 +246,11 @@ export default function AdminClient({
   const [testProject, setTestProject] = useState(false);
   const [laborProductivity, setLaborProductivity] = useState(false);
   const [sage300Id, setSage300Id] = useState("");
+  const [qboCustomerId, setQboCustomerId] = useState("");
+  const [qboCustomerName, setQboCustomerName] = useState("");
+  const [qboOptions, setQboOptions] = useState<{ id: string; label: string; kind: "project" | "subcustomer" | "customer"; parentName: string | null }[]>([]);
+  const [qboOptionsLoading, setQboOptionsLoading] = useState(false);
+  const [qboOptionsError, setQboOptionsError] = useState("");
   const [reportFields, setReportFields] = useState<ReportFieldValues>({});
 
   const [copyDirProjects, setCopyDirProjects] = useState<CopyDirProject[]>([]);
@@ -304,10 +311,28 @@ export default function AdminClient({
         setTestProject(d.test_project ?? false);
         setLaborProductivity(d.labor_productivity ?? false);
         setSage300Id(d.sage_300_id ?? "");
+        setQboCustomerId(d.qbo_customer_id ?? "");
+        setQboCustomerName(d.qbo_customer_name ?? "");
         setReportFields(d.report_fields ?? {});
         setLoading(false);
       });
   }, [projectId]);
+
+  // Lazy-load QBO Projects/Customers for the picker. Best-effort — when QBO
+  // isn't connected the endpoint returns 422 and we just leave the dropdown
+  // empty (the input still accepts a manual value).
+  useEffect(() => {
+    setQboOptionsLoading(true);
+    setQboOptionsError("");
+    fetch("/api/integrations/quickbooks/projects")
+      .then(async (r) => ({ ok: r.ok, body: await r.json().catch(() => ({})) }))
+      .then(({ ok, body }) => {
+        if (!ok) setQboOptionsError(body?.error ?? "");
+        else setQboOptions(body?.options ?? []);
+      })
+      .catch(() => setQboOptionsError("Network error while loading QuickBooks projects."))
+      .finally(() => setQboOptionsLoading(false));
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -426,6 +451,8 @@ export default function AdminClient({
         test_project: testProject,
         labor_productivity: laborProductivity,
         sage_300_id: sage300Id,
+        qbo_customer_id: qboCustomerId,
+        qbo_customer_name: qboCustomerName,
         report_fields: reportFields,
       }),
     });
@@ -694,6 +721,56 @@ export default function AdminClient({
                           placeholder="Enter Sage 300 ID"
                         />
                       </Field>
+                    </div>
+                    <div className="max-w-xl space-y-2 pt-2 border-t border-gray-100">
+                      <Field label="QuickBooks Project / Customer:">
+                        <select
+                          value={qboCustomerId}
+                          onChange={(e) => {
+                            if (!isSuperAdmin) return;
+                            const id = e.target.value;
+                            setQboCustomerId(id);
+                            const opt = qboOptions.find((o) => o.id === id);
+                            setQboCustomerName(opt?.label ?? "");
+                          }}
+                          disabled={!isSuperAdmin}
+                          className="h-11 w-full rounded-md border border-black/10 bg-[color:var(--surface-sunken)] px-3 text-sm text-[color:var(--ink)] focus:border-[color:var(--ink)] focus:outline-none focus:ring-1 focus:ring-[color:var(--ink)] disabled:cursor-not-allowed"
+                        >
+                          <option value="">
+                            {qboOptionsLoading
+                              ? "Loading QuickBooks projects…"
+                              : qboOptionsError
+                                ? "Auto-match by project name"
+                                : qboOptions.length === 0
+                                  ? "QuickBooks not connected — auto-match by name"
+                                  : "Auto-match by project name (default)"}
+                          </option>
+                          {qboOptions.map((o) => {
+                            const badge = o.kind === "project" ? "Project" : o.kind === "subcustomer" ? "Customer:Job" : "Customer";
+                            return (
+                              <option key={o.id} value={o.id}>
+                                {`[${badge}] ${o.label}`}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </Field>
+                      <p className="text-xs text-gray-500">
+                        Pin this SiteCommand project to a specific QuickBooks <strong>Project</strong> (recommended for
+                        GC files in QBO Plus/Advanced) or a Customer:Job. <em>Resync with ERP</em> will pull job-to-date
+                        costs from transactions assigned to this QBO record. Leave blank to fall back to auto-matching
+                        by project name.
+                      </p>
+                      {qboCustomerName && qboCustomerId && (
+                        <p className="text-xs text-gray-400">
+                          Currently pinned to: <span className="font-mono">{qboCustomerName}</span>
+                        </p>
+                      )}
+                      {qboOptionsError && (
+                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1">
+                          {qboOptionsError}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </SectionCard>

@@ -97,6 +97,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       }
       if (q.includes("FROM Customer")) {
         if (scenario.customerExists) {
+          // Projects-first lookup: when the query asks for IsProject=true, return
+          // the Project Id (510); otherwise return the plain Customer (501).
+          if (q.includes("IsProject = true")) {
+            return json(200, { QueryResponse: { Customer: [{ Id: "510", DisplayName: "EH Sitework" }] } });
+          }
           return json(200, { QueryResponse: { Customer: [{ Id: "501", DisplayName: "EH Sitework" }] } });
         }
         return json(200, { QueryResponse: { Customer: [{ Id: "55", DisplayName: "Owner LLC" }] } });
@@ -600,7 +605,7 @@ async function main() {
   assert.ok(customerLookup, "must look up the Customer:Job for the project");
   const detailReport = calls.find((c) => c.url.includes("/reports/ProfitAndLossDetail"));
   assert.ok(detailReport, "must request ProfitAndLossDetail for the items-based pull");
-  assert.match(detailReport!.url, /customer=501/, "PnLDetail must be scoped to the resolved customer id");
+  assert.match(detailReport!.url, /customer=510/, "PnLDetail must be scoped to the QBO Project id (510), not the plain Customer (501)");
   assert.match(detailReport!.url, /columns=tx_date,name,memo,item_name,subt_nat_amount/, "must request the item_name column");
   // The legacy account-based P&L must NOT be called when every code is item-mapped.
   const accountReport = calls.find((c) => /reports\/ProfitAndLoss\?/.test(c.url));
@@ -632,6 +637,30 @@ async function main() {
   assert.ok(detailCall, "items path still runs");
   assert.ok(summaryCall, "legacy account path still runs in parallel");
   pass("mixed mapping merges item-based and account-based costs in one resync");
+
+  // ── 13. Explicit per-project QBO Customer override bypasses name lookup ────
+  console.log("\n[13] Explicit per-project QBO Customer override");
+  process.env.QBO_BUDGET_CODE_MAP = JSON.stringify({
+    "02-310.C": { item: "02-310.C" },
+  });
+  // customerExists is FALSE — so any name-based lookup would not match the
+  // project. The pinned id below must short-circuit the lookup entirely.
+  scenario.customerExists = false;
+  calls.length = 0;
+  const jtdPinned = await fetchQBOJobToDateCosts("co-1", appCreds, prodCreds, {
+    projectName: "Doesn't matter — override is set",
+    qboCustomerId: "PINNED-777",
+    budgetCodes: ["02-310.C"],
+  });
+  delete process.env.QBO_BUDGET_CODE_MAP;
+
+  assert.ok(jtdPinned.ok, `pinned-id pull failed: ${!jtdPinned.ok ? jtdPinned.error : ""}`);
+  const noCustomerLookup = calls.find((c) => c.url.includes("FROM%20Customer"));
+  assert.equal(noCustomerLookup, undefined, "explicit override must skip the Customer name lookup entirely");
+  const pinnedReport = calls.find((c) => c.url.includes("/reports/ProfitAndLossDetail"));
+  assert.ok(pinnedReport, "must still call PnLDetail");
+  assert.match(pinnedReport!.url, /customer=PINNED-777/, "PnLDetail must use the pinned customer id verbatim");
+  pass("explicit QBO Customer id pinned on the project skips name lookup and scopes the report directly");
 
   console.log(`\nAll ${passed} QBO integration checks passed.`);
 }
