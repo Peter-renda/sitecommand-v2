@@ -13,6 +13,28 @@ export function isCompanyAdmin(companyRole: string | null): boolean {
 }
 
 /**
+ * Returns true only when the user is a Company Super Admin (the account
+ * owner) on the company that OWNS the given project. Stricter than
+ * `getToolLevel(... ) === "admin"`, which also includes Company Admins,
+ * Project Admins, and explicit per-tool admin grants.
+ */
+export async function isProjectSuperAdmin(
+  projectId: string,
+  session: Session
+): Promise<boolean> {
+  if (session.company_role !== "super_admin" || !session.company_id) return false;
+
+  const supabase = getSupabase();
+  const { data: project } = await supabase
+    .from("projects")
+    .select("company_id")
+    .eq("id", projectId)
+    .single();
+
+  return project?.company_id === session.company_id;
+}
+
+/**
  * Checks whether a user may access a given project at all.
  *
  * Access is granted when ANY of the following is true:

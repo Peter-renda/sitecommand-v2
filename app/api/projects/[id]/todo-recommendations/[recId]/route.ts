@@ -82,6 +82,24 @@ export async function PATCH(
       .maybeSingle();
     const taskNumber = (maxRow?.task_number ?? 0) + 1;
 
+    // Accepting assigns the new task to the user who accepted it.
+    const { data: me } = await supabase
+      .from("users")
+      .select("first_name, last_name, username, email")
+      .eq("id", session.id)
+      .maybeSingle();
+    const selfName =
+      [me?.first_name, me?.last_name].filter(Boolean).join(" ").trim() ||
+      me?.username ||
+      me?.email ||
+      session.email ||
+      "Me";
+    const selfAssignee = {
+      id: session.id,
+      name: selfName,
+      email: me?.email ?? session.email ?? null,
+    };
+
     const { data: task, error: taskErr } = await supabase
       .from("tasks")
       .insert({
@@ -92,7 +110,7 @@ export async function PATCH(
         category: rec.category || null,
         description: rec.rationale || null,
         distribution_list: [],
-        assignees: [],
+        assignees: [selfAssignee],
         due_date: rec.suggested_due_date || null,
         is_private: false,
         created_by: session.id,

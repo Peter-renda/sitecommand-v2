@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
-import { getToolLevel, requireToolLevel } from "@/lib/tool-permissions";
+import { getToolLevel } from "@/lib/tool-permissions";
+import { isProjectSuperAdmin } from "@/lib/project-access";
 import { sendInvoiceAssignmentEmail } from "@/lib/email";
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
@@ -90,8 +91,10 @@ export async function POST(
 
   const { id: projectId } = await params;
 
-  const denied = await requireToolLevel(session, projectId, "transaction-orders", "admin");
-  if (denied) return denied;
+  // Assigning an invoice is reserved for Company Super Admins.
+  if (!(await isProjectSuperAdmin(projectId, session))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   let body: {
     storagePath?: unknown;

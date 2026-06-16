@@ -1,7 +1,7 @@
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import TransactionOrdersClient from "./TransactionOrdersClient";
-import { getToolLevel } from "@/lib/tool-permissions";
+import { isProjectSuperAdmin } from "@/lib/project-access";
 
 export default async function TransactionOrdersPage({
   params,
@@ -12,14 +12,16 @@ export default async function TransactionOrdersPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
-  const toolLevel = await getToolLevel(session, id, "transaction-orders");
+  // Assigning an invoice to another project is reserved for Company Super
+  // Admins (not all tool-admins), so the control is hidden for everyone else.
+  const canAssign = await isProjectSuperAdmin(id, session);
 
   return (
     <TransactionOrdersClient
       projectId={id}
       username={session.username}
       userId={session.id}
-      canAssign={toolLevel === "admin"}
+      canAssign={canAssign}
     />
   );
 }
