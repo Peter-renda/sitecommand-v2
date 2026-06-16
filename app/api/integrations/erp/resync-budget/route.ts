@@ -51,11 +51,21 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabase();
 
   // ERP data is company-scoped, so the project must belong to the caller's company.
-  const { data: project } = await supabase
+  const { data: project, error: projectError } = await supabase
     .from("projects")
     .select("id, company_id, name, project_number, qbo_customer_id")
     .eq("id", projectId)
     .single();
+  // Distinguish a genuinely absent row (PGRST116: zero rows for .single()) from a
+  // failed query — e.g. a missing column because migration 163 wasn't applied.
+  // Masking DB errors as a 404 "Project not found" makes schema drift
+  // undiagnosable (it sent us chasing a non-existent project once already).
+  if (projectError && projectError.code !== "PGRST116") {
+    return NextResponse.json(
+      { error: `Failed to load project: ${projectError.message ?? "database error"}. If this mentions a missing column, apply supabase/migrations/163_project_qbo_customer_mapping.sql.` },
+      { status: 500 }
+    );
+  }
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   if (project.company_id !== session.company_id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
