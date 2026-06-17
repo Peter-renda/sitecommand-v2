@@ -943,6 +943,8 @@ export type QBOSovLine = {
 
 type QBOCodeRef = { accountId?: string; classId?: string; itemId?: string };
 
+type QBOProjectCostingRef = { customerId?: string | null; classId?: string | null };
+
 function roundMoney(n: number): number {
   return Number((Number.isFinite(n) ? n : 0).toFixed(2));
 }
@@ -1166,11 +1168,12 @@ function lineDescription(line: QBOSovLine): string {
 /** Account-based expense line (Bills). Falls back to the project Class when the
  *  budget-code map doesn't supply one, so every cost line stays job-tracked. */
 function buildBillLine(
-  line: QBOSovLine, ref: QBOCodeRef, defaultAccountId: string, defaultClassId?: string | null
+  line: QBOSovLine, ref: QBOCodeRef, defaultAccountId: string, projectRef?: QBOProjectCostingRef
 ): Record<string, unknown> {
   const detail: Record<string, unknown> = { AccountRef: { value: ref.accountId ?? defaultAccountId } };
-  const classId = ref.classId ?? defaultClassId;
+  const classId = ref.classId ?? projectRef?.classId;
   if (classId) detail.ClassRef = { value: classId };
+  if (projectRef?.customerId) detail.CustomerRef = { value: projectRef.customerId };
   return {
     DetailType: "AccountBasedExpenseLineDetail",
     Amount: roundMoney(line.amount),
@@ -1183,7 +1186,7 @@ function buildBillLine(
 function buildItemLine(
   line: QBOSovLine, ref: QBOCodeRef, defaultItemId: string,
   detailType: "ItemBasedExpenseLineDetail" | "SalesItemLineDetail",
-  defaultClassId?: string | null
+  projectRef?: QBOProjectCostingRef
 ): Record<string, unknown> {
   const amount = roundMoney(line.amount);
   let qty = 1;
@@ -1194,8 +1197,11 @@ function buildItemLine(
     unitPrice = roundMoney(line.unitCost);
   }
   const detail: Record<string, unknown> = { ItemRef: { value: ref.itemId ?? defaultItemId }, Qty: qty, UnitPrice: unitPrice };
-  const classId = ref.classId ?? defaultClassId;
+  const classId = ref.classId ?? projectRef?.classId;
   if (classId) detail.ClassRef = { value: classId };
+  if (detailType === "ItemBasedExpenseLineDetail" && projectRef?.customerId) {
+    detail.CustomerRef = { value: projectRef.customerId };
+  }
   return {
     DetailType: detailType,
     Amount: amount,
@@ -1259,6 +1265,8 @@ export type QBOCommitmentPayload = {
   // Project context (G3 class job costing, G7 DocNumber prefix).
   project_name?: string | null;
   project_number?: string | null;
+  /** Explicit QBO Project/Customer id pinned on the SiteCommand project. */
+  qbo_customer_id?: string | null;
   // Directory contact details used to enrich an auto-created Vendor (G2).
   vendorDetails?: QBOPartyDetails | null;
   // Schedule of Values (P1 G13) — one QBO line per item when present.
@@ -1357,6 +1365,8 @@ export async function syncCommitmentToQBO(
   const config = await getQBOPostingConfig(companyId);
   const docNumber = buildQBODocNumber(commitment.number, commitment.project_number, config.docNumberPrefix);
   const projectClassId = await resolveProjectClassId(companyId, appCreds, companyCreds, config, commitment.project_name);
+  const projectCustomerId = (commitment.qbo_customer_id ?? "").trim() || await findCustomerIdByName(companyId, appCreds, companyCreds, commitment.project_name);
+  const projectRef: QBOProjectCostingRef = { customerId: projectCustomerId, classId: projectClassId };
   const termId = await findTermId(companyId, appCreds, companyCreds, commitment.payment_terms);
 
   // Resolve per-line cost-code refs (Account/Class/Item) for any mapped codes.
@@ -1390,8 +1400,8 @@ export async function syncCommitmentToQBO(
         return { ok: false, error: "No QBO expense account found. Set QBO_AP_EXPENSE_ACCOUNT to a valid expense or COGS account.", rawResponse: "" };
       }
       const lines = sovLines.length
-        ? sovLines.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId, projectClassId))
-        : [buildBillLine({ budgetCode: "", description: commitment.title, amount }, {}, expenseAccountId, projectClassId)];
+        ? sovLines.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId, projectRef))
+        : [buildBillLine({ budgetCode: "", description: commitment.title, amount }, {}, expenseAccountId, projectRef)];
       const basePayload: Record<string, unknown> = {
         VendorRef: { value: vendorId },
         TxnDate: commitment.start_date || today,
@@ -1428,8 +1438,8 @@ export async function syncCommitmentToQBO(
         return { ok: false, error: "Could not resolve or create a QBO item for the purchase order line.", rawResponse: "" };
       }
       const lines = sovLines.length
-        ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "ItemBasedExpenseLineDetail", projectClassId))
-        : [buildItemLine({ budgetCode: "", description: commitment.title, amount }, {}, itemId, "ItemBasedExpenseLineDetail", projectClassId)];
+        ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "ItemBasedExpenseLineDetail", projectRef))
+        : [buildItemLine({ budgetCode: "", description: commitment.title, amount }, {}, itemId, "ItemBasedExpenseLineDetail", projectRef)];
       // Ship Via / Bill To have no structured PurchaseOrder fields — keep them
       // in the note alongside any unmatched payment terms (G12).
       const poNoteLines = [
@@ -1595,8 +1605,8 @@ export async function syncPrimeContractToQBO(
 
   try {
     const lines = sovLines.length
-      ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail", projectClassId))
-      : [buildItemLine({ budgetCode: "", description: contract.title, amount: revisedAmount }, {}, itemId, "SalesItemLineDetail", projectClassId)];
+      ? sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail", { classId: projectClassId }))
+      : [buildItemLine({ budgetCode: "", description: contract.title, amount: revisedAmount }, {}, itemId, "SalesItemLineDetail", { classId: projectClassId })];
     const basePayload: Record<string, unknown> = {
       CustomerRef: { value: customerId },
       TxnDate: contract.start_date ?? today,
@@ -1647,6 +1657,7 @@ export type QBOAPInvoicePayload = {
   retainagePct?: number; // % withheld; emits a negative line when QBO_RETAINAGE_PAYABLE_ACCOUNT is set
   projectName?: string | null;   // class job costing (G3)
   projectNumber?: string | null; // DocNumber prefix (G7)
+  qboCustomerId?: string | null; // QBO Project/CustomerRef for job-costed AP lines
   vendorDetails?: QBOPartyDetails | null;
 };
 
@@ -1681,6 +1692,8 @@ export async function syncAPInvoiceToQBO(
     return { ok: false, error: "No QBO expense account found. Set QBO_AP_EXPENSE_ACCOUNT to a valid expense or COGS account.", rawResponse: "" };
   }
   const projectClassId = await resolveProjectClassId(companyId, appCreds, companyCreds, config, invoice.projectName);
+  const projectCustomerId = (invoice.qboCustomerId ?? "").trim() || await findCustomerIdByName(companyId, appCreds, companyCreds, invoice.projectName);
+  const projectRef: QBOProjectCostingRef = { customerId: projectCustomerId, classId: projectClassId };
   const docNumber = buildQBODocNumber(invoice.commitmentNumber, invoice.projectNumber, config.docNumberPrefix);
   const codeRefs = await resolveCodeRefs(companyId, appCreds, companyCreds, invoice.lineItems.map((l) => l.budgetCode), await getQBOBudgetCodeMap(companyId));
   const refFor = (code: string): QBOCodeRef => codeRefs[(code ?? "").trim()] ?? {};
@@ -1692,7 +1705,7 @@ export async function syncAPInvoiceToQBO(
   }
 
   try {
-    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId, projectClassId));
+    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId, projectRef));
 
     // Retainage withheld — negative line to the payable account (best-effort, config-gated).
     const pct = invoice.retainagePct ?? 0;
@@ -1798,7 +1811,7 @@ export async function syncARInvoiceToQBO(
   }
 
   try {
-    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail", projectClassId));
+    const lines: Record<string, unknown>[] = invoice.lineItems.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail", { classId: projectClassId }));
 
     // Materials presently stored (AIA G-703 column F) — billed alongside work
     // completed as its own line so the owner invoice matches the pay app.
@@ -1806,7 +1819,7 @@ export async function syncARInvoiceToQBO(
     if (totalMaterialsStored > 0) {
       lines.push(buildItemLine(
         { budgetCode: "", description: "Materials presently stored", amount: totalMaterialsStored },
-        {}, itemId, "SalesItemLineDetail", projectClassId
+        {}, itemId, "SalesItemLineDetail", { classId: projectClassId }
       ));
     }
 
@@ -1866,9 +1879,9 @@ export async function syncARInvoiceToQBO(
 //
 //   1. ITEMS-BASED (recommended for QBO GC files):
 //      One QBO Product/Service Item per budget code (e.g. "02-310.C"). The pull
-//      resolves the project to a Customer (or Customer:Job), reads the
-//      ProfitAndLossDetail report scoped to that customer, and sums each Item's
-//      amount. This is the canonical construction-industry pattern in QBO.
+//      resolves the project to a Customer (or Customer:Job), reads paid Bills,
+//      and sums item-detail lines for that Customer/Project. This follows the
+//      Product/Service + Customer/Project fields shown on QBO Bills.
 //
 //   2. ACCOUNT-BASED (legacy):
 //      Budget code maps to a QBO Account. The pull reads a ProfitAndLoss summary
@@ -1876,8 +1889,9 @@ export async function syncARInvoiceToQBO(
 //      minority of GCs whose CoA carries a separate account per cost code.
 //
 // Per-code decision: if the QBO_BUDGET_CODE_MAP entry has `item`, that code is
-// pulled via path 1; if it has only `account`, it's pulled via path 2. Codes
-// with neither are skipped.
+// pulled via path 1 using that Item; if it has only `account`, it's pulled via
+// path 2. Unmapped codes default to the GC-standard path where the QBO
+// Product/Service name/number is the budget code itself.
 
 export type QBOJobToDateResult =
   | { ok: true; costs: Record<string, number>; warning?: string }
@@ -1912,39 +1926,67 @@ function collectReportAccountAmounts(node: any, byId: Map<string, number>, byNam
   }
 }
 
+/** True when a QBO Bill is paid/closed enough to count as paid job cost. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isPaidQBOBill(bill: any): boolean {
+  const balance = Number(bill?.Balance);
+  if (Number.isFinite(balance)) return Math.abs(balance) < 0.005;
+  const linked = bill?.LinkedTxn;
+  return Array.isArray(linked) && linked.some((t) => String(t?.TxnType ?? "").toLowerCase() === "billpaymentcheck");
+}
+
 /**
- * Walks a ProfitAndLossDetail-style report and sums each leaf row's amount by
- * the value of a target column (e.g. "item_name"). The column indices come
- * from the report's Columns header; only leaf rows (no nested Rows) are
- * counted so group/section subtotals are never double-added.
+ * Sums paid Bill item-detail lines by Product/Service for a QBO Project/Customer.
+ * QBO exposes the same fields shown in the Bill UI: ItemRef = Product/Service,
+ * CustomerRef = Customer/Project, and Balance/LinkedTxn indicate payment state.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function collectDetailReportByColumn(json: any, columnType: string): Map<string, number> {
-  const byKey = new Map<string, number>();
-  const cols = Array.isArray(json?.Columns?.Column) ? json.Columns.Column : [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const keyIdx = cols.findIndex((c: any) =>
-    String(c?.ColType ?? "").toLowerCase() === columnType.toLowerCase() ||
-    String(c?.MetaData?.find?.((m: any) => m?.Name === "ColKey")?.Value ?? "").toLowerCase() === columnType.toLowerCase()
-  );
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const amtIdx = cols.findIndex((c: any) => String(c?.ColType ?? "").toLowerCase() === "amount");
-  if (keyIdx < 0 || amtIdx < 0) return byKey;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function visit(node: any): void {
-    if (!node || typeof node !== "object") return;
-    const nested = node?.Rows?.Row;
-    if (Array.isArray(nested)) for (const c of nested) visit(c);
-    const col = node?.ColData;
-    const hasNested = Array.isArray(nested) && nested.length > 0;
-    if (Array.isArray(col) && !hasNested && col.length > Math.max(keyIdx, amtIdx)) {
-      const key = String(col[keyIdx]?.value ?? "").trim().toLowerCase();
-      const amount = Number(col[amtIdx]?.value);
-      if (key && Number.isFinite(amount)) byKey.set(key, (byKey.get(key) ?? 0) + amount);
+function collectPaidBillItemAmounts(bills: any[], customerId: string): Map<string, number> {
+  const byItem = new Map<string, number>();
+  for (const bill of bills) {
+    if (!isPaidQBOBill(bill)) continue;
+    const lines = Array.isArray(bill?.Line) ? bill.Line : [];
+    for (const line of lines) {
+      const detail = line?.ItemBasedExpenseLineDetail;
+      if (!detail) continue;
+      const lineCustomerId = String(detail?.CustomerRef?.value ?? "").trim();
+      if (lineCustomerId !== customerId) continue;
+      const amount = Number(line?.Amount);
+      if (!Number.isFinite(amount)) continue;
+      const itemKeys = new Set([detail?.ItemRef?.name, detail?.ItemRef?.value]
+        .map((v) => String(v ?? "").trim().toLowerCase())
+        .filter(Boolean));
+      for (const key of itemKeys) {
+        byItem.set(key, (byItem.get(key) ?? 0) + amount);
+      }
     }
   }
-  visit(json);
-  return byKey;
+  return byItem;
+}
+
+async function fetchPaidBillsForJobCost(
+  companyId: string,
+  appCreds: QBOAppCredentials,
+  companyCreds: QBOCompanyCredentials
+): Promise<{ ok: true; bills: any[] } | { ok: false; error: string }> {
+  const bills: any[] = [];
+  for (let startPosition = 1; startPosition <= 10000; startPosition += 1000) {
+    const query = `SELECT * FROM Bill STARTPOSITION ${startPosition} MAXRESULTS 1000`;
+    let status: number;
+    let json: any;
+    let rawText: string;
+    try {
+      ({ status, json, rawText } = await callQBO(companyId, appCreds, companyCreds, "GET", `query?query=${encodeURIComponent(query)}`));
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : "Network error" };
+    }
+    if (status !== 200) return { ok: false, error: extractQBOError(json, rawText) };
+    const rows = json?.QueryResponse?.Bill;
+    const page = rows == null ? [] : Array.isArray(rows) ? rows : [rows];
+    bills.push(...page);
+    if (page.length < 1000) break;
+  }
+  return { ok: true, bills };
 }
 
 /** Public result shape — main entry point that delegates to the two paths and merges. */
@@ -1967,9 +2009,9 @@ export async function fetchQBOJobToDateCosts(
   const accountOnlyMapped: string[] = [];
   for (const code of codes) {
     const entry = map[code];
-    if (!entry) continue;
-    if ((entry.item ?? "").trim()) itemMapped.push(code);
-    else if ((entry.account ?? "").trim()) accountOnlyMapped.push(code);
+    if ((entry?.item ?? "").trim()) itemMapped.push(code);
+    else if ((entry?.account ?? "").trim()) accountOnlyMapped.push(code);
+    else itemMapped.push(code); // Default GC pattern: QBO Product/Service name/number equals the budget code.
   }
 
   if (itemMapped.length === 0 && accountOnlyMapped.length === 0) {
@@ -2008,10 +2050,10 @@ export async function fetchQBOJobToDateCosts(
 
 /**
  * Items-based pull: groups item-mapped codes by their target Item, resolves the
- * project to a Customer (or Customer:Job), reads ProfitAndLossDetail scoped to
- * that customer with `item_name` surfaced, and attributes each Item's total back
- * to the code that maps to it. Codes whose Item is shared by >1 code are
- * skipped (ambiguous).
+ * project to a Customer (or Customer:Job), reads paid QBO Bills, and sums each
+ * Item detail line whose Customer/Project matches this project. The Item's
+ * Product/Service number/name is attributed back to the mapped budget code.
+ * Codes whose Item is shared by >1 code are skipped (ambiguous).
  */
 async function pullByItem(
   companyId: string, appCreds: QBOAppCredentials, companyCreds: QBOCompanyCredentials,
@@ -2025,7 +2067,7 @@ async function pullByItem(
   // itemName(lower) → budget codes that map to it.
   const itemToCodes = new Map<string, string[]>();
   for (const code of opts.codes) {
-    const item = (opts.map[code]?.item ?? "").trim();
+    const item = (opts.map[code]?.item ?? code).trim();
     if (!item) continue;
     const k = item.toLowerCase();
     const list = itemToCodes.get(k) ?? [];
@@ -2049,26 +2091,14 @@ async function pullByItem(
     };
   }
 
-  const path =
-    `reports/ProfitAndLossDetail?customer=${encodeURIComponent(customerId)}` +
-    `&accounting_method=Accrual&columns=tx_date,name,memo,item_name,subt_nat_amount` +
-    `&start_date=1900-01-01&end_date=2100-12-31`;
+  const paidBills = await fetchPaidBillsForJobCost(companyId, appCreds, companyCreds);
+  if (!paidBills.ok) return paidBills;
 
-  let status: number;
-  let json: unknown;
-  let rawText: string;
-  try {
-    ({ status, json, rawText } = await callQBO(companyId, appCreds, companyCreds, "GET", path));
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Network error" };
-  }
-  if (status !== 200) return { ok: false, error: extractQBOError(json, rawText) };
-
-  const byItem = collectDetailReportByColumn(json, "item_name");
+  const byItem = collectPaidBillItemAmounts(paidBills.bills, customerId);
   if (byItem.size === 0) {
     return {
       ok: true, costs: {},
-      warning: "QuickBooks did not return item-level detail for this project. Confirm that costs on this Customer:Job are coded via Items (not just Accounts).",
+      warning: "QuickBooks did not return any paid Bill item lines for this project. Confirm the Bill is paid and its Item details line has both a Product/Service and Customer/Project.",
     };
   }
 

@@ -39,13 +39,13 @@ type RecordType = (typeof VALID_TYPES)[number];
 async function getProjectContext(
   supabase: ReturnType<typeof getSupabase>,
   projectId: string
-): Promise<{ name: string | null; number: string | null }> {
+): Promise<{ name: string | null; number: string | null; qboCustomerId: string | null }> {
   const { data } = await supabase
     .from("projects")
-    .select("name, project_number")
+    .select("name, project_number, qbo_customer_id")
     .eq("id", projectId)
     .single();
-  return { name: data?.name ?? null, number: data?.project_number ?? null };
+  return { name: data?.name ?? null, number: data?.project_number ?? null, qboCustomerId: data?.qbo_customer_id ?? null };
 }
 
 /** Maps QBO financial feedback onto update columns with the given prefix. */
@@ -171,7 +171,7 @@ export async function POST(req: NextRequest) {
 
     const result = await syncCommitmentToQBO(
       session.company_id, appCreds, companyCreds,
-      { ...commitment, sovLines, project_name: project.name, project_number: project.number, vendorDetails },
+      { ...commitment, sovLines, project_name: project.name, project_number: project.number, qbo_customer_id: project.qboCustomerId, vendorDetails },
       commitment.qbo_id
     );
 
@@ -316,6 +316,7 @@ export async function POST(req: NextRequest) {
         retainagePct: Number(commitment.default_retainage) || 0,
         projectName: project.name,
         projectNumber: project.number,
+        qboCustomerId: project.qboCustomerId,
         vendorDetails,
       },
       commitment.qbo_ap_invoice_id

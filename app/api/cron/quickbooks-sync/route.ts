@@ -122,17 +122,17 @@ export async function GET(req: NextRequest) {
     // ── 2. Find this company's projects ──────────────────────────────────────
     const { data: projects } = await supabase
       .from("projects")
-      .select("id, name, project_number")
+      .select("id, name, project_number, qbo_customer_id")
       .eq("company_id", companyId);
 
     const projectIds = (projects ?? []).map((p: { id: string }) => p.id);
     if (projectIds.length === 0) continue;
     const projectById = new Map(
-      (projects ?? []).map((p: { id: string; name: string | null; project_number: string | null }) => [
-        p.id, { name: p.name ?? null, number: p.project_number ?? null },
+      (projects ?? []).map((p: { id: string; name: string | null; project_number: string | null; qbo_customer_id?: string | null }) => [
+        p.id, { name: p.name ?? null, number: p.project_number ?? null, qboCustomerId: p.qbo_customer_id ?? null },
       ])
     );
-    const projectCtx = (projectId: string) => projectById.get(projectId) ?? { name: null, number: null };
+    const projectCtx = (projectId: string) => projectById.get(projectId) ?? { name: null, number: null, qboCustomerId: null };
 
     // ── 3. Dirty commitments ─────────────────────────────────────────────────
     // "Dirty" = never synced (last_synced_at IS NULL) OR updated since last sync.
@@ -169,7 +169,7 @@ export async function GET(req: NextRequest) {
       const vendorDetails = await lookupDirectoryPartyDetails(commitment.project_id, commitment.contract_company);
       const result = await syncCommitmentToQBO(
         companyId, appCreds, companyCreds,
-        { ...commitment, sovLines, project_name: project.name, project_number: project.number, vendorDetails },
+        { ...commitment, sovLines, project_name: project.name, project_number: project.number, qbo_customer_id: project.qboCustomerId, vendorDetails },
         commitment.qbo_id
       );
 
@@ -313,6 +313,7 @@ export async function GET(req: NextRequest) {
             retainagePct: Number((commitment as { default_retainage?: number }).default_retainage) || 0,
             projectName: apProject.name,
             projectNumber: apProject.number,
+            qboCustomerId: apProject.qboCustomerId,
             vendorDetails: await lookupDirectoryPartyDetails(commitment.project_id, commitment.contract_company),
           },
           existingApId

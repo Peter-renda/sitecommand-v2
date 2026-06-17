@@ -90,6 +90,50 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
     if (path.endsWith("/query")) {
       const q = u.searchParams.get("query") ?? "";
+      if (q.includes("FROM Bill")) {
+        return json(200, {
+          QueryResponse: {
+            Bill: [
+              {
+                Id: "b-paid-1",
+                Balance: 0,
+                Line: [
+                  { Amount: 20000, ItemBasedExpenseLineDetail: { ItemRef: { value: "i1", name: "02-310.C" }, CustomerRef: { value: "510" } } },
+                  { Amount: 768.66, ItemBasedExpenseLineDetail: { ItemRef: { value: "i2", name: "01-030.M" }, CustomerRef: { value: "510" } } },
+                ],
+              },
+              {
+                Id: "b-paid-2",
+                Balance: 0,
+                Line: [
+                  { Amount: 15500, ItemBasedExpenseLineDetail: { ItemRef: { value: "i1", name: "02-310.C" }, CustomerRef: { value: "510" } } },
+                ],
+              },
+              {
+                Id: "b-unpaid",
+                Balance: 100,
+                Line: [
+                  { Amount: 99999, ItemBasedExpenseLineDetail: { ItemRef: { value: "i1", name: "02-310.C" }, CustomerRef: { value: "510" } } },
+                ],
+              },
+              {
+                Id: "b-other-project",
+                Balance: 0,
+                Line: [
+                  { Amount: 12345, ItemBasedExpenseLineDetail: { ItemRef: { value: "i1", name: "02-310.C" }, CustomerRef: { value: "999" } } },
+                ],
+              },
+              {
+                Id: "b-pinned-project",
+                Balance: 0,
+                Line: [
+                  { Amount: 777, ItemBasedExpenseLineDetail: { ItemRef: { value: "i1", name: "02-310.C" }, CustomerRef: { value: "PINNED-777" } } },
+                ],
+              },
+            ],
+          },
+        });
+      }
       if (q.includes("FROM Vendor")) {
         return scenario.vendorExists
           ? json(200, { QueryResponse: { Vendor: [{ Id: "71", DisplayName: "Acme Concrete" }] } })
@@ -328,6 +372,7 @@ async function main() {
     estimated_completion: "2026-09-30",
     payment_terms: "Net 30",
     project_name: "Riverside Plaza",
+    qbo_customer_id: "510",
     vendorDetails: {
       companyName: "Acme Concrete LLC",
       email: "ap@acmeconcrete.com",
@@ -367,6 +412,7 @@ async function main() {
   assert.equal(billPayload.Line[0].DetailType, "AccountBasedExpenseLineDetail");
   assert.equal(billPayload.Line[0].AccountBasedExpenseLineDetail.AccountRef.value, "80", "expense line must debit detected COGS account");
   assert.equal(billPayload.Line[0].AccountBasedExpenseLineDetail.ClassRef.value, "44", "lines must fall back to the project Class for job costing");
+  assert.equal(billPayload.Line[0].AccountBasedExpenseLineDetail.CustomerRef.value, "510", "bill expense lines must be scoped to the pinned QBO Project/Customer");
   assert.equal(billPayload.Line[0].Description, "03-100 — Footings", "line description carries budget code");
   assert.equal(billPayload.Id, undefined, "create payload must not carry Id");
   assert.ok(createResult.ok && createResult.vendorId === "72", "result must surface the resolved vendor id");
@@ -581,12 +627,12 @@ async function main() {
   assert.match(reportCall!.url, /classid=44/, "P&L must be scoped to the project's Class id");
   pass("pulls job-to-date costs by budget code, scoped to project Class, skipping unmapped codes");
 
-  // ── 11. Items-based job-to-date pull (Customer:Job + PnLDetail by item_name) ─
+  // ── 11. Items-based job-to-date pull (Customer:Job + paid Bill item lines) ─
   console.log("\n[11] Items-based job-to-date pull");
   process.env.QBO_BUDGET_CODE_MAP = JSON.stringify({
     "02-310.C": { item: "02-310.C" },
-    "01-030.M": { item: "01-030.M" },
-    "09-925.L": { item: "09-925.L" }, // mapped but not present in the mock report
+    // 01-030.M intentionally has no map entry: the default GC path treats the QBO Product/Service number as the budget code.
+    "09-925.L": { item: "09-925.L" }, // mapped but not present in paid Bills
   });
   scenario.customerExists = true;
   calls.length = 0;
@@ -599,18 +645,18 @@ async function main() {
 
   assert.ok(jtdItems.ok, `items-based pull failed: ${!jtdItems.ok ? jtdItems.error : ""}`);
   assert.equal(jtdItems.ok && jtdItems.costs["02-310.C"], 35500, "two posted lines on 02-310.C should sum to 35,500");
-  assert.equal(jtdItems.ok && jtdItems.costs["01-030.M"], 768.66, "single posted line on 01-030.M should map through");
-  assert.ok(jtdItems.ok && jtdItems.costs["09-925.L"] === undefined, "code mapped to an item with no postings is omitted (not zeroed)");
+  assert.equal(jtdItems.ok && jtdItems.costs["01-030.M"], 768.66, "unmapped code should default to a matching QBO Product/Service number");
+  assert.ok(jtdItems.ok && jtdItems.costs["09-925.L"] === undefined, "code mapped to an item with no paid Bill postings is omitted (not zeroed)");
   const customerLookup = calls.find((c) => c.url.includes("FROM%20Customer"));
   assert.ok(customerLookup, "must look up the Customer:Job for the project");
+  const billQuery = calls.find((c) => c.url.includes("FROM%20Bill"));
+  assert.ok(billQuery, "must query Bills for the items-based paid-cost pull");
   const detailReport = calls.find((c) => c.url.includes("/reports/ProfitAndLossDetail"));
-  assert.ok(detailReport, "must request ProfitAndLossDetail for the items-based pull");
-  assert.match(detailReport!.url, /customer=510/, "PnLDetail must be scoped to the QBO Project id (510), not the plain Customer (501)");
-  assert.match(detailReport!.url, /columns=tx_date,name,memo,item_name,subt_nat_amount/, "must request the item_name column");
+  assert.equal(detailReport, undefined, "items-based paid-cost pull should not rely on ProfitAndLossDetail");
   // The legacy account-based P&L must NOT be called when every code is item-mapped.
   const accountReport = calls.find((c) => /reports\/ProfitAndLoss\?/.test(c.url));
   assert.equal(accountReport, undefined, "items-only mapping should not trigger the account-based P&L");
-  pass("items-based pull resolves Customer:Job, reads PnLDetail by item_name, and aggregates correctly");
+  pass("items-based pull resolves Customer:Job, sums paid Bill item lines, and aggregates correctly");
 
   // ── 12. Mixed mapping: some codes by Item, others by Account (legacy) ───────
   console.log("\n[12] Mixed (items + accounts) pull");
@@ -630,9 +676,9 @@ async function main() {
   delete process.env.QBO_BUDGET_CODE_MAP;
 
   assert.ok(jtdMixed.ok, `mixed pull failed: ${!jtdMixed.ok ? jtdMixed.error : ""}`);
-  assert.equal(jtdMixed.ok && jtdMixed.costs["02-310.C"], 35500, "items-mapped code resolved via PnLDetail");
+  assert.equal(jtdMixed.ok && jtdMixed.costs["02-310.C"], 35500, "items-mapped code resolved via paid Bill item lines");
   assert.equal(jtdMixed.ok && jtdMixed.costs["10-100.M"], 30000, "account-mapped code resolved via PnL by Class");
-  const detailCall = calls.find((c) => c.url.includes("/reports/ProfitAndLossDetail"));
+  const detailCall = calls.find((c) => c.url.includes("FROM%20Bill"));
   const summaryCall = calls.find((c) => /reports\/ProfitAndLoss\?/.test(c.url));
   assert.ok(detailCall, "items path still runs");
   assert.ok(summaryCall, "legacy account path still runs in parallel");
@@ -655,11 +701,12 @@ async function main() {
   delete process.env.QBO_BUDGET_CODE_MAP;
 
   assert.ok(jtdPinned.ok, `pinned-id pull failed: ${!jtdPinned.ok ? jtdPinned.error : ""}`);
+  assert.equal(jtdPinned.ok && jtdPinned.costs["02-310.C"], 777, "pinned project id must scope paid Bill item costs to the pinned CustomerRef");
   const noCustomerLookup = calls.find((c) => c.url.includes("FROM%20Customer"));
   assert.equal(noCustomerLookup, undefined, "explicit override must skip the Customer name lookup entirely");
-  const pinnedReport = calls.find((c) => c.url.includes("/reports/ProfitAndLossDetail"));
-  assert.ok(pinnedReport, "must still call PnLDetail");
-  assert.match(pinnedReport!.url, /customer=PINNED-777/, "PnLDetail must use the pinned customer id verbatim");
+  const pinnedBillQuery = calls.find((c) => c.url.includes("FROM%20Bill"));
+  assert.ok(pinnedBillQuery, "must still query Bills");
+  assert.equal(calls.some((c) => c.url.includes("/reports/ProfitAndLossDetail")), false, "pinned paid-cost pull should not rely on PnLDetail");
   pass("explicit QBO Customer id pinned on the project skips name lookup and scopes the report directly");
 
   console.log(`\nAll ${passed} QBO integration checks passed.`);
