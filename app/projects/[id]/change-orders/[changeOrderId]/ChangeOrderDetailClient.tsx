@@ -197,6 +197,47 @@ export default function ChangeOrderDetailClient({
   const [newItemLabel, setNewItemLabel] = useState("");
   const [newItemNotes, setNewItemNotes] = useState("");
   const [addingItem, setAddingItem] = useState(false);
+  const [erpConnected, setErpConnected] = useState<"quickbooks" | "sage300cre" | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/integrations/erp/status`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.connected === "quickbooks") setErpConnected("quickbooks");
+        else if (data.connected === "sage300cre") setErpConnected("sage300cre");
+      })
+      .catch(() => {});
+  }, []);
+
+  async function handleSyncToErp() {
+    if (!erpConnected) return;
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const endpoint =
+        erpConnected === "quickbooks"
+          ? "/api/integrations/quickbooks/sync"
+          : "/api/integrations/sage300cre/sync";
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordType: "change_order", recordId: changeOrderId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setSyncMessage("Synced successfully.");
+        // Refresh CO to pick up updated erp_status
+        const coRes = await fetch(`/api/projects/${projectId}/change-orders/${changeOrderId}`);
+        if (coRes.ok) setCo(await coRes.json());
+      } else {
+        setSyncMessage(data?.error || `Sync failed (${res.status})`);
+      }
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}/directory`)
@@ -607,6 +648,19 @@ export default function ChangeOrderDetailClient({
             >
               Export PDF
             </button>
+            {erpConnected && status === "Approved" && (
+              <button
+                onClick={handleSyncToErp}
+                disabled={syncing}
+                className="px-3 py-1.5 text-xs border border-blue-300 rounded text-blue-700 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {syncing
+                  ? "Syncing…"
+                  : erpConnected === "quickbooks"
+                  ? "Sync to QuickBooks"
+                  : "Sync to Sage 300 CRE"}
+              </button>
+            )}
             {isCommitment && (
               <>
                 {isPendingErpAcceptance && (
@@ -1328,6 +1382,11 @@ export default function ChangeOrderDetailClient({
         {saved && (
           <div className="px-6 py-2 bg-green-50 border-t border-green-200 text-xs text-green-700 shrink-0">
             Changes saved.
+          </div>
+        )}
+        {syncMessage && (
+          <div className={`px-6 py-2 border-t text-xs shrink-0 ${syncMessage.startsWith("Synced") ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"}`}>
+            {syncMessage}
           </div>
         )}
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-white shrink-0">

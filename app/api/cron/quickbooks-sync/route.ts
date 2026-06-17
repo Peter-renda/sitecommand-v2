@@ -29,6 +29,7 @@ import {
   syncPrimeContractToQBO,
   syncAPInvoiceToQBO,
   syncARInvoiceToQBO,
+  syncChangeOrderToQBO,
   fetchQBOEntityFinancials,
   type QBOEntityFinancials,
   type QBOResult,
@@ -41,6 +42,7 @@ const MAX_COMMITMENTS_PER_COMPANY    = 25;
 const MAX_PRIME_CONTRACTS_PER_COMPANY = 25;
 const MAX_AP_INVOICES_PER_COMPANY     = 25;
 const MAX_AR_INVOICES_PER_COMPANY     = 25;
+const MAX_CHANGE_ORDERS_PER_COMPANY   = 25;
 const MAX_PAYMENT_REFRESHES_PER_COMPANY = 25;
 
 /** Maps QBO financial feedback onto update columns with the given prefix. */
@@ -105,6 +107,7 @@ export async function GET(req: NextRequest) {
     primeContractsSynced: 0,
     apInvoicesSynced: 0,
     arInvoicesSynced: 0,
+    changeOrdersSynced: 0,
     paymentsRefreshed: 0,
     failures: 0,
     errors: [] as string[],
@@ -417,7 +420,97 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── 7. Payment-status refresh: pull balances back for synced records ──────
+    // ── 7. Dirty approved change orders ──────────────────────────────────────
+    const { data: coCandidates } = await supabase
+      .from("change_orders")
+      .select("id, type, number, title, description, contract_company, amount, status, date_initiated, due_date, project_id, commitment_id, prime_contract_id, schedule_of_values, qbo_id, qbo_synced_at, updated_at")
+      .in("project_id", projectIds)
+      .eq("status", "Approved")
+      .is("deleted_at", null)
+      .order("updated_at", { ascending: true })
+      .limit(MAX_CHANGE_ORDERS_PER_COMPANY * 4);
+
+    const dirtyChangeOrders = (coCandidates ?? [])
+      .filter((co) => !co.qbo_synced_at || new Date(co.updated_at) > new Date(co.qbo_synced_at))
+      .slice(0, MAX_CHANGE_ORDERS_PER_COMPANY);
+
+    for (const co of dirtyChangeOrders) {
+      const project = projectCtx(co.project_id);
+      let parentType: "subcontract" | "purchase_order" | "prime";
+      if (co.type === "prime") {
+        parentType = "prime";
+      } else if (co.commitment_id) {
+        const { data: parentCommitment } = await supabase
+          .from("commitments")
+          .select("type")
+          .eq("id", co.commitment_id)
+          .single();
+        parentType = (parentCommitment?.type === "purchase_order") ? "purchase_order" : "subcontract";
+      } else {
+        parentType = "subcontract";
+      }
+
+      const sovLines = ((co.schedule_of_values ?? []) as Array<{ budget_code?: string; description?: string; amount?: number }>)
+        .filter((line) => Number(line.amount) !== 0)
+        .map((line) => ({
+          budgetCode: line.budget_code ?? "",
+          description: line.description ?? co.title,
+          amount: Number(line.amount),
+        }));
+
+      const partyName = co.contract_company;
+      const partyDetails = await lookupDirectoryPartyDetails(co.project_id, partyName);
+
+      const result = await syncChangeOrderToQBO(
+        companyId, appCreds, companyCreds,
+        {
+          id: co.id,
+          number: co.number,
+          title: co.title,
+          description: co.description,
+          contract_company: co.contract_company,
+          amount: Number(co.amount),
+          status: co.status,
+          date_initiated: co.date_initiated,
+          due_date: co.due_date,
+          project_id: co.project_id,
+          project_name: project.name,
+          project_number: project.number,
+          parentType,
+          partyDetails,
+          sovLines,
+        },
+        co.qbo_id
+      );
+
+      const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
+      if (result.ok) {
+        update.qbo_synced_at = new Date().toISOString();
+        if (result.action === "deleted" || result.action === "skipped") {
+          update.qbo_id = null;
+          update.qbo_sync_token = null;
+          update.erp_status = "not_synced";
+          update.qbo_total_amount = null;
+          update.qbo_balance = null;
+          update.qbo_payment_status = null;
+        } else {
+          update.qbo_id = result.id;
+          update.qbo_sync_token = result.syncToken ?? null;
+          Object.assign(update, financialsColumns("qbo", result.financials));
+        }
+        summary.changeOrdersSynced++;
+      } else {
+        summary.failures++;
+        summary.errors.push(`change_order ${co.id}: ${result.error}`);
+      }
+
+      await Promise.all([
+        supabase.from("change_orders").update(update).eq("id", co.id),
+        writeLog(supabase, "change_order", co.id, result),
+      ]);
+    }
+
+    // ── 8. Payment-status refresh: pull balances back for synced records ──────
     // Payments applied entirely inside QBO never touch updated_at here, so the
     // dirty filters above won't see them. Walk the stalest synced records
     // (oldest qbo_payments_refreshed_at first) and re-read their financials.

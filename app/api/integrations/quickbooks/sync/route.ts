@@ -28,11 +28,12 @@ import {
   syncPrimeContractToQBO,
   syncAPInvoiceToQBO,
   syncARInvoiceToQBO,
+  syncChangeOrderToQBO,
   type QBOEntityFinancials,
   type QBOResult,
 } from "@/lib/quickbooks";
 
-const VALID_TYPES = ["commitments", "prime_contracts", "ap_invoice", "ar_invoice"] as const;
+const VALID_TYPES = ["commitments", "prime_contracts", "ap_invoice", "ar_invoice", "change_order"] as const;
 type RecordType = (typeof VALID_TYPES)[number];
 
 /** Project context passed to the sync payloads (class job costing + DocNumber prefix). */
@@ -412,6 +413,94 @@ export async function POST(req: NextRequest) {
     await writeLog(supabase, "ar_invoice", recordId, result);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
     return NextResponse.json({ ok: true, qboId: result.id });
+  }
+
+  // ── change_order ─────────────────────────────────────────────────────────────
+  if (recordType === "change_order") {
+    const { data: co, error: fetchErr } = await supabase
+      .from("change_orders")
+      .select("id, type, number, title, description, contract_company, amount, status, date_initiated, due_date, project_id, commitment_id, prime_contract_id, schedule_of_values, qbo_id")
+      .eq("id", recordId)
+      .is("deleted_at", null)
+      .single();
+
+    const failure = fetchFailure("change order", fetchErr, co);
+    if (failure) return failure;
+
+    if (co.status !== "Approved") {
+      return NextResponse.json(
+        { error: "Only Approved change orders can be synced to QuickBooks. Change the status to Approved first." },
+        { status: 422 }
+      );
+    }
+
+    // Resolve the parent type so we know which QBO entity to create.
+    let parentType: "subcontract" | "purchase_order" | "prime";
+    if (co.type === "prime") {
+      parentType = "prime";
+    } else {
+      if (!co.commitment_id) {
+        return NextResponse.json({ error: "Commitment change order has no parent commitment." }, { status: 422 });
+      }
+      const { data: parent } = await supabase
+        .from("commitments")
+        .select("type")
+        .eq("id", co.commitment_id)
+        .single();
+      parentType = parent?.type === "purchase_order" ? "purchase_order" : "subcontract";
+    }
+
+    const project = await getProjectContext(supabase, co.project_id);
+    const partyDetails = await lookupDirectoryPartyDetails(co.project_id, co.contract_company);
+
+    // Map schedule_of_values JSONB → QBOSovLine[]
+    const sovLines = Array.isArray(co.schedule_of_values)
+      ? (co.schedule_of_values as Array<{ budget_code?: string | null; description?: string | null; amount?: number | string | null }>)
+          .filter((l) => l?.amount != null && Number(l.amount) !== 0)
+          .map((l) => ({
+            budgetCode: String(l.budget_code ?? ""),
+            description: String(l.description ?? co.title),
+            amount: Number(l.amount),
+          }))
+      : [];
+
+    await supabase.from("change_orders").update({ erp_status: "pending" }).eq("id", recordId);
+
+    const result = await syncChangeOrderToQBO(
+      session.company_id, appCreds, companyCreds,
+      { ...co, sovLines, parentType, project_name: project.name, project_number: project.number, partyDetails },
+      co.qbo_id
+    );
+
+    const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
+    if (result.ok) {
+      update.qbo_synced_at = new Date().toISOString();
+      if (result.action === "deleted" || result.action === "skipped") {
+        update.qbo_id = null;
+        update.qbo_sync_token = null;
+        update.erp_status = "not_synced";
+        update.qbo_total_amount = null;
+        update.qbo_balance = null;
+        update.qbo_payment_status = null;
+      } else {
+        update.qbo_id = result.id;
+        update.qbo_sync_token = result.syncToken ?? null;
+        if (result.financials) {
+          update.qbo_total_amount = result.financials.totalAmount;
+          update.qbo_balance = result.financials.balance;
+          update.qbo_payment_status = result.financials.paymentStatus ?? result.financials.docStatus?.toLowerCase() ?? null;
+          update.qbo_payments_refreshed_at = new Date().toISOString();
+        }
+      }
+    }
+
+    await Promise.all([
+      supabase.from("change_orders").update(update).eq("id", recordId),
+      writeLog(supabase, "change_order", recordId, result),
+    ]);
+
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
+    return NextResponse.json({ ok: true, qboId: result.id, erp_status: update.erp_status });
   }
 
   return NextResponse.json({ error: "Unhandled recordType" }, { status: 500 });

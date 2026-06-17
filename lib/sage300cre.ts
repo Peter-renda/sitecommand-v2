@@ -929,3 +929,110 @@ export async function syncARInvoiceToSage300Cre(
   const result = await upsertAgave(app, company, "ar-invoices", body, existingId);
   return result.ok ? { ...result, customerId } : result;
 }
+
+// ── Change-order sync ────────────────────────────────────────────────────────
+//
+// Commitment Change Orders (CCOs) → Purchase Order (same entity as the parent
+// commitment; Sage treats COs as PO amendments or separate POs, and Agave
+// accepts either). Prime Contract Change Orders (PCCOs) → AR Invoice.
+//
+// Only Approved COs should be synced (enforced by the caller). The vendor /
+// customer must already exist in Sage 300 CRE — Sage is the system of record
+// and we never auto-create parties.
+
+export type Sage300CreChangeOrderPayload = {
+  id: string;
+  number: string;
+  title: string;
+  description?: string | null;
+  contract_company: string;
+  amount: number;
+  status: string;
+  date_initiated?: string | null;
+  due_date?: string | null;
+  project_number?: string | null;
+  project_name?: string | null;
+  /**
+   * 'subcontract' | 'purchase_order' for CCOs (parent commitment type);
+   * 'prime' for PCCOs.
+   */
+  parentType: "subcontract" | "purchase_order" | "prime";
+  sovLines?: Sage300CreSovLine[];
+};
+
+/**
+ * Pushes an approved change order to Sage 300 CRE.
+ * CCOs sync as Purchase Orders; PCCOs sync as AR Invoices.
+ */
+export async function syncChangeOrderToSage300Cre(
+  app: Sage300CreAppCredentials,
+  company: Sage300CreCompanyCredentials,
+  co: Sage300CreChangeOrderPayload,
+  existingId?: string | null
+): Promise<Sage300CreResult> {
+  const today = new Date().toISOString().slice(0, 10);
+  const isPrime = co.parentType === "prime";
+
+  const partyName = (co.contract_company ?? "").trim();
+  if (!partyName) {
+    return {
+      ok: false,
+      error: "This change order has no Contract Company. Edit it, set the Contract Company, then sync again.",
+      rawResponse: "",
+    };
+  }
+
+  const jobId = await resolveSage300CreJobId(app, company, co.project_number, co.project_name);
+  const sovLines = co.sovLines ?? [];
+  const costCodeIds = sovLines.length
+    ? await resolveCostCodeIds(app, company, sovLines.map((l) => l.budgetCode), jobId)
+    : {};
+  const lines = sovLines.length
+    ? sovLines.map((l) => toLineItem(l, jobId, costCodeIds[(l.budgetCode ?? "").trim()]))
+    : [toLineItem({ budgetCode: "", description: co.title, amount: roundMoney(co.amount) }, jobId)];
+
+  if (isPrime) {
+    const customerId = await resolvePartyId(app, company, "customers", partyName);
+    if (!customerId) {
+      return {
+        ok: false,
+        error: `Customer "${partyName}" was not found in Sage 300 CRE. Create the customer in Sage 300 CRE first, then re-sync.`,
+        rawResponse: "",
+      };
+    }
+    const body: Record<string, unknown> = {
+      customer: customerId,
+      number: `CO-${co.number}`,
+      description: co.description || co.title,
+      issued_date: co.date_initiated || today,
+      amount: roundMoney(co.amount),
+      line_items: lines,
+    };
+    if (co.due_date) body.due_date = co.due_date;
+    if (jobId) body.job_id = jobId;
+    const result = await upsertAgave(app, company, "ar-invoices", body, existingId);
+    return result.ok ? { ...result, customerId } : result;
+
+  } else {
+    const vendorId = await resolvePartyId(app, company, "vendors", partyName);
+    if (!vendorId) {
+      return {
+        ok: false,
+        error: `Vendor "${partyName}" was not found in Sage 300 CRE. Create the vendor in Sage 300 CRE first, then re-sync.`,
+        rawResponse: "",
+      };
+    }
+    const body: Record<string, unknown> = {
+      vendor: vendorId,
+      number: `CO-${co.number}`,
+      description: co.description || co.title,
+      issued_date: co.date_initiated || today,
+      amount: roundMoney(co.amount),
+      line_items: lines,
+    };
+    if (co.due_date) body.due_date = co.due_date;
+    if (jobId) body.job_id = jobId;
+    const result = await upsertAgave(app, company, "purchase-orders", body, existingId);
+    return result.ok ? { ...result, vendorId } : result;
+  }
+}

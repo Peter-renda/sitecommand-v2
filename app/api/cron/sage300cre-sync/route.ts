@@ -26,6 +26,7 @@ import {
   syncPrimeContractToSage300Cre,
   syncAPInvoiceToSage300Cre,
   syncARInvoiceToSage300Cre,
+  syncChangeOrderToSage300Cre,
   fetchSage300CreRecordFinancials,
   type Sage300CreFinancials,
   type Sage300CreResult,
@@ -35,6 +36,7 @@ const MAX_COMMITMENTS_PER_COMPANY = 25;
 const MAX_PRIME_CONTRACTS_PER_COMPANY = 25;
 const MAX_AP_INVOICES_PER_COMPANY = 25;
 const MAX_AR_INVOICES_PER_COMPANY = 25;
+const MAX_CHANGE_ORDERS_PER_COMPANY = 25;
 const MAX_PAYMENT_REFRESHES_PER_COMPANY = 25;
 
 /**
@@ -109,6 +111,7 @@ export async function GET(req: NextRequest) {
     primeContractsSynced: 0,
     apInvoicesSynced: 0,
     arInvoicesSynced: 0,
+    changeOrdersSynced: 0,
     paymentsRefreshed: 0,
     failures: 0,
     errors: [] as string[],
@@ -388,7 +391,82 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── 7. Payment-status refresh: pull balances back for synced records ──────
+    // ── 7. Dirty approved change orders ──────────────────────────────────────
+    const { data: coCandidates } = await supabase
+      .from("change_orders")
+      .select("id, type, number, title, description, contract_company, amount, status, date_initiated, due_date, project_id, commitment_id, prime_contract_id, schedule_of_values, sage300cre_id, sage300cre_synced_at, updated_at")
+      .in("project_id", projectIds)
+      .eq("status", "Approved")
+      .is("deleted_at", null)
+      .order("updated_at", { ascending: true })
+      .limit(MAX_CHANGE_ORDERS_PER_COMPANY * 4);
+
+    const dirtyChangeOrders = (coCandidates ?? [])
+      .filter((co) => !co.sage300cre_synced_at || new Date(co.updated_at) > new Date(co.sage300cre_synced_at))
+      .slice(0, MAX_CHANGE_ORDERS_PER_COMPANY);
+
+    for (const co of dirtyChangeOrders) {
+      const project = projectCtx(co.project_id);
+      let parentType: "subcontract" | "purchase_order" | "prime";
+      if (co.type === "prime") {
+        parentType = "prime";
+      } else if (co.commitment_id) {
+        const { data: parentCommitment } = await supabase
+          .from("commitments")
+          .select("type")
+          .eq("id", co.commitment_id)
+          .single();
+        parentType = (parentCommitment?.type === "purchase_order") ? "purchase_order" : "subcontract";
+      } else {
+        parentType = "subcontract";
+      }
+
+      const sovLines = ((co.schedule_of_values ?? []) as Array<{ budget_code?: string; description?: string; amount?: number }>)
+        .filter((line) => Number(line.amount) !== 0)
+        .map((line) => ({
+          budgetCode: line.budget_code ?? "",
+          description: line.description ?? co.title,
+          amount: Number(line.amount),
+        }));
+
+      const result = await syncChangeOrderToSage300Cre(
+        app, company,
+        {
+          id: co.id,
+          number: co.number,
+          title: co.title,
+          description: co.description,
+          contract_company: co.contract_company,
+          amount: Number(co.amount),
+          status: co.status,
+          date_initiated: co.date_initiated,
+          due_date: co.due_date,
+          project_number: project.number,
+          project_name: project.name,
+          parentType,
+          sovLines,
+        },
+        co.sage300cre_id
+      );
+
+      const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
+      if (result.ok) {
+        update.sage300cre_id = result.id;
+        update.sage300cre_synced_at = new Date().toISOString();
+        Object.assign(update, financialsColumns("sage300cre", result.financials, true));
+        summary.changeOrdersSynced++;
+      } else {
+        summary.failures++;
+        summary.errors.push(`change_order ${co.id}: ${result.error}`);
+      }
+
+      await Promise.all([
+        supabase.from("change_orders").update(update).eq("id", co.id),
+        writeLog(supabase, "change_order", co.id, result),
+      ]);
+    }
+
+    // ── 8. Payment-status refresh: pull balances back for synced records ──────
     // Payments entered entirely inside Sage never touch updated_at here, so the
     // dirty filters above won't see them. Walk the stalest synced records
     // (oldest sage300cre_payments_refreshed_at first) and re-read financials.

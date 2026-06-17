@@ -1858,6 +1858,219 @@ export async function syncARInvoiceToQBO(
   }
 }
 
+// ── Change-order sync ─────────────────────────────────────────────────────────
+//
+// Commitment Change Orders (CCOs) and Prime Contract Change Orders (PCCOs) each
+// post as a standalone QBO document representing the change amount. They are
+// independent of the parent commitment / prime contract document so QBO gets a
+// full audit trail of every approved change.
+//
+//   CCO, subcontract parent → Bill
+//   CCO, purchase-order parent → PurchaseOrder
+//   PCCO                       → Invoice (AR)
+//
+// Only Approved COs should be synced (enforced by the caller). Void COs are
+// deleted / closed on the QBO side, matching the commitment/prime behaviour.
+
+export type QBOChangeOrderPayload = {
+  id: string;
+  number: string;
+  title: string;
+  description?: string | null;
+  contract_company: string;
+  amount: number;
+  status: string;
+  date_initiated?: string | null;
+  due_date?: string | null;
+  project_id: string;
+  project_name?: string | null;
+  project_number?: string | null;
+  /**
+   * 'subcontract' | 'purchase_order' for CCOs (matches parent commitment type);
+   * 'prime' for PCCOs.
+   */
+  parentType: "subcontract" | "purchase_order" | "prime";
+  /** Directory-contact details for vendor/customer enrichment (best-effort). */
+  partyDetails?: QBOPartyDetails | null;
+  /** SOV lines from the CO's schedule_of_values JSONB column. */
+  sovLines?: QBOSovLine[];
+};
+
+/**
+ * Creates or updates a QBO document representing an approved change order.
+ * - CCO (subcontract) → Bill
+ * - CCO (purchase_order) → PurchaseOrder
+ * - PCCO → Invoice
+ *
+ * DocNumber uses a "CO-{number}" prefix so COs are distinguishable from the
+ * parent commitment/contract documents in the QBO transaction list.
+ */
+export async function syncChangeOrderToQBO(
+  companyId: string,
+  appCreds: QBOAppCredentials,
+  companyCreds: QBOCompanyCredentials,
+  co: QBOChangeOrderPayload,
+  existingQboId?: string | null
+): Promise<QBOResult> {
+  const today = new Date().toISOString().slice(0, 10);
+  const isPrime = co.parentType === "prime";
+  const isSubcontract = co.parentType === "subcontract";
+  const entity = isPrime ? "invoice" : isSubcontract ? "bill" : "purchaseorder";
+
+  const partyName = (co.contract_company ?? "").trim();
+  if (!partyName) {
+    return {
+      ok: false, validation: true,
+      error: `This change order has no Contract Company. Edit it, set the Contract Company, then sync again.`,
+      rawResponse: "",
+    };
+  }
+
+  // Void change orders: remove/close the QBO document.
+  if (isDeadStatus(co.status)) {
+    if (!existingQboId) return { ok: true, id: "", action: "skipped", rawResponse: "" };
+    try {
+      const syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, entity, existingQboId);
+      if (syncToken === null) return { ok: true, id: "", action: "deleted", rawResponse: "" };
+      if (isPrime) {
+        const { status, json, rawText } = await callQBO(
+          companyId, appCreds, companyCreds, "POST", "invoice?operation=void",
+          { Id: existingQboId, SyncToken: syncToken }
+        );
+        if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const inv = (json as any)?.Invoice;
+        return { ok: true, id: existingQboId, action: "voided", syncToken: inv?.SyncToken !== undefined ? String(inv.SyncToken) : undefined, financials: inv ? extractFinancials(inv) : undefined, rawResponse: rawText.slice(0, 8000) };
+      }
+      if (isSubcontract) {
+        const { status, json, rawText } = await callQBO(
+          companyId, appCreds, companyCreds, "POST", "bill?operation=delete",
+          { Id: existingQboId, SyncToken: syncToken }
+        );
+        if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
+        return { ok: true, id: "", action: "deleted", rawResponse: rawText.slice(0, 8000) };
+      }
+      const { status, json, rawText } = await callQBO(
+        companyId, appCreds, companyCreds, "POST", "purchaseorder?operation=update",
+        { Id: existingQboId, SyncToken: syncToken, sparse: true, POStatus: "Closed" }
+      );
+      if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const po = (json as any)?.PurchaseOrder;
+      return { ok: true, id: existingQboId, action: "closed", syncToken: po?.SyncToken !== undefined ? String(po.SyncToken) : undefined, financials: po ? extractFinancials(po) : undefined, rawResponse: rawText.slice(0, 8000) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : "Network error", rawResponse: "" };
+    }
+  }
+
+  const config = await getQBOPostingConfig(companyId);
+  // CO DocNumber: "CO-{number}" (capped at 21 chars). When a project-number
+  // prefix is configured it replaces the "CO" portion: "{proj}-CO-{number}".
+  const coDocBase = `CO-${co.number}`;
+  const docNumber = buildQBODocNumber(coDocBase, co.project_number, config.docNumberPrefix).slice(0, 21);
+  const projectClassId = await resolveProjectClassId(companyId, appCreds, companyCreds, config, co.project_name);
+  const codeRefs = co.sovLines?.length
+    ? await resolveCodeRefs(companyId, appCreds, companyCreds, co.sovLines.map((l) => l.budgetCode), await getQBOBudgetCodeMap(companyId))
+    : {};
+  const refFor = (code: string): QBOCodeRef => codeRefs[(code ?? "").trim()] ?? {};
+  const privateNote = [co.title, co.description].filter(Boolean).join("\n");
+
+  // Fetch SyncToken for updates.
+  let syncToken: string | null = null;
+  if (existingQboId) {
+    syncToken = await fetchQBOSyncToken(companyId, appCreds, companyCreds, entity, existingQboId);
+    if (syncToken === null) existingQboId = null; // deleted on QBO → recreate
+  }
+
+  try {
+    if (isPrime) {
+      const customer = await findOrCreateCustomerId(companyId, appCreds, companyCreds, partyName, co.partyDetails);
+      if (!customer.id) return { ok: false, error: `Could not resolve or create QBO customer "${partyName}": ${customer.error}`, rawResponse: "" };
+      const customerId = customer.id;
+      const itemId = await findOrCreateItemId(companyId, appCreds, companyCreds, config.itemName);
+      if (!itemId) return { ok: false, error: "Could not resolve or create a QBO item for the invoice line.", rawResponse: "" };
+      const lines = co.sovLines?.length
+        ? co.sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "SalesItemLineDetail", projectClassId))
+        : [buildItemLine({ budgetCode: "", description: co.title, amount: co.amount }, {}, itemId, "SalesItemLineDetail", projectClassId)];
+      const basePayload: Record<string, unknown> = {
+        CustomerRef: { value: customerId },
+        TxnDate: co.date_initiated ?? today,
+        DocNumber: docNumber,
+        PrivateNote: privateNote,
+        CustomerMemo: { value: co.title },
+        Line: lines,
+      };
+      if (co.due_date) basePayload.DueDate = co.due_date;
+      const path = existingQboId ? "invoice?operation=update" : "invoice";
+      const payload = existingQboId ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true } : basePayload;
+      const { status, json, rawText } = await callQBO(companyId, appCreds, companyCreds, "POST", path, payload);
+      if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const inv = (json as any)?.Invoice;
+      const id = String(inv?.Id ?? "");
+      if (!id) return { ok: false, error: "QBO returned no Invoice Id", rawResponse: rawText.slice(0, 8000) };
+      return { ok: true, id, syncToken: inv?.SyncToken !== undefined ? String(inv.SyncToken) : undefined, customerId, financials: extractFinancials(inv), rawResponse: rawText.slice(0, 8000) };
+
+    } else if (isSubcontract) {
+      const vendor = await findOrCreateVendorId(companyId, appCreds, companyCreds, partyName, co.partyDetails);
+      if (!vendor.id) return { ok: false, error: `Could not resolve or create QBO vendor "${partyName}": ${vendor.error}`, rawResponse: "" };
+      const vendorId = vendor.id;
+      const expenseAccountId = await findExpenseAccountId(companyId, appCreds, companyCreds, config.expenseAccountName);
+      if (!expenseAccountId) return { ok: false, error: "No QBO expense account found. Set QBO_AP_EXPENSE_ACCOUNT to a valid expense or COGS account.", rawResponse: "" };
+      const lines = co.sovLines?.length
+        ? co.sovLines.map((l) => buildBillLine(l, refFor(l.budgetCode), expenseAccountId, projectClassId))
+        : [buildBillLine({ budgetCode: "", description: co.title, amount: co.amount }, {}, expenseAccountId, projectClassId)];
+      const basePayload: Record<string, unknown> = {
+        VendorRef: { value: vendorId },
+        TxnDate: co.date_initiated ?? today,
+        DocNumber: docNumber,
+        PrivateNote: privateNote,
+        Line: lines,
+      };
+      if (co.due_date) basePayload.DueDate = co.due_date;
+      const path = existingQboId ? "bill?operation=update" : "bill";
+      const payload = existingQboId ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true } : basePayload;
+      const { status, json, rawText } = await callQBO(companyId, appCreds, companyCreds, "POST", path, payload);
+      if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bill = (json as any)?.Bill;
+      const id = String(bill?.Id ?? "");
+      if (!id) return { ok: false, error: "QBO returned no Bill Id", rawResponse: rawText.slice(0, 8000) };
+      return { ok: true, id, syncToken: bill?.SyncToken !== undefined ? String(bill.SyncToken) : undefined, vendorId, financials: extractFinancials(bill), rawResponse: rawText.slice(0, 8000) };
+
+    } else {
+      // purchase_order parent → PurchaseOrder
+      const vendor = await findOrCreateVendorId(companyId, appCreds, companyCreds, partyName, co.partyDetails);
+      if (!vendor.id) return { ok: false, error: `Could not resolve or create QBO vendor "${partyName}": ${vendor.error}`, rawResponse: "" };
+      const vendorId = vendor.id;
+      const itemId = await findOrCreateItemId(companyId, appCreds, companyCreds, config.itemName);
+      if (!itemId) return { ok: false, error: "Could not resolve or create a QBO item for the purchase order line.", rawResponse: "" };
+      const lines = co.sovLines?.length
+        ? co.sovLines.map((l) => buildItemLine(l, refFor(l.budgetCode), itemId, "ItemBasedExpenseLineDetail", projectClassId))
+        : [buildItemLine({ budgetCode: "", description: co.title, amount: co.amount }, {}, itemId, "ItemBasedExpenseLineDetail", projectClassId)];
+      const basePayload: Record<string, unknown> = {
+        VendorRef: { value: vendorId },
+        TxnDate: co.date_initiated ?? today,
+        DocNumber: docNumber,
+        PrivateNote: privateNote,
+        Line: lines,
+      };
+      if (co.due_date) basePayload.DueDate = co.due_date;
+      const path = existingQboId ? "purchaseorder?operation=update" : "purchaseorder";
+      const payload = existingQboId ? { ...basePayload, Id: existingQboId, SyncToken: syncToken, sparse: true } : basePayload;
+      const { status, json, rawText } = await callQBO(companyId, appCreds, companyCreds, "POST", path, payload);
+      if (status !== 200) return { ok: false, error: extractQBOError(json, rawText), rawResponse: rawText.slice(0, 8000) };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const po = (json as any)?.PurchaseOrder;
+      const id = String(po?.Id ?? "");
+      if (!id) return { ok: false, error: "QBO returned no PurchaseOrder Id", rawResponse: rawText.slice(0, 8000) };
+      return { ok: true, id, syncToken: po?.SyncToken !== undefined ? String(po.SyncToken) : undefined, vendorId, financials: extractFinancials(po), rawResponse: rawText.slice(0, 8000) };
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Network error", rawResponse: "" };
+  }
+}
+
 // ── Job-to-date costs (PULL: ERP → SiteCommand budget) ─────────────────────────
 //
 // The reverse direction of the pushes above. Two paths coexist so users can run

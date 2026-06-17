@@ -28,11 +28,12 @@ import {
   syncPrimeContractToSage300Cre,
   syncAPInvoiceToSage300Cre,
   syncARInvoiceToSage300Cre,
+  syncChangeOrderToSage300Cre,
   type Sage300CreFinancials,
   type Sage300CreResult,
 } from "@/lib/sage300cre";
 
-const VALID_TYPES = ["commitments", "prime_contracts", "ap_invoice", "ar_invoice"] as const;
+const VALID_TYPES = ["commitments", "prime_contracts", "ap_invoice", "ar_invoice", "change_order"] as const;
 type RecordType = (typeof VALID_TYPES)[number];
 
 /** Project context passed to the sync payloads (Sage job resolution). */
@@ -383,6 +384,76 @@ export async function POST(req: NextRequest) {
     await writeLog(supabase, "ar_invoice", recordId, result);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
     return NextResponse.json({ ok: true, sage300creId: result.id });
+  }
+
+  // ── change_order ─────────────────────────────────────────────────────────────
+  if (recordType === "change_order") {
+    const { data: co, error: fetchErr } = await supabase
+      .from("change_orders")
+      .select("id, type, number, title, description, contract_company, amount, status, date_initiated, due_date, project_id, commitment_id, prime_contract_id, schedule_of_values, sage300cre_id")
+      .eq("id", recordId)
+      .is("deleted_at", null)
+      .single();
+
+    const failure = fetchFailure("change order", fetchErr, co);
+    if (failure) return failure;
+
+    if (co.status !== "Approved") {
+      return NextResponse.json(
+        { error: "Only Approved change orders can be synced to Sage 300 CRE. Change the status to Approved first." },
+        { status: 422 }
+      );
+    }
+
+    let parentType: "subcontract" | "purchase_order" | "prime";
+    if (co.type === "prime") {
+      parentType = "prime";
+    } else {
+      if (!co.commitment_id) {
+        return NextResponse.json({ error: "Commitment change order has no parent commitment." }, { status: 422 });
+      }
+      const { data: parent } = await supabase
+        .from("commitments")
+        .select("type")
+        .eq("id", co.commitment_id)
+        .single();
+      parentType = parent?.type === "purchase_order" ? "purchase_order" : "subcontract";
+    }
+
+    const project = await getProjectContext(supabase, co.project_id);
+
+    const sovLines = Array.isArray(co.schedule_of_values)
+      ? (co.schedule_of_values as Array<{ budget_code?: string | null; description?: string | null; amount?: number | string | null }>)
+          .filter((l) => l?.amount != null && Number(l.amount) !== 0)
+          .map((l) => ({
+            budgetCode: String(l.budget_code ?? ""),
+            description: String(l.description ?? co.title),
+            amount: Number(l.amount),
+          }))
+      : [];
+
+    await supabase.from("change_orders").update({ erp_status: "pending" }).eq("id", recordId);
+
+    const result = await syncChangeOrderToSage300Cre(
+      app, company,
+      { ...co, sovLines, parentType, project_name: project.name, project_number: project.number },
+      co.sage300cre_id
+    );
+
+    const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
+    if (result.ok) {
+      update.sage300cre_id = result.id;
+      update.sage300cre_synced_at = new Date().toISOString();
+      Object.assign(update, financialsColumns("sage300cre", result.financials, true));
+    }
+
+    await Promise.all([
+      supabase.from("change_orders").update(update).eq("id", recordId),
+      writeLog(supabase, "change_order", recordId, result),
+    ]);
+
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
+    return NextResponse.json({ ok: true, sage300creId: result.id, erp_status: "synced" });
   }
 
   return NextResponse.json({ error: "Unhandled recordType" }, { status: 500 });

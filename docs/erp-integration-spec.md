@@ -639,6 +639,9 @@ Both crons are invoked by Vercel Cron and require `Authorization: Bearer {CRON_S
 | Prime Contract | Receivable | **Invoice (AR)** | `Invoice` | Customer = Owner/Client |
 | Commitment SOV billing (AP Invoice) | Payable invoice | **Bill** | `Bill` | SOV billed-to-date lines |
 | Prime Contract SOV billing (AR Invoice) | Receivable invoice | **Invoice (AR)** | `Invoice` | SOV this-period lines |
+| CCO (Subcontract parent) | Payable | **Bill** | `Bill` | DocNumber = `CO-{number}`; only Approved COs sync |
+| CCO (Purchase Order parent) | Payable | **Purchase Order** | `PurchaseOrder` | DocNumber = `CO-{number}`; only Approved COs sync |
+| PCCO (Prime Contract change order) | Receivable | **Invoice (AR)** | `Invoice` | DocNumber = `CO-{number}`; only Approved COs sync |
 
 ### 4.2 Sage 300 CRE (via Agave)
 
@@ -648,6 +651,8 @@ Both crons are invoked by Vercel Cron and require `Authorization: Bearer {CRON_S
 | Commitment SOV billing (AP Invoice) | Payable invoice | **AP Invoice** | `/ap-invoices` | Header `purchase_order_number` links back to PO |
 | Prime Contract | Receivable | **AR Invoice** | `/ar-invoices` | Connector-dependent; may be unsupported |
 | Prime Contract SOV billing (AR Invoice) | Receivable invoice | **AR Invoice** | `/ar-invoices` | SOV work-completed-this-period lines |
+| CCO (Subcontract or PO parent) | Payable | **Purchase Order** | `/purchase-orders` | `number = CO-{number}`; only Approved COs sync |
+| PCCO (Prime Contract change order) | Receivable | **AR Invoice** | `/ar-invoices` | `number = CO-{number}`; only Approved COs sync |
 
 ---
 
