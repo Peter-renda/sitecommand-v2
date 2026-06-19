@@ -15,6 +15,22 @@ type Note = {
 
 type View = "notebook" | "recycling";
 
+type DirectoryContact = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  company: string | null;
+  type: string;
+};
+
+// Resolved email-connection status for the active user (null = not yet loaded,
+// "loading" = request in flight).
+type EmailConn =
+  | { connected: boolean; provider?: string; email?: string }
+  | "loading"
+  | null;
+
 const FONT_SIZES = [
   { label: "Small", value: "2" },
   { label: "Normal", value: "3" },
@@ -59,7 +75,25 @@ function safeFilename(value: string): string {
   );
 }
 
-export default function QuickNotesClient({ projectId }: { projectId: string }) {
+// Builds the default HTML email body: a greeting addressed to the recipient,
+// the note's content, and the sender's signature. Both Gmail and Outlook send
+// the body as HTML, and the note content is already HTML, so we compose HTML.
+function buildEmailBody(noteHtml: string, recipientFirstName: string, senderName: string): string {
+  const name = recipientFirstName.trim() || "there";
+  const greeting = `<p>Hi ${escapeHtml(name)},</p>`;
+  const spacer = "<p><br /></p>";
+  const content = noteHtml && noteHtml.trim() ? noteHtml : "<p></p>";
+  const signature = `<p>Best regards,<br />${escapeHtml(senderName.trim())}</p>`;
+  return `${greeting}${spacer}${content}${spacer}${signature}`;
+}
+
+export default function QuickNotesClient({
+  projectId,
+  userName,
+}: {
+  projectId: string;
+  userName: string;
+}) {
   const storageKey = useMemo(() => `quick-notes:${projectId}`, [projectId]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -71,9 +105,24 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
   const [transcribing, setTranscribing] = useState(false);
   const [audioMessage, setAudioMessage] = useState("");
 
+  // Convert-to-email modal state
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailConn, setEmailConn] = useState<EmailConn>(null);
+  const [contacts, setContacts] = useState<DirectoryContact[]>([]);
+  const [emailTo, setEmailTo] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailSuccess, setEmailSuccess] = useState(false);
+
   const editorRef = useRef<HTMLDivElement>(null);
+  const emailEditorRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  // True once the user has hand-edited the email body, so we stop
+  // auto-regenerating the greeting when the recipient changes.
+  const emailBodyTouched = useRef(false);
 
   const activeNotes = useMemo(() => notes.filter((n) => !n.deletedAt), [notes]);
   const recycledNotes = useMemo(() => notes.filter((n) => n.deletedAt), [notes]);
@@ -83,6 +132,23 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
   const activeNote = notes.find((n) => n.id === activeId) ?? null;
   const activeContent = activeNote?.content ?? "";
   const canEdit = isEditing && !isRecycling;
+
+  // Unique directory emails (with a display label) for the recipient autofill.
+  const contactEmailOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { email: string; label: string }[] = [];
+    for (const c of contacts) {
+      const email = (c.email ?? "").trim();
+      if (!email) continue;
+      const key = email.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const name = [c.first_name, c.last_name].filter(Boolean).join(" ").trim();
+      const label = [name, c.company].filter(Boolean).join(" — ");
+      out.push({ email, label: label || email });
+    }
+    return out.sort((a, b) => a.label.localeCompare(b.label));
+  }, [contacts]);
 
   useEffect(() => {
     try {
@@ -196,6 +262,108 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  // Look up a directory contact by email (case-insensitive) so we can address
+  // the greeting to them by name.
+  function contactByEmail(email: string): DirectoryContact | undefined {
+    const e = email.trim().toLowerCase();
+    if (!e) return undefined;
+    return contacts.find((c) => (c.email ?? "").trim().toLowerCase() === e);
+  }
+
+  function openEmailModal() {
+    if (!activeNote) return;
+    setEmailError(null);
+    setEmailSuccess(false);
+    setEmailTo("");
+    setEmailSubject(activeNote.title || "Untitled note");
+    emailBodyTouched.current = false;
+    setEmailBody(buildEmailBody(activeNote.content, "", userName));
+    setShowEmailModal(true);
+
+    // Resolve email-connection status (cached after first load).
+    setEmailConn((prev) => (prev && prev !== "loading" ? prev : "loading"));
+    fetch("/api/emails/connection")
+      .then((r) => r.json())
+      .then((data) => {
+        const active = data?.outlook?.connected
+          ? { connected: true, provider: "outlook", email: data.outlook.email }
+          : data?.gmail?.connected
+          ? { connected: true, provider: "gmail", email: data.gmail.email }
+          : { connected: false };
+        setEmailConn(active);
+      })
+      .catch(() => setEmailConn({ connected: false }));
+
+    // Load the project directory once for recipient autofill.
+    if (contacts.length === 0) {
+      fetch(`/api/projects/${projectId}/directory`)
+        .then((r) => r.json())
+        .then((data) => setContacts(Array.isArray(data) ? data : []))
+        .catch(() => setContacts([]));
+    }
+  }
+
+  function closeEmailModal() {
+    if (sending) return;
+    setShowEmailModal(false);
+  }
+
+  // The editor only mounts once we've confirmed an email connection, so seed
+  // its content when it becomes ready (not merely when the modal opens).
+  const emailEditorReady =
+    showEmailModal && emailConn !== null && emailConn !== "loading" && emailConn.connected;
+
+  useEffect(() => {
+    if (emailEditorReady && emailEditorRef.current) {
+      emailEditorRef.current.innerHTML = emailBody;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailEditorReady]);
+
+  function handleEmailToChange(value: string) {
+    setEmailTo(value);
+    // Re-address the greeting to the matched contact until the user edits the body.
+    if (!emailBodyTouched.current && activeNote) {
+      const firstName = contactByEmail(value)?.first_name?.trim() || "";
+      const body = buildEmailBody(activeNote.content, firstName, userName);
+      setEmailBody(body);
+      if (emailEditorRef.current) emailEditorRef.current.innerHTML = body;
+    }
+  }
+
+  function handleEmailBodyInput() {
+    emailBodyTouched.current = true;
+    setEmailBody(emailEditorRef.current?.innerHTML ?? "");
+  }
+
+  async function sendEmail() {
+    if (!emailTo.trim() || !emailSubject.trim() || sending) return;
+    setSending(true);
+    setEmailError(null);
+    try {
+      const res = await fetch("/api/emails/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: emailTo.trim(),
+          subject: emailSubject.trim(),
+          body: emailBody,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setEmailError(data.error ?? "Failed to send. Please try again.");
+      } else {
+        setEmailSuccess(true);
+        setTimeout(() => setShowEmailModal(false), 1500);
+      }
+    } catch {
+      setEmailError("Network error. Please try again.");
+    } finally {
+      setSending(false);
+    }
   }
 
   function updateActive(patch: Partial<Note>) {
@@ -505,6 +673,13 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
                         </button>
                         <button
                           type="button"
+                          onClick={openEmailModal}
+                          className="btn-secondary"
+                        >
+                          Convert to Email
+                        </button>
+                        <button
+                          type="button"
                           onClick={moveToRecycling}
                           className="btn-secondary"
                         >
@@ -549,6 +724,144 @@ export default function QuickNotesClient({ projectId }: { projectId: string }) {
           </section>
         </div>
       </main>
+
+      {/* ── Convert to Email Modal ── */}
+      {showEmailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={closeEmailModal} />
+          <div className="relative card shadow-2xl w-full max-w-lg flex flex-col max-h-[88vh]">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[color:var(--border-base)]">
+              <h2 className="h3-warm !mb-0">Convert note to email</h2>
+              <button
+                type="button"
+                onClick={closeEmailModal}
+                disabled={sending}
+                className="text-[color:var(--ink-soft)] hover:text-[color:var(--ink)] disabled:opacity-40"
+                aria-label="Close"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {emailConn === "loading" || emailConn === null ? (
+              <div className="px-5 py-10 text-center text-sm text-[color:var(--ink-soft)] flex items-center justify-center gap-2.5">
+                <span className="inline-block w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-500 rounded-full animate-spin" />
+                Checking your email connection…
+              </div>
+            ) : !emailConn.connected ? (
+              <div className="px-5 py-8 text-center">
+                <p className="text-sm text-[color:var(--ink)] font-medium">No email account connected</p>
+                <p className="text-xs text-[color:var(--ink-soft)] mt-1.5 mb-4">
+                  Connect Outlook or Gmail to send notes as email.
+                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <a
+                    href={`/api/auth/outlook/connect?projectId=${projectId}`}
+                    className="px-3 py-1.5 text-xs font-medium bg-[#0078D4] text-white rounded hover:opacity-90 transition-opacity"
+                  >
+                    Connect Outlook
+                  </a>
+                  <a
+                    href={`/api/auth/gmail/connect?projectId=${projectId}`}
+                    className="px-3 py-1.5 text-xs font-medium bg-[#EA4335] text-white rounded hover:opacity-90 transition-opacity"
+                  >
+                    Connect Gmail
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="px-5 py-5 space-y-4 overflow-y-auto">
+                  <div>
+                    <label className="block mono-label text-[color:var(--ink-soft)] mb-1">To</label>
+                    <input
+                      type="email"
+                      list="quick-note-email-contacts"
+                      value={emailTo}
+                      onChange={(e) => handleEmailToChange(e.target.value)}
+                      placeholder="recipient@example.com"
+                      className="w-full border border-[color:var(--border-base)] rounded-md px-3 py-2 text-sm text-[color:var(--ink)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+                    />
+                    <datalist id="quick-note-email-contacts">
+                      {contactEmailOptions.map((c) => (
+                        <option key={c.email} value={c.email}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </datalist>
+                  </div>
+
+                  <div>
+                    <label className="block mono-label text-[color:var(--ink-soft)] mb-1">Subject</label>
+                    <input
+                      type="text"
+                      value={emailSubject}
+                      onChange={(e) => setEmailSubject(e.target.value)}
+                      placeholder="Subject line"
+                      className="w-full border border-[color:var(--border-base)] rounded-md px-3 py-2 text-sm text-[color:var(--ink)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block mono-label text-[color:var(--ink-soft)] mb-1">Message</label>
+                    <div
+                      ref={emailEditorRef}
+                      contentEditable
+                      suppressContentEditableWarning
+                      onInput={handleEmailBodyInput}
+                      className="min-h-[180px] max-h-[300px] overflow-y-auto border border-[color:var(--border-base)] rounded-md p-3 text-sm text-[color:var(--ink)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+                      style={{ lineHeight: 1.6 }}
+                    />
+                  </div>
+
+                  {emailError && (
+                    <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                      {emailError}
+                    </p>
+                  )}
+                  {emailSuccess && (
+                    <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                      Email sent successfully!
+                    </p>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-5 py-4 border-t border-[color:var(--border-base)] flex items-center justify-between gap-3">
+                  {emailConn.email ? (
+                    <span className="mono-label text-[color:var(--ink-soft)] truncate">
+                      From: <strong>{emailConn.email}</strong>
+                    </span>
+                  ) : (
+                    <span />
+                  )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={closeEmailModal}
+                      disabled={sending}
+                      className="btn-quiet disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={sendEmail}
+                      disabled={sending || emailSuccess || !emailTo.trim() || !emailSubject.trim()}
+                      className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {sending ? "Sending…" : "Send Email"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

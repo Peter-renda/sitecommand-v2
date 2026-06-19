@@ -7,5 +7,5 @@ export default async function QuickNotesPage({ params }: { params: Promise<{ id:
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <QuickNotesClient projectId={id} />;
+  return <QuickNotesClient projectId={id} userName={session.username} />;
 }
