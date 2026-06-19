@@ -1,6 +1,6 @@
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import UnderConstructionNotice from "../components/UnderConstructionNotice";
+import PreconstructionConnect from "./PreconstructionConnect";
 
 export default async function PreconstructionPage({
   params,
@@ -9,6 +9,6 @@ export default async function PreconstructionPage({
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
-  await params;
-  return <UnderConstructionNotice title="Preconstruction" />;
+  const { id } = await params;
+  return <PreconstructionConnect projectId={id} username={session.username} />;
 }
