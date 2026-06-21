@@ -1276,7 +1276,8 @@ function ApsSection() {
         <div>
           <h2 className="text-sm font-semibold text-gray-900">Autodesk Platform Services (APS)</h2>
           <p className="text-xs text-gray-500 mt-0.5">
-            Required for BIM file uploads and 3D model viewing (.rvt, .dwg, .ifc, and more).
+            Required for BIM file uploads and 3D model viewing (.rvt, .dwg, .ifc, and more), and for
+            the BuildingConnected integration on the Preconstruction page.
           </p>
         </div>
         <span
@@ -1336,7 +1337,7 @@ function ApsSection() {
         </div>
       </form>
 
-      <div className="mt-6 pt-5 border-t border-gray-100">
+      <div className="mt-6 pt-5 border-t border-gray-100 space-y-3">
         <p className="text-xs text-gray-400">
           Credentials are stored in the platform settings database and override any{" "}
           <code className="font-mono bg-gray-100 px-1 py-0.5 rounded">APS_CLIENT_ID</code>
@@ -1344,6 +1345,19 @@ function ApsSection() {
           <code className="font-mono bg-gray-100 px-1 py-0.5 rounded">APS_CLIENT_SECRET</code>{" "}
           environment variables set on the server.
         </p>
+        <p className="text-xs text-gray-400">
+          To use BuildingConnected, register the following callback URL on your APS app in the{" "}
+          <span className="text-gray-500 font-medium">Autodesk Developer Portal</span>{" "}
+          (My Apps → Edit → Callback URLs). Also enable the{" "}
+          <span className="text-gray-500 font-medium">BuildingConnected API</span> and ensure{" "}
+          <code className="font-mono bg-gray-100 px-1 py-0.5 rounded">data:read</code>,{" "}
+          <code className="font-mono bg-gray-100 px-1 py-0.5 rounded">data:write</code>, and{" "}
+          <code className="font-mono bg-gray-100 px-1 py-0.5 rounded">offline_access</code> scopes
+          are permitted:
+        </p>
+        <code className="block font-mono text-xs bg-gray-100 px-3 py-2 rounded-md text-gray-700 break-all">
+          {typeof window !== "undefined" ? window.location.origin : ""}/api/integrations/buildingconnected/callback
+        </code>
       </div>
     </div>
   );
