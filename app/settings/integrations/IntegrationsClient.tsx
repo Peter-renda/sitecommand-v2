@@ -1863,6 +1863,222 @@ function ElevenLabsSection() {
   );
 }
 
+// ── BuildingConnected section (company super_admin) ───────────────────────────
+
+type BuildingConnectedStatus = {
+  configured: boolean;
+  connected: boolean;
+  canManage: boolean;
+  user: { name: string | null; email: string | null } | null;
+  connectedAt: string | null;
+};
+
+const BC_ERROR_LABELS: Record<string, string> = {
+  unauthorized: "Your session expired. Please sign in and try again.",
+  forbidden: "Only a Company Super Admin can connect BuildingConnected.",
+  no_company: "Your account isn't associated with a company.",
+  not_configured:
+    "Autodesk Platform Services app credentials aren't set up yet. A site administrator needs to add them first.",
+  invalid_callback: "Autodesk returned an unexpected response. Please try again.",
+  invalid_state: "The connection request expired or couldn't be verified. Please try again.",
+  missing_app_creds: "Autodesk app credentials are missing. Contact your administrator.",
+  token_exchange_failed: "Autodesk rejected the connection. Please try again.",
+  denied: "The Autodesk authorization was cancelled.",
+};
+
+function BuildingConnectedSection() {
+  const [status, setStatus] = useState<BuildingConnectedStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [banner, setBanner] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  async function load() {
+    try {
+      const res = await fetch("/api/integrations/buildingconnected/status");
+      if (res.ok) setStatus(await res.json());
+    } catch {
+      /* leave status null → generic unavailable state */
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  // Surface the ?bc_connected / ?bc_error params from the OAuth round-trip, then
+  // strip them so a refresh doesn't replay the banner.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connectedFlag = params.get("bc_connected");
+    const errorCode = params.get("bc_error");
+    if (connectedFlag) {
+      setBanner({ kind: "success", text: "Autodesk BuildingConnected is now connected." });
+    } else if (errorCode) {
+      const base = BC_ERROR_LABELS[errorCode] || "Could not connect BuildingConnected.";
+      const reason = params.get("reason");
+      setBanner({ kind: "error", text: reason ? `${base} (${reason})` : base });
+    }
+    if (connectedFlag || errorCode) {
+      const url = new URL(window.location.href);
+      ["bc_connected", "bc_error", "reason"].forEach((k) => url.searchParams.delete(k));
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
+
+  async function handleDisconnect() {
+    if (!window.confirm("Disconnect Autodesk BuildingConnected for your company?")) return;
+    setDisconnecting(true);
+    try {
+      const res = await fetch("/api/integrations/buildingconnected/disconnect", { method: "POST" });
+      if (res.ok) {
+        setBanner({ kind: "success", text: "Autodesk BuildingConnected disconnected." });
+        await load();
+      } else {
+        const j = await res.json().catch(() => ({}));
+        setBanner({ kind: "error", text: j.error || "Could not disconnect. Please try again." });
+      }
+    } catch {
+      setBanner({ kind: "error", text: "Could not disconnect. Please try again." });
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
+  const connected = status?.connected ?? false;
+  const configured = status?.configured ?? false;
+  const canManage = status?.canManage ?? false;
+  const connectHref =
+    "/api/integrations/buildingconnected/connect?returnTo=" +
+    encodeURIComponent("/settings/integrations");
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="flex items-start justify-between mb-5">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Autodesk BuildingConnected</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Bid management and preconstruction. Connects via Autodesk Platform Services (the same APS
+            app used by the BIM viewer). Opportunities and bids flow into the Preconstruction tool.
+          </p>
+        </div>
+        <span
+          className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ml-4 ${
+            connected ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"
+          }`}
+        >
+          {loading ? "…" : connected ? "Connected" : "Not connected"}
+        </span>
+      </div>
+
+      {banner && (
+        <div
+          className={`mb-4 flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${
+            banner.kind === "success"
+              ? "bg-green-50 border-green-100 text-green-800"
+              : "bg-red-50 border-red-100 text-red-700"
+          }`}
+        >
+          <span>{banner.text}</span>
+          <button
+            type="button"
+            onClick={() => setBanner(null)}
+            className="ml-auto text-xs underline opacity-70 hover:opacity-100"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-xs text-gray-400 py-2">Checking connection…</div>
+      ) : connected ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-gray-700">
+            <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
+            <span>
+              Connected
+              {status?.user?.name ? (
+                <> as <span className="font-medium">{status.user.name}</span></>
+              ) : null}
+              {status?.user?.email ? (
+                <span className="text-gray-400"> ({status.user.email})</span>
+              ) : null}
+              {status?.connectedAt ? (
+                <span className="text-gray-400">
+                  {" "}· since {new Date(status.connectedAt).toLocaleDateString()}
+                </span>
+              ) : null}
+            </span>
+          </div>
+          {canManage ? (
+            <div className="flex items-center gap-2">
+              <a
+                href={connectHref}
+                className="inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-md bg-gray-900 hover:bg-black transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Reconnect
+              </a>
+              <button
+                type="button"
+                onClick={handleDisconnect}
+                disabled={disconnecting}
+                className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50"
+              >
+                {disconnecting ? "Disconnecting…" : "Disconnect"}
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400">Managed by your Company Super Admin.</p>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs text-gray-500">
+            {!configured
+              ? "Autodesk Platform Services app credentials aren't configured yet. A site administrator needs to add APS_CLIENT_ID and APS_CLIENT_SECRET (platform settings) before BuildingConnected can be connected."
+              : canManage
+                ? "Authorize SiteCommand to read your company's BuildingConnected bids and opportunities."
+                : "Only a Company Super Admin can connect BuildingConnected. Ask your admin to enable it."}
+          </p>
+          <a
+            href={connectHref}
+            aria-disabled={!configured || !canManage}
+            onClick={(e) => {
+              if (!configured || !canManage) e.preventDefault();
+            }}
+            className={`inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-md transition-colors ${
+              configured && canManage
+                ? "bg-gray-900 hover:bg-black"
+                : "bg-gray-300 cursor-not-allowed"
+            }`}
+          >
+            <ExternalLink className="w-4 h-4" />
+            Connect BuildingConnected
+          </a>
+        </div>
+      )}
+
+      <div className="mt-5 pt-4 border-t border-gray-100">
+        <p className="text-xs text-gray-400">
+          Register this callback URL on your APS app in the Autodesk Developer Portal (My Apps →
+          Edit → Callback URLs), and enable the BuildingConnected API with{" "}
+          <code className="font-mono bg-gray-100 px-1 rounded">data:read</code>,{" "}
+          <code className="font-mono bg-gray-100 px-1 rounded">data:write</code>, and{" "}
+          <code className="font-mono bg-gray-100 px-1 rounded">offline_access</code> scopes:
+          <br />
+          <code className="font-mono bg-gray-100 px-1 rounded break-all">
+            {(typeof window !== "undefined" ? window.location.origin : "")}
+            /api/integrations/buildingconnected/callback
+          </code>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Page root ─────────────────────────────────────────────────────────────────
 
 export default function IntegrationsClient({ isSiteAdmin }: { isSiteAdmin: boolean }) {
@@ -1873,7 +2089,7 @@ export default function IntegrationsClient({ isSiteAdmin }: { isSiteAdmin: boole
         <p className="text-sm text-gray-500 mt-1">
           {isSiteAdmin
             ? "Configure platform-level third-party service credentials."
-            : "Connect your company's accounting system to sync contracts and commitments."}
+            : "Connect your company's accounting and preconstruction systems to sync data into SiteCommand."}
         </p>
       </div>
 
@@ -1891,6 +2107,7 @@ export default function IntegrationsClient({ isSiteAdmin }: { isSiteAdmin: boole
           <QuickBooksSection />
           <XeroSection />
           <Sage300CreSection />
+          <BuildingConnectedSection />
           <ElevenLabsCompanySection />
         </>
       )}
