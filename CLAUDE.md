@@ -1668,3 +1668,43 @@ The Budget tool's ERP button is **Resync with ERP** (formerly the placeholder "R
 
 ### Verification
 - Both offline checks cover the pull: `fetchQBOJobToDateCosts` (P&L report parse, Class scoping, account→code reverse-map, unmapped codes skipped) and `fetchSage300CreJobToDateCosts` (job-scoped cost-code actuals, code/name match, unmatched skipped).
+
+## Training – Guides (Company Documents + Employee Assignments)
+
+### Overview
+The **Training → Guides** section (left-nav tree, alongside Practice and Videos) lets a **Company Super Admin** upload guide/reference documents that everyone in the company can read, and assign them to specific employees with due dates. Uploaded documents automatically form an ordered **Table of Contents**.
+
+### Tool-Level Permissions
+- **Company Super Admin** (`company_role === "super_admin"`): upload, rename, reorder, delete guides; assign/unassign employees and set due dates.
+- **Any other company member** (has `company_id`): read-only — browse the Table of Contents, open documents, and view/complete their own assignments.
+- All data is **company-scoped** (`training_guides.company_id`). Mutations re-verify the guide belongs to the caller's company; assignments can only target users in the same `org_members`.
+
+### Table of Contents
+- The Guides page renders a numbered, ordered list of every uploaded guide (`sort_order` ascending, then `created_at`). New uploads append to the end (`sort_order = max + 1`).
+- Super Admins reorder with up/down controls (a `PATCH … { move: "up" | "down" }` that swaps `sort_order` with the adjacent guide), and can rename / edit the description inline.
+
+### Word Document → HTML Rendering
+- Browsers download a `.docx` instead of rendering it, so on upload a **Word document is converted to a styled HTML rendition** (mammoth) and stored next to the original in the `training-guides` bucket. The guide's "open" link then serves that HTML (`content-type: text/html`, signed URL) so it **renders in a new tab**.
+- Only **Office Open XML (`.docx`)** converts (`isConvertibleWordDoc`). Legacy binary `.doc` and any non-Word upload (PDF, etc.) open via the original file. PDFs already render inline in the browser.
+- Conversion is best-effort: if mammoth fails or yields no content, `content_html_path` stays null and the guide opens the original `.docx` (download). Helper: `lib/training-guides.ts` (`convertDocxToHtmlDocument` wraps mammoth's fragment in a full `<!DOCTYPE html>` document with readable CSS). `mammoth` is in `serverExternalPackages` (next.config).
+
+### Assignments
+- Assign modal (Super Admin): pick employees from `GET /api/company/members`, set a due date, and assign. Current assignees are listed with a Remove control. Upsert on `(guide_id, user_id)` so re-assigning refreshes the due date and re-opens the item.
+- The assignee sees an **"Assigned to you"** section on the Guides page with due dates, **overdue** highlighting, and a **Mark complete / Reopen** toggle. Completing is allowed for the assignee or a Super Admin of the owning company.
+
+### Storage / Schema (migrations 165–166)
+- Private `training-guides` bucket (250 MB limit, signed URLs). Upload path: `{companyId}/{ts}-{safeFilename}`; converted HTML: `{originalPath}.html`.
+- `training_guides`: `company_id`, `title`, `description`, `storage_path`, `content_html_path` (Word→HTML rendition, null otherwise), `filename`, `file_type`, `sort_order`, `created_by`. (`content_html_path` added in migration 166.)
+- `training_guide_assignments`: `guide_id`, `user_id`, `assigned_by`, `due_date`, `status` (`assigned`/`completed`), `completed_at`, `UNIQUE(guide_id, user_id)`.
+
+### API
+- `GET /api/training/guides` — `{ guides, myAssignments, canManage }`. Each guide's `url` is a signed link to the HTML rendition when present, else the original. Any session with a `company_id`.
+- `POST /api/training/guides` — Super Admin; body `{ title, description?, storagePath, filename, fileType? }`. Validates `storagePath` is under `{companyId}/`, converts `.docx` → HTML, inserts the row.
+- `GET /api/training/guides/upload-url?filename=…` — Super Admin; signed PUT URL into the bucket.
+- `PATCH/DELETE /api/training/guides/[guideId]` — Super Admin; rename/reorder, or delete (removes the row + original + HTML files).
+- `GET/POST /api/training/guides/[guideId]/assignments` — Super Admin; list / create assignments (`{ userIds, dueDate? }`).
+- `PATCH/DELETE /api/training/guides/assignments/[assignmentId]` — mark complete (assignee or Super Admin) / unassign (Super Admin).
+
+### UI (SiteCommand)
+- `app/training/TrainingNav.tsx` — Guides node links to `/training/guides`.
+- `app/training/guides/page.tsx` (passes `canManage`/`hasCompany`) + `GuidesClient.tsx` (TOC, "Assigned to you", upload form, and the `AssignModal`).
