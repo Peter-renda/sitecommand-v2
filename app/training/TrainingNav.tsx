@@ -21,7 +21,8 @@ const TREE: Section[] = [
   },
   {
     label: "Guides",
-    items: [{ label: "Coming soon" }],
+    defaultOpen: true,
+    items: [{ label: "Company Guides", href: "/training/guides" }],
   },
   {
     label: "Videos",
