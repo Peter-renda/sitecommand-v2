@@ -19,6 +19,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { getSupabase } from "@/lib/supabase";
+import { getCompanyBestPracticesText } from "@/lib/company-best-practices";
 
 type Supa = ReturnType<typeof getSupabase>;
 type Row = Record<string, unknown>;
@@ -236,17 +237,19 @@ export async function generateLookingAheadNotes(
 
   const { data: project } = await supabase
     .from("projects")
-    .select("name, project_type, address, status, start_date, end_date")
+    .select("name, project_type, address, status, start_date, end_date, company_id")
     .eq("id", projectId)
     .single();
 
-  const [emailText, tableRows] = await Promise.all([
+  const [emailText, tableRows, bestPractices] = await Promise.all([
     collectEmailContext(supabase, projectId),
     Promise.all(TABLES.map(async (t) => ({ label: t.label, rows: await fetchTable(supabase, t.table, projectId) }))),
+    getCompanyBestPracticesText(supabase, (project?.company_id as string | null) ?? null),
   ]);
 
   const tableContext = buildTableContext(tableRows);
   const emailBlock = emailText ? `### Emails\n${emailText}\n` : "";
+  const bestPracticesBlock = bestPractices ? `${bestPractices}\n\n` : "";
 
   // Prior notes so the model doesn't repeat itself.
   const priorNoteHeadlines = existingRows
@@ -280,6 +283,7 @@ How to reason:
 - Study the DRAWINGS/PLANS and SPECIFICATIONS for relevant quantities, materials, and requirements for the work at hand.
 - Read recent EMAILS for delivery dates, delays, commitments, and clarifications worth remembering.
 - Pull contract/commitment values, RFI answers, submittal dispositions, and daily-log notes (installed quantities, manpower, deliveries) that the team should keep top of mind.
+- Apply the COMPANY BEST PRACTICES & STANDARDS as authoritative policy. When a standard sets a deadline or lead time (e.g. "buyout within 90 days of contract", "electrical submittals within 30 days of contract"), surface where this project stands against it as a fact — compute the concrete target date from the applicable contract/record date and note it (e.g. "Per company standard, electrical submittals are due within 30 days of contract; the electrical subcontract was executed 2026-05-01, so the target is 2026-05-31"). State it as a fact to remember, not a task.
 - Prefer specific facts with numbers, dates, and names over generic statements.
 
 Hard rules:
@@ -295,7 +299,7 @@ Hard rules:
   const userPrompt = `${projectHeader}
 Today: ${today}
 
-=== PROJECT DATA (plans, specs, contracts, schedule, RFIs, submittals, logs) ===
+${bestPracticesBlock}=== PROJECT DATA (plans, specs, contracts, schedule, RFIs, submittals, logs) ===
 ${tableContext || "(no records)"}
 ${emailBlock}
 === PREVIOUSLY SURFACED (do not repeat) ===

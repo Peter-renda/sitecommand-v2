@@ -14,6 +14,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { getSupabase } from "@/lib/supabase";
+import { getCompanyBestPracticesText } from "@/lib/company-best-practices";
 
 type Supa = ReturnType<typeof getSupabase>;
 type Row = Record<string, unknown>;
@@ -226,18 +227,20 @@ export async function generateTodoRecommendations(
 
   const { data: project } = await supabase
     .from("projects")
-    .select("name, project_type, address, status, start_date, end_date")
+    .select("name, project_type, address, status, start_date, end_date, company_id")
     .eq("id", projectId)
     .single();
 
-  const [emailText, tableRows, tasks] = await Promise.all([
+  const [emailText, tableRows, tasks, bestPractices] = await Promise.all([
     collectEmailContext(supabase, projectId),
     Promise.all(TABLES.map(async (t) => ({ label: t.label, rows: await fetchTable(supabase, t.table, projectId) }))),
     fetchTable(supabase, "tasks", projectId),
+    getCompanyBestPracticesText(supabase, (project?.company_id as string | null) ?? null),
   ]);
 
   const tableContext = buildTableContext(tableRows);
   const emailBlock = emailText ? `### Emails\n${emailText}\n` : "";
+  const bestPracticesBlock = bestPractices ? `${bestPractices}\n\n` : "";
 
   // Existing tasks + prior recommendations so the model doesn't duplicate work.
   const existingTaskTitles = tasks
@@ -268,6 +271,7 @@ export async function generateTodoRecommendations(
 How to reason:
 - Read the recent EMAILS for explicit or implied action items, commitments, deadlines, and requests directed at the team.
 - Use where the project sits in its SCHEDULE together with typical construction lead times. If something needs to be ordered, submitted, or approved now to stay on schedule (e.g. long-lead material procurement, submittals that must be approved before fabrication, inspections to book ahead), surface it.
+- Apply the COMPANY BEST PRACTICES & STANDARDS as authoritative policy. When a standard sets a deadline or lead time (e.g. "all buyout within 90 days of contract", "electrical submittals within 30 days of contract"), create the corresponding to-do and set "suggestedDueDate" by computing it from the applicable contract/record date (e.g. buyout due = subcontract execution date + 90 days). Cite the standard and the date you derived from in the rationale. Only do this when the relevant record exists in the project data and the work isn't already done.
 - Pull from open RFIs, submittals, change events/orders, meetings, daily logs, and punch list items for follow-ups that are overdue or about to become blocking.
 - Prefer specific, time-sensitive, actionable items over generic advice.
 
@@ -283,7 +287,7 @@ Hard rules:
   const userPrompt = `${projectHeader}
 Today: ${today}
 
-=== RECENT PROJECT DATA ===
+${bestPracticesBlock}=== RECENT PROJECT DATA ===
 ${tableContext || "(no records)"}
 ${emailBlock}
 === EXISTING TASKS (do not duplicate) ===

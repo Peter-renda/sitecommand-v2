@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { canAccessProject } from "@/lib/project-access";
 import { getSupabase } from "@/lib/supabase";
+import { getCompanyBestPracticesText } from "@/lib/company-best-practices";
 import { GoogleGenAI, Type } from "@google/genai";
 
 export const maxDuration = 300;
@@ -451,7 +452,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: project } = await supabase
     .from("projects")
-    .select("name, project_type, address, status")
+    .select("name, project_type, address, status, company_id")
     .eq("id", projectId)
     .single();
 
@@ -459,7 +460,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // Gather candidates from all sources. Drawings + spec book first (typically larger
   // reference docs), then attachments, then general documents.
-  const [drawings, specBook, rfiAtts, subAtts, docs, buildingCode, tableRows, emails] = await Promise.all([
+  const [drawings, specBook, rfiAtts, subAtts, docs, buildingCode, tableRows, emails, bestPractices] = await Promise.all([
     collectDrawingPdfs(supabase, projectId),
     collectSpecBook(supabase, projectId),
     collectRfiAttachments(supabase, projectId),
@@ -473,6 +474,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       })),
     ),
     collectEmailContext(supabase, projectId),
+    getCompanyBestPracticesText(supabase, (project?.company_id as string | null) ?? null),
   ]);
 
   const candidates: Candidate[] = [...specBook, ...drawings, ...buildingCode.files, ...rfiAtts, ...subAtts, ...docs];
@@ -489,7 +491,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const emailBlock = emails.text
     ? `### Emails (${emails.threadCount} thread${emails.threadCount === 1 ? "" : "s"}, ${emails.messageCount} message${emails.messageCount === 1 ? "" : "s"})\n${emails.text}\n`
     : "";
-  const context = `${buildContext(tableRows)}${emailBlock}${buildingCode.text}`;
+  const bestPracticesBlock = bestPractices ? `${bestPractices}\n\n` : "";
+  const context = `${bestPracticesBlock}${buildContext(tableRows)}${emailBlock}${buildingCode.text}`;
   const manifest = uploaded.length
     ? uploaded.map((f) => `- [${f.fileId}] ${f.description}: ${f.filename}`).join("\n")
     : "(no files attached)";
@@ -498,6 +501,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
 Rules:
 - Ground every answer in the provided project data and attached files. Quote relevant record fields or file content when useful.
+- Treat the COMPANY BEST PRACTICES & STANDARDS block (when present) as authoritative company policy. Apply those standards when answering — including deriving target dates from any stated deadlines/lead times against the relevant project records — and cite the standard you applied.
 - When you cite a record, reference it by its tool and identifying fields (e.g., "RFI #12 — Subject: Roof flashing detail" or "Daily Log on 2026-04-01").
 - If the answer isn't in the data, say so clearly and suggest where the user might add the information.
 - Keep responses concise and scannable. Use short paragraphs or bullet lists.

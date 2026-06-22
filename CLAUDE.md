@@ -1707,4 +1707,31 @@ The **Training → Guides** section (left-nav tree, alongside Practice and Video
 
 ### UI (SiteCommand)
 - `app/training/TrainingNav.tsx` — Guides node links to `/training/guides`.
-- `app/training/guides/page.tsx` (passes `canManage`/`hasCompany`) + `GuidesClient.tsx` (TOC, "Assigned to you", upload form, and the `AssignModal`).
+- `app/training/guides/page.tsx` (passes `canManage`/`hasCompany`) + `GuidesClient.tsx` (TOC, "Assigned to you", upload form, the `AssignModal`, and the `BestPracticesSection`).
+
+## Training – Best Practice Templates (Company Standards that feed the AI)
+
+### Overview
+On **Training → Company Guides**, below the document Table of Contents, a **Best Practice Templates** section lets a **Company Super Admin** document the company's standards for each step of the process (Submittals, Specs, Buyout, RFIs, Closeout, …) as titled free-text entries. These are both (a) human-readable standards everyone in the company can browse, and (b) **authoritative policy injected into the AI features**.
+
+### AI Integration (the key behavior)
+- The same standards are fed into **Assist**, **Looking Ahead**, and **To Do recommendations** as a `=== COMPANY BEST PRACTICES & STANDARDS ===` context block, framed as authoritative company policy.
+- When a standard states a **deadline / lead time** (e.g. "all buyout within 90 days of contract", "electrical submittals within 30 days of contract"), the AI is instructed to **apply it to the relevant project records and derive the concrete target date** from the applicable contract/record date:
+  - **To Do** creates the actionable item with a `suggestedDueDate` computed from the rule (e.g. buyout due = subcontract execution date + 90 days) and cites the standard in the rationale. This is the primary "add those tasks" surface.
+  - **Looking Ahead** surfaces the same as a **fact to remember** ("Per company standard, electrical submittals are due within 30 days of contract; the electrical subcontract was executed 2026-05-01, so the target is 2026-05-31") — consistent with Looking Ahead being facts, not action items.
+  - **Assist** applies the standards when answering and cites which standard it used.
+
+### Tool-Level Permissions
+- **Company Super Admin**: add / edit / reorder / delete best-practice entries.
+- **Any other company member**: read-only.
+- Company-scoped (`training_best_practices.company_id`); mutations re-verify the entry belongs to the caller's company.
+
+### Schema / Implementation (migration 167)
+- `training_best_practices`: `company_id`, `title`, `content` (free text — the standards/rules), `sort_order`, `created_by`. Reorder swaps `sort_order` with the adjacent entry (`PATCH … { move: "up" | "down" }`).
+- Shared accessor: `lib/company-best-practices.ts` → `getCompanyBestPracticesText(supabase, companyId)` (returns the formatted block, or `""` when none) and `getProjectBestPracticesText(supabase, projectId)` (resolves the owning company first). Bounded to 20k chars / 4k per entry so it never dominates the AI context.
+- Injection points (each adds `company_id` to its project select, then prepends the block to the prompt/context):
+  - `lib/looking-ahead.ts` (`generateLookingAheadNotes`) — daily cron + manual refresh.
+  - `lib/todo-recommendations.ts` (`generateTodoRecommendations`) — daily cron + manual refresh.
+  - `app/api/projects/[id]/assist/route.ts` (POST) — Assist Q&A.
+- API: `GET/POST /api/training/best-practices` (list / create — create is Super Admin), `PATCH/DELETE /api/training/best-practices/[bpId]` (edit/reorder/delete — Super Admin).
+- UI: `BestPracticesSection` in `GuidesClient.tsx` — quick-start topic chips, inline add/edit (title + multiline content), reorder, delete; read-only list for members. A note explains the entries feed Assist / Looking Ahead / To Do.
