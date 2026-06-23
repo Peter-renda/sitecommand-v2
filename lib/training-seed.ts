@@ -246,13 +246,14 @@ export async function seedTrainingProjectManager(
   const pmEmail = owner?.email || emailFor("project", "manager", domain);
   const pmFirst = (owner?.first_name || pmName).split(/\s+/)[0] || "there";
 
-  // 1) Directory — seed the GC's internal team.
+  // 1) Directory — seed the GC's internal team. Contacts are seeded WITHOUT
+  // email addresses (names/phones/title/company only).
   const teamContacts = TEAM.map((t) => ({
     project_id: projectId,
     type: "user" as const,
     first_name: t.first,
     last_name: t.last,
-    email: emailFor(t.first, t.last, domain),
+    email: null,
     phone: t.phone,
     company: companyName,
     job_title: t.title,
