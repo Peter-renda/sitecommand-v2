@@ -13,7 +13,8 @@ export type OpenItemType =
   | "budget"
   | "commitment"
   | "prime_contract"
-  | "transaction_order_assignment";
+  | "transaction_order_assignment"
+  | "training_guide_assignment";
 
 export type DashboardPreferences = {
   attentionTypes: Record<OpenItemType, boolean>;
@@ -31,6 +32,7 @@ export const OPEN_ITEM_TYPE_LABELS: Record<OpenItemType, string> = {
   commitment: "Commitments",
   prime_contract: "Prime Contracts",
   transaction_order_assignment: "Assigned Invoices",
+  training_guide_assignment: "Assigned Guides",
 };
 
 export const OPEN_ITEM_TYPES: OpenItemType[] = [
@@ -43,6 +45,7 @@ export const OPEN_ITEM_TYPES: OpenItemType[] = [
   "commitment",
   "prime_contract",
   "transaction_order_assignment",
+  "training_guide_assignment",
 ];
 
 export const DEFAULT_DASHBOARD_PREFS: DashboardPreferences = {
@@ -56,6 +59,7 @@ export const DEFAULT_DASHBOARD_PREFS: DashboardPreferences = {
     commitment: true,
     prime_contract: true,
     transaction_order_assignment: true,
+    training_guide_assignment: true,
   },
   showWhileAway: true,
   showPortfolioTotal: true,

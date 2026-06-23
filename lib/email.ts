@@ -787,6 +787,41 @@ export async function sendInvoiceAssignmentEmail({
   );
 }
 
+export async function sendGuideAssignmentEmail({
+  to,
+  recipientName,
+  guideTitle,
+  assignedBy,
+  dueDate,
+  guidesUrl,
+}: {
+  to: string;
+  recipientName?: string;
+  guideTitle: string;
+  assignedBy: string;
+  dueDate: string | null;
+  guidesUrl: string;
+}) {
+  const dueLine = dueDate
+    ? `<p style="font-size:13px;color:#555;"><strong>Due by:</strong> ${new Date(`${dueDate}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>`
+    : "";
+
+  await sendEmail("guide-assignment", {
+    to,
+    subject: `Guide assigned: ${guideTitle}`,
+    html: `
+      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
+      <p style="font-size:14px;">${assignedBy} assigned you a company guide to review.</p>
+      <p style="font-size:16px;font-weight:600;">${guideTitle}</p>
+      ${dueLine}
+      <p>
+        <a href="${guidesUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Open in SiteCommand</a>
+      </p>
+      <p style="color:#aaa;font-size:11px;">This will also appear in the items that need your attention on your SiteCommand dashboard. Sent via SiteCommand.</p>
+    `,
+  });
+}
+
 export async function sendTransmittalCreatedEmail({
   to,
   recipientName,

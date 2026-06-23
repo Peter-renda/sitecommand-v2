@@ -1683,18 +1683,22 @@ The **Training → Guides** section (left-nav tree, alongside Practice and Video
 - The Guides page renders a numbered, ordered list of every uploaded guide (`sort_order` ascending, then `created_at`). New uploads append to the end (`sort_order = max + 1`).
 - Super Admins reorder with up/down controls (a `PATCH … { move: "up" | "down" }` that swaps `sort_order` with the adjacent guide), and can rename / edit the description inline.
 
-### Word Document → HTML Rendering
-- Browsers download a `.docx` instead of rendering it, so on upload a **Word document is converted to a styled HTML rendition** (mammoth) and stored next to the original in the `training-guides` bucket. The guide's "open" link then serves that HTML (`content-type: text/html`, signed URL) so it **renders in a new tab**.
+### Word Document → Plain Text
+- Browsers download a `.docx` instead of showing it, so on upload a **Word document's plain text is extracted** (mammoth `extractRawText`) and stored next to the original in the `training-guides` bucket as a `.txt` file. The guide's "open" link then serves that file (`content-type: text/plain`, signed URL) so it opens as **plain, readable text in a new tab** (no HTML rendering).
 - Only **Office Open XML (`.docx`)** converts (`isConvertibleWordDoc`). Legacy binary `.doc` and any non-Word upload (PDF, etc.) open via the original file. PDFs already render inline in the browser.
-- Conversion is best-effort: if mammoth fails or yields no content, `content_html_path` stays null and the guide opens the original `.docx` (download). Helper: `lib/training-guides.ts` (`convertDocxToHtmlDocument` wraps mammoth's fragment in a full `<!DOCTYPE html>` document with readable CSS). `mammoth` is in `serverExternalPackages` (next.config).
+- Conversion is best-effort: if mammoth fails or yields no content, `content_text_path` stays null and the guide opens the original `.docx` (download). Helper: `lib/training-guides.ts` (`convertDocxToText`). `mammoth` is in `serverExternalPackages` (next.config).
 
 ### Assignments
 - Assign modal (Super Admin): pick employees from `GET /api/company/members`, set a due date, and assign. Current assignees are listed with a Remove control. Upsert on `(guide_id, user_id)` so re-assigning refreshes the due date and re-opens the item.
 - The assignee sees an **"Assigned to you"** section on the Guides page with due dates, **overdue** highlighting, and a **Mark complete / Reopen** toggle. Completing is allowed for the assignee or a Super Admin of the owning company.
 
+### Assignment Notifications (email + dashboard)
+- **Email**: `POST /api/training/guides/[guideId]/assignments` sends `sendGuideAssignmentEmail` (`lib/email.ts`, Resend) to each assigned employee with an email — guide title, who assigned it, the due date, and a link to `/training/guides`. Fire-and-forget / non-fatal (no-ops without `RESEND_API_KEY`); the assignment persists regardless.
+- **Dashboard "needs your attention"**: assigned guides surface as an open item on the portfolio dashboard. `app/api/dashboard/my-tasks/route.ts` adds the `training_guide_assignment` open-item type — it queries `training_guide_assignments` for the current user where `status = 'assigned'` (company-scoped, `project_id = ""`, `project_name = "Company guides"`). `DashboardClient.tsx` routes it to `/training/guides` (via `openItemHref`), labels it **"assigned guide"**, and `lib/dashboard-preferences.ts` registers it (`OPEN_ITEM_TYPES` / labels / default-on) so it shows in the attention list and the Dashboard Settings toggles. Empty `project_id`s are filtered out of the project-name lookup so the UUID `in` query doesn't break.
+
 ### Storage / Schema (migrations 165–166)
-- Private `training-guides` bucket (250 MB limit, signed URLs). Upload path: `{companyId}/{ts}-{safeFilename}`; converted HTML: `{originalPath}.html`.
-- `training_guides`: `company_id`, `title`, `description`, `storage_path`, `content_html_path` (Word→HTML rendition, null otherwise), `filename`, `file_type`, `sort_order`, `created_by`. (`content_html_path` added in migration 166.)
+- Private `training-guides` bucket (250 MB limit, signed URLs). Upload path: `{companyId}/{ts}-{safeFilename}`; extracted text: `{originalPath}.txt`.
+- `training_guides`: `company_id`, `title`, `description`, `storage_path`, `content_text_path` (Word→plain-text rendition, null otherwise), `filename`, `file_type`, `sort_order`, `created_by`. (Added as `content_html_path` in migration 166; renamed to `content_text_path` in migration 168 when the rendition switched from HTML to plain text.)
 - `training_guide_assignments`: `guide_id`, `user_id`, `assigned_by`, `due_date`, `status` (`assigned`/`completed`), `completed_at`, `UNIQUE(guide_id, user_id)`.
 
 ### API

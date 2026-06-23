@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
+import { sendGuideAssignmentEmail } from "@/lib/email";
 
 function isSuperAdmin(session: { company_role?: string | null }): boolean {
   return session.company_role === "super_admin";
@@ -33,7 +34,7 @@ async function loadGuide(
 ) {
   const { data } = await supabase
     .from("training_guides")
-    .select("id")
+    .select("id, title")
     .eq("id", guideId)
     .eq("company_id", companyId)
     .maybeSingle();
@@ -117,7 +118,8 @@ export async function POST(
 
   const supabase = getSupabase();
 
-  if (!(await loadGuide(supabase, guideId, session.company_id))) {
+  const guide = await loadGuide(supabase, guideId, session.company_id);
+  if (!guide) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -149,6 +151,36 @@ export async function POST(
     .upsert(rows, { onConflict: "guide_id,user_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Notify the assigned employees by email (fire-and-forget; non-fatal).
+  try {
+    const { data: notifyUsers } = await supabase
+      .from("users")
+      .select("id, email, username")
+      .in("id", validIds);
+    const guidesUrl = process.env.NEXT_PUBLIC_APP_URL
+      ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")}/training/guides`
+      : "/training/guides";
+    const assignedBy =
+      [session.email, session.username].filter(Boolean).join(" / ") || "A SiteCommand admin";
+    const guideTitle = (guide.title as string | null) || "Company guide";
+    await Promise.all(
+      (notifyUsers ?? [])
+        .filter((u) => typeof u.email === "string" && u.email.includes("@"))
+        .map((u) =>
+          sendGuideAssignmentEmail({
+            to: u.email as string,
+            recipientName: (u.username as string | null) || undefined,
+            guideTitle,
+            assignedBy,
+            dueDate,
+            guidesUrl,
+          }).catch(() => {}),
+        ),
+    );
+  } catch {
+    // Non-fatal — assignments are persisted regardless of email delivery.
+  }
 
   // Return the refreshed assignment list for the guide.
   const { data } = await supabase

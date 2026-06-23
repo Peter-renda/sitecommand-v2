@@ -45,7 +45,7 @@ type MyTask = {
 type MyOpenItem = {
   id: string;
   title: string;
-  type: "task" | "rfi" | "submittal" | "change_event" | "change_order" | "budget" | "commitment" | "prime_contract" | "transaction_order_assignment";
+  type: "task" | "rfi" | "submittal" | "change_event" | "change_order" | "budget" | "commitment" | "prime_contract" | "transaction_order_assignment" | "training_guide_assignment";
   status: string;
   due_date: string | null;
   project_id: string;
@@ -280,6 +280,9 @@ function openItemHref(item: MyOpenItem): string {
       return `${projectBase}/prime-contracts/${item.id}`;
     case "transaction_order_assignment":
       return `${projectBase}/transaction-orders`;
+    case "training_guide_assignment":
+      // Company-scoped (no project) — link straight to the Guides page.
+      return `/training/guides`;
     default:
       return projectBase;
   }
@@ -844,7 +847,9 @@ export default function DashboardClient({ username, email, role, companyRole, us
     typeLabel:
       item.type === "transaction_order_assignment"
         ? "assigned invoice"
-        : item.type.replace(/_/g, " "),
+        : item.type === "training_guide_assignment"
+          ? "assigned guide"
+          : item.type.replace(/_/g, " "),
     pillClass: item.due_date && new Date(item.due_date) < new Date() ? "pill-danger" : "pill-warn",
     title: item.title,
     projectName: item.project_name || "Project",
