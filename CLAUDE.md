@@ -1735,3 +1735,31 @@ On **Training → Company Guides**, below the document Table of Contents, a **Be
   - `app/api/projects/[id]/assist/route.ts` (POST) — Assist Q&A.
 - API: `GET/POST /api/training/best-practices` (list / create — create is Super Admin), `PATCH/DELETE /api/training/best-practices/[bpId]` (edit/reorder/delete — Super Admin).
 - UI: `BestPracticesSection` in `GuidesClient.tsx` — quick-start topic chips, inline add/edit (title + multiline content), reorder, delete; read-only list for members. A note explains the entries feed Assist / Looking Ahead / To Do.
+
+## Training – Project Simulation (SiteCommand Training Sandbox)
+
+### Overview
+**Training → Practice** is a launcher for hands-on **SiteCommand Training** sandboxes. The user picks a **role** (Superintendent / Project Manager / Project Accounting) and a **project type** (multifamily, education, data center, …), clicks **Launch training project**, and a real-but-sandboxed SiteCommand project is created and **opened in a new tab**. The user then runs the whole job using the actual SiteCommand tools.
+
+This replaces the previous text-based, day-by-day **grading game** (scoring frequency + speed). Those settings were removed from the setup; the old game engine (`simulation_games`/`simulation_days`/`simulation_actions`/`simulation_score_reports` tables, `/api/training/games/*`, `lib/simulation.ts`) is left in place but is no longer used by the Practice flow.
+
+### Sandbox = a real, training-flagged project
+- A sandbox is an ordinary `projects` row with `is_training = true` (migration `168_training_sandbox_projects.sql`, which also adds `training_role`, `training_project_type`, `training_owner_id`, and a `training_day` counter for the upcoming day/email feed).
+- On launch the user is inserted into `project_memberships` as `project_admin`, so `getToolLevel` resolves to **admin** on every tool and the whole workspace is usable — even for users with no company (access then rests solely on that membership row).
+- **No content is seeded yet** (directory, emails, plans, specs are all empty). Seeding, and a **per-"day" fake-email feed** (advancing `training_day` delivers a new batch of inbox emails), are the planned next iterations.
+
+### Branding
+- Every tool page of a sandbox shows a persistent amber **SiteCommand Training** banner (`app/projects/[id]/components/TrainingBanner.tsx`), rendered from `app/projects/[id]/layout.tsx` when the project's `is_training` is true. It links back to `/training/practice` to exit.
+
+### Hiding sandboxes from the real app
+- `GET /api/projects` filters `is_training = false` (both the org-admin and member branches), so sandboxes never appear in the dashboard project tiles or the projects list.
+- `GET /api/dashboard/my-tasks` drops tasks/open-items belonging to training projects (resolved via the project-name lookup, now also selecting `is_training`).
+- Known minor leaks not yet filtered: global search and the Project Admin **Copy Directory From** dropdown can still surface sandbox projects (harmless — sandboxes are empty and owned by the user).
+
+### API
+- `GET /api/training/projects` — list the current user's sandboxes (`is_training` + `training_owner_id = me`, non-archived).
+- `POST /api/training/projects` — body `{ role, projectType }`; validates against `simulation-constants`, creates the project (`name: "Training: <Type>"`, `sector` = type label, `company_id` = the user's company or null), adds the `project_admin` membership (rolls back the project if that insert fails), returns `{ id }`. Any logged-in user may launch one.
+- `DELETE /api/training/projects/[projectId]` — owner-only, training-projects-only; cascade-deletes the sandbox.
+
+### UI (SiteCommand)
+- `app/training/practice/PracticeClient.tsx` — role cards + project-type select + **Launch training project ↗** (opens a blank tab synchronously to dodge popup blockers, then points it at `/projects/{id}`), plus a **Your training projects** list with open-in-new-tab + delete. Reuses `ROLES` / `PROJECT_TYPES` / `roleLabel` / `projectTypeLabel` from `lib/simulation-constants.ts`.

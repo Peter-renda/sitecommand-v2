@@ -20,6 +20,7 @@ export async function GET() {
       .from("projects")
       .select("*")
       .eq("company_id", session.company_id)
+      .eq("is_training", false)
       .is("archived_at", null)
       .order("created_at", { ascending: false });
     const projects = Array.isArray(data) ? data : [];
@@ -52,6 +53,7 @@ export async function GET() {
     .from("projects")
     .select("*")
     .in("id", projectIds)
+    .eq("is_training", false)
     .is("archived_at", null)
     .order("created_at", { ascending: false });
 

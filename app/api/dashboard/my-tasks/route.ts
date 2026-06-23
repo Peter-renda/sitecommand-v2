@@ -330,17 +330,27 @@ export async function GET() {
   // Fetch project names for all returned entities.
   const projectIds = [...new Set([...tasks.map((t) => t.project_id), ...dedupedOpenItems.map((i) => i.project_id)])];
   const { data: projectsData } = projectIds.length
-    ? await supabase.from("projects").select("id, name").in("id", projectIds)
-    : { data: [] as { id: string; name: string }[] };
+    ? await supabase.from("projects").select("id, name, is_training").in("id", projectIds)
+    : { data: [] as { id: string; name: string; is_training: boolean }[] };
 
   const projectMap = new Map((projectsData || []).map((p: { id: string; name: string }) => [p.id, p.name]));
+  // Training sandboxes are personal practice environments — keep their items out
+  // of the real dashboard.
+  const trainingProjectIds = new Set(
+    (projectsData || [])
+      .filter((p: { is_training?: boolean }) => p.is_training)
+      .map((p: { id: string }) => p.id),
+  );
 
-  const result = tasks.map((t) => ({
-    ...t,
-    project_name: projectMap.get(t.project_id) ?? "",
-  }));
+  const result = tasks
+    .filter((t) => !trainingProjectIds.has(t.project_id))
+    .map((t) => ({
+      ...t,
+      project_name: projectMap.get(t.project_id) ?? "",
+    }));
 
   const openItemsResult = dedupedOpenItems
+    .filter((item) => !trainingProjectIds.has(item.project_id))
     .map((item) => ({
       ...item,
       project_name: projectMap.get(item.project_id) ?? "",
