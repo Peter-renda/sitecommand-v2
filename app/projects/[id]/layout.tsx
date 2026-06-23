@@ -23,6 +23,7 @@ export default async function ProjectLayout({
   // accounts and trust the client-side interceptor to handle data correctly.
   let isTraining = false;
   let trainingRole: string | null = null;
+  let trainingSavedAt: string | null = null;
   if (session.user_type !== "demo") {
     const hasAccess = await canAccessProject(id, session);
     if (!hasAccess) redirect("/dashboard");
@@ -32,11 +33,12 @@ export default async function ProjectLayout({
     // environment, not a real project.
     const { data: project } = await getSupabase()
       .from("projects")
-      .select("is_training, training_role")
+      .select("is_training, training_role, training_last_saved_at")
       .eq("id", id)
       .maybeSingle();
     isTraining = !!project?.is_training;
     trainingRole = project?.training_role ?? null;
+    trainingSavedAt = project?.training_last_saved_at ?? null;
   }
 
   return (
