@@ -1,15 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
 import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 import { addUserToDirectory } from "@/lib/directory";
 import { sendProjectMemberInviteEmail } from "@/lib/email";
 
-export async function GET() {
+/** Attach a `has_schedule` flag to each project (one query for the whole set). */
+async function withSchedules(
+  supabase: SupabaseClient,
+  projects: Array<{ id: string; [k: string]: unknown }>,
+) {
+  if (projects.length === 0) return [];
+  const { data: schedules } = await supabase
+    .from("project_schedules")
+    .select("project_id")
+    .in("project_id", projects.map((p) => p.id));
+  const scheduled = new Set((schedules ?? []).map((row: { project_id: string }) => row.project_id));
+  return projects.map((p) => ({ ...p, has_schedule: scheduled.has(p.id) }));
+}
+
+export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = getSupabase();
+
+  // Training mode: while the user is working inside a training sandbox (cookie
+  // set by the sandbox banner), the dashboard/project list is scoped to their own
+  // training projects instead of their live projects — so they stay "in training"
+  // even when they navigate back to the dashboard.
+  const trainingMode = req.cookies.get("sc_training_mode")?.value === "1";
+  if (trainingMode) {
+    const { data } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("is_training", true)
+      .eq("training_owner_id", session.id)
+      .is("archived_at", null)
+      .order("created_at", { ascending: false });
+    return NextResponse.json(await withSchedules(supabase, Array.isArray(data) ? data : []));
+  }
 
   // Org-level admins see all projects under their company
   const isOrgAdmin =
@@ -23,21 +54,7 @@ export async function GET() {
       .eq("is_training", false)
       .is("archived_at", null)
       .order("created_at", { ascending: false });
-    const projects = Array.isArray(data) ? data : [];
-    if (projects.length === 0) return NextResponse.json([]);
-
-    const { data: schedules } = await supabase
-      .from("project_schedules")
-      .select("project_id")
-      .in("project_id", projects.map((p: { id: string }) => p.id));
-    const scheduledProjectIds = new Set((schedules ?? []).map((row: { project_id: string }) => row.project_id));
-
-    return NextResponse.json(
-      projects.map((project: { id: string }) => ({
-        ...project,
-        has_schedule: scheduledProjectIds.has(project.id),
-      }))
-    );
+    return NextResponse.json(await withSchedules(supabase, Array.isArray(data) ? data : []));
   }
 
   // Standard members and external collaborators: only projects explicitly assigned
@@ -64,21 +81,7 @@ export async function GET() {
   }
 
   const { data } = await projectQuery;
-  const projects = Array.isArray(data) ? data : [];
-  if (projects.length === 0) return NextResponse.json([]);
-
-  const { data: schedules } = await supabase
-    .from("project_schedules")
-    .select("project_id")
-    .in("project_id", projects.map((p: { id: string }) => p.id));
-  const scheduledProjectIds = new Set((schedules ?? []).map((row: { project_id: string }) => row.project_id));
-
-  return NextResponse.json(
-    projects.map((project: { id: string }) => ({
-      ...project,
-      has_schedule: scheduledProjectIds.has(project.id),
-    }))
-  );
+  return NextResponse.json(await withSchedules(supabase, Array.isArray(data) ? data : []));
 }
 
 export async function POST(req: NextRequest) {

@@ -40,6 +40,15 @@ export default function TrainingBanner({
   const [now, setNow] = useState(() => Date.now());
   const savingRef = useRef(false);
 
+  // Mark this browser as "in training mode" while the user is in a sandbox, so the
+  // dashboard and project list stay scoped to their training projects even after
+  // they navigate away from the sandbox. Cleared from the dashboard's
+  // "Exit training mode" control. 30-day, lax, non-httpOnly (read server-side by
+  // /api/projects and client-side by the dashboard).
+  useEffect(() => {
+    document.cookie = "sc_training_mode=1; path=/; max-age=2592000; samesite=lax";
+  }, []);
+
   const save = useCallback(async () => {
     if (savingRef.current) return;
     savingRef.current = true;
