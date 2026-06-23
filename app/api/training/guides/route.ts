@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
-import { convertDocxToHtmlDocument, isConvertibleWordDoc } from "@/lib/training-guides";
+import { convertDocxToText, isConvertibleWordDoc } from "@/lib/training-guides";
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
 const BUCKET = "training-guides";
@@ -27,7 +27,7 @@ type GuideRow = {
   title: string;
   description: string | null;
   storage_path: string;
-  content_html_path: string | null;
+  content_text_path: string | null;
   filename: string;
   file_type: string | null;
   sort_order: number;
@@ -44,41 +44,40 @@ async function signGuideUrl(
   return data?.signedUrl ?? null;
 }
 
-// What a guide's "open" link points at: the converted HTML rendition when one
-// exists (so Word docs render in a tab), otherwise the original file.
-function openPathFor(row: { storage_path: string; content_html_path?: string | null }): string {
-  return row.content_html_path || row.storage_path;
+// What a guide's "open" link points at: the extracted plain-text rendition when
+// one exists (so Word docs open as readable text), otherwise the original file.
+function openPathFor(row: { storage_path: string; content_text_path?: string | null }): string {
+  return row.content_text_path || row.storage_path;
 }
 
 /**
  * Convert a freshly-uploaded .docx (already in storage at `storagePath`) to a
- * styled HTML document and store it next to the original. Returns the HTML
+ * plain-text rendition and store it next to the original. Returns the text
  * storage path, or null if the file isn't a convertible Word doc / conversion
  * failed (the guide then opens via the original file).
  */
-async function buildHtmlRendition(
+async function buildTextRendition(
   supabase: ReturnType<typeof getSupabase>,
   storagePath: string,
   fileType: string,
   filename: string,
-  title: string,
 ): Promise<string | null> {
   if (!isConvertibleWordDoc(fileType, filename)) return null;
   try {
     const { data: file, error } = await supabase.storage.from(BUCKET).download(storagePath);
     if (error || !file) return null;
     const buffer = Buffer.from(await file.arrayBuffer());
-    const html = await convertDocxToHtmlDocument(buffer, title);
-    if (!html) return null;
-    const htmlPath = `${storagePath}.html`;
+    const text = await convertDocxToText(buffer);
+    if (!text) return null;
+    const textPath = `${storagePath}.txt`;
     const { error: upErr } = await supabase.storage
       .from(BUCKET)
-      .upload(htmlPath, Buffer.from(html, "utf-8"), {
-        contentType: "text/html; charset=utf-8",
+      .upload(textPath, Buffer.from(text, "utf-8"), {
+        contentType: "text/plain; charset=utf-8",
         upsert: true,
       });
     if (upErr) return null;
-    return htmlPath;
+    return textPath;
   } catch {
     return null;
   }
@@ -97,7 +96,7 @@ export async function GET() {
   const { data: guideRows, error } = await supabase
     .from("training_guides")
     .select(
-      "id, title, description, storage_path, content_html_path, filename, file_type, sort_order, created_at",
+      "id, title, description, storage_path, content_text_path, filename, file_type, sort_order, created_at",
     )
     .eq("company_id", session.company_id)
     .order("sort_order", { ascending: true })
@@ -138,7 +137,7 @@ export async function GET() {
   const { data: assignmentRows } = await supabase
     .from("training_guide_assignments")
     .select(
-      "id, guide_id, due_date, status, completed_at, created_at, training_guides(id, title, description, storage_path, content_html_path, filename, file_type)",
+      "id, guide_id, due_date, status, completed_at, created_at, training_guides(id, title, description, storage_path, content_text_path, filename, file_type)",
     )
     .eq("user_id", session.id)
     .order("created_at", { ascending: false });
@@ -151,7 +150,7 @@ export async function GET() {
             title: string;
             description: string | null;
             storage_path: string;
-            content_html_path: string | null;
+            content_text_path: string | null;
             filename: string;
             file_type: string | null;
           }
@@ -218,15 +217,9 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
   const nextSort = (last?.sort_order ?? 0) + 1;
 
-  // Word documents can't render inline in a browser, so convert .docx uploads to
-  // a styled HTML rendition stored alongside the original.
-  const contentHtmlPath = await buildHtmlRendition(
-    supabase,
-    storagePath,
-    fileType,
-    filename,
-    title,
-  );
+  // Browsers download a .docx instead of showing it, so extract .docx uploads to
+  // a plain-text rendition (served as text/plain) stored alongside the original.
+  const contentTextPath = await buildTextRendition(supabase, storagePath, fileType, filename);
 
   const { data, error } = await supabase
     .from("training_guides")
@@ -235,14 +228,14 @@ export async function POST(req: NextRequest) {
       title,
       description: description || null,
       storage_path: storagePath,
-      content_html_path: contentHtmlPath,
+      content_text_path: contentTextPath,
       filename: filename || "guide.pdf",
       file_type: fileType || null,
       sort_order: nextSort,
       created_by: session.id,
     })
     .select(
-      "id, title, description, storage_path, content_html_path, filename, file_type, sort_order, created_at",
+      "id, title, description, storage_path, content_text_path, filename, file_type, sort_order, created_at",
     )
     .single();
 

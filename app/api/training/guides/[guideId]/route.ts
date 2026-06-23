@@ -108,14 +108,14 @@ export async function DELETE(
 
   const { data: existing } = await supabase
     .from("training_guides")
-    .select("storage_path, content_html_path")
+    .select("storage_path, content_text_path")
     .eq("id", guideId)
     .eq("company_id", session.company_id)
     .maybeSingle();
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Assignments cascade via the FK; remove the row, then the stored file(s)
-  // (the original upload plus any converted HTML rendition).
+  // (the original upload plus any extracted plain-text rendition).
   const { error } = await supabase
     .from("training_guides")
     .delete()
@@ -124,7 +124,7 @@ export async function DELETE(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const paths = [existing.storage_path, existing.content_html_path].filter(
+  const paths = [existing.storage_path, existing.content_text_path].filter(
     (p): p is string => Boolean(p),
   );
   if (paths.length > 0) {
