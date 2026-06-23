@@ -39,7 +39,8 @@
       "Bash(gunzip -f /tmp/design.gz)",
       "Bash(cp \"/root/.claude/uploads/a2ce9306-2780-5b88-99d6-5b8c5dae9d07/96c1b116-208570_Addendum_No.1.pdf\" /home/user/SiteCommand/public/training/208570-addendum-no-1.pdf)",
       "Bash(cp \"/root/.claude/uploads/a2ce9306-2780-5b88-99d6-5b8c5dae9d07/1a712ced-208570_Addendum_No.2__Final.pdf\" /home/user/SiteCommand/public/training/208570-addendum-no-2-final.pdf)",
-      "Bash(awk '{print $5, $9}')"
+      "Bash(awk '{print $5, $9}')",
+      "Bash(cp \"/root/.claude/uploads/a2ce9306-2780-5b88-99d6-5b8c5dae9d07/d22bf351-260415_UW_Kane_Hall_CAAMs_Bid_Drawings_Part1.pdf\" /home/user/SiteCommand/public/training/208570-bid-drawings-part-1.pdf && ls -lh /home/user/SiteCommand/public/training/ | awk '{print $5, $9}')"
     ]
   }
 }
