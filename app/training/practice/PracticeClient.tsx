@@ -188,16 +188,21 @@ export default function PracticeClient({ username }: { username: string }) {
 function ProjectRow({ project, reload }: { project: TrainingProject; reload: () => void }) {
   const [deleting, setDeleting] = useState(false);
 
-  async function remove(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
+  async function remove() {
     if (!confirm(`Delete "${project.name}"? This permanently removes the sandbox and can't be undone.`))
       return;
     setDeleting(true);
     try {
-      await fetch(`/api/training/projects/${project.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/training/projects/${project.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to delete training project");
+      }
+      // On success this row unmounts once the list reloads, so leave `deleting`
+      // set (avoids a state update after unmount); only reset it on failure.
       reload();
-    } finally {
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete training project");
       setDeleting(false);
     }
   }
@@ -210,28 +215,33 @@ function ProjectRow({ project, reload }: { project: TrainingProject; reload: () 
     .join(" · ");
 
   return (
-    <a
-      href={`/projects/${project.id}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="group w-full text-left rounded-lg border border-gray-200 bg-white p-4 hover:border-gray-300 hover:shadow-sm transition-all flex items-center gap-4"
-    >
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">{project.name}</p>
-        <p className="text-xs text-gray-500 mt-0.5">
-          {[meta, lastSavedLabel(project.training_last_saved_at)].filter(Boolean).join(" · ")}
-        </p>
-      </div>
-      <span className="shrink-0 text-xs font-medium text-gray-500 group-hover:text-gray-900">
-        Open ↗
-      </span>
-      <span
+    <div className="group rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all flex items-center">
+      <a
+        href={`/projects/${project.id}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex-1 min-w-0 flex items-center gap-4 p-4"
+      >
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900 truncate">{project.name}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {[meta, lastSavedLabel(project.training_last_saved_at)].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        <span className="shrink-0 text-xs font-medium text-gray-500 group-hover:text-gray-900">
+          Open ↗
+        </span>
+      </a>
+      {/* Real button OUTSIDE the anchor so the click can't trigger navigation. */}
+      <button
+        type="button"
         onClick={remove}
-        className="shrink-0 text-gray-300 hover:text-red-500 transition-colors p-1"
+        disabled={deleting}
+        className="shrink-0 text-gray-300 hover:text-red-500 transition-colors px-3 py-4 disabled:opacity-50"
         title="Delete sandbox"
       >
         {deleting ? "…" : "✕"}
-      </span>
-    </a>
+      </button>
+    </div>
   );
 }
