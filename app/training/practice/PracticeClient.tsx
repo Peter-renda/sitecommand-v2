@@ -19,6 +19,12 @@ import {
  * hands-on sandbox.)
  */
 
+// The launcher currently offers a single project type. Kept as a filtered list
+// (rather than hardcoded) so more types can be re-introduced later without
+// reworking the control — PROJECT_TYPES stays the source of truth for labels.
+const OFFERED_TYPES = PROJECT_TYPES.filter((p) => p.value === "higher_ed");
+const DEFAULT_TYPE = OFFERED_TYPES[0]?.value ?? "higher_ed";
+
 type TrainingProject = {
   id: string;
   name: string;
@@ -43,7 +49,7 @@ function lastSavedLabel(iso: string | null): string {
 
 export default function PracticeClient({ username }: { username: string }) {
   const [role, setRole] = useState<SimRole>("superintendent");
-  const [projectType, setProjectType] = useState<string>("multifamily");
+  const [projectType, setProjectType] = useState<string>(DEFAULT_TYPE);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -140,7 +146,7 @@ export default function PracticeClient({ username }: { username: string }) {
             onChange={(e) => setProjectType(e.target.value)}
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10"
           >
-            {PROJECT_TYPES.map((p) => (
+            {OFFERED_TYPES.map((p) => (
               <option key={p.value} value={p.value}>
                 {p.label}
               </option>
