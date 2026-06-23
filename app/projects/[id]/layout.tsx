@@ -4,6 +4,7 @@ import { canAccessProject } from "@/lib/project-access";
 import { getSupabase } from "@/lib/supabase";
 import AssistWidget from "@/components/AssistWidget";
 import TrainingBanner from "./components/TrainingBanner";
+import TrainingDayOnePanel from "./components/TrainingDayOnePanel";
 
 export default async function ProjectLayout({
   children,
@@ -21,6 +22,7 @@ export default async function ProjectLayout({
   // Those projects don't exist in the database, so we skip the DB access check for demo
   // accounts and trust the client-side interceptor to handle data correctly.
   let isTraining = false;
+  let trainingRole: string | null = null;
   if (session.user_type !== "demo") {
     const hasAccess = await canAccessProject(id, session);
     if (!hasAccess) redirect("/dashboard");
@@ -29,10 +31,11 @@ export default async function ProjectLayout({
     // always clear this is a practice environment, not a real project.
     const { data: project } = await getSupabase()
       .from("projects")
-      .select("is_training")
+      .select("is_training, training_role")
       .eq("id", id)
       .maybeSingle();
     isTraining = !!project?.is_training;
+    trainingRole = project?.training_role ?? null;
   }
 
   return (
@@ -40,6 +43,7 @@ export default async function ProjectLayout({
       {isTraining && <TrainingBanner />}
       {children}
       <AssistWidget projectId={id} />
+      {isTraining && trainingRole === "project_manager" && <TrainingDayOnePanel projectId={id} />}
     </>
   );
 }
