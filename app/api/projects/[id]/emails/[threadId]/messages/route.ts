@@ -31,6 +31,24 @@ export async function GET(
 
   if (!row) return NextResponse.json({ error: "Thread not found" }, { status: 404 });
 
+  // Training sandbox emails are seeded locally and have no live mailbox behind
+  // them, so always serve the stored copy (skip the provider fetch entirely).
+  const { data: project } = await supabase
+    .from("projects")
+    .select("is_training")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (project?.is_training) {
+    const stored = await getStoredThreadMessages(supabase, threadId);
+    return NextResponse.json({
+      provider: null,
+      accountEmail: null,
+      subject: row.subject,
+      messages: stored,
+      stored: true,
+    });
+  }
+
   try {
     const { provider, accountEmail, messages } = await fetchActiveThread(
       session.id,

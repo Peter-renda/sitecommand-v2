@@ -20,6 +20,7 @@ import {
   projectTypeLabel,
   type SimRole,
 } from "@/lib/simulation-constants";
+import { seedTrainingProjectManager } from "@/lib/training-seed";
 
 const VALID_ROLES = new Set(ROLES.map((r) => r.value));
 const VALID_TYPES = new Set(PROJECT_TYPES.map((p) => p.value));
@@ -67,6 +68,7 @@ export async function POST(req: NextRequest) {
   // directory, emails, plans/specs) gets seeded in a later iteration; for now the
   // user lands in an empty-but-real project workspace they can run.
   const typeLabel = projectTypeLabel(projectType);
+  const startDate = new Date().toISOString().split("T")[0];
   const { data: project, error } = await supabase
     .from("projects")
     .insert({
@@ -75,7 +77,7 @@ export async function POST(req: NextRequest) {
       sector: typeLabel,
       status: "active",
       value: 0,
-      start_date: new Date().toISOString().split("T")[0],
+      start_date: startDate,
       company_id: session.company_id ?? null,
       is_training: true,
       training_role: role,
@@ -111,6 +113,25 @@ export async function POST(req: NextRequest) {
       { error: `Failed to set up sandbox access: ${memberError.message}` },
       { status: 500 },
     );
+  }
+
+  // Project Managers land in a project that already feels live: the GC's team is
+  // in the Directory and a Day-1 handoff email from the preconstruction manager
+  // is waiting on the Emails tab. Awaited so the content is in place before the
+  // client opens the sandbox, but non-fatal — a seed hiccup shouldn't block the
+  // launch.
+  if (role === "project_manager") {
+    try {
+      await seedTrainingProjectManager(supabase, {
+        projectId: project.id,
+        ownerUserId: session.id,
+        projectType,
+        startDate,
+        companyId: session.company_id ?? null,
+      });
+    } catch (e) {
+      console.error("Failed to seed PM training content:", e);
+    }
   }
 
   return NextResponse.json({ id: project.id });
