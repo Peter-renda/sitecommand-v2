@@ -79,6 +79,8 @@ const ARCHITECT = "Halford Studio Architects";
 // public/training and appending to the relevant list.
 const DRAWINGS: { label: string; file: string }[] = [
   { label: "Bid Drawings — Part 1", file: "208570-bid-drawings-part-1.pdf" },
+  { label: "Bid Drawings — Part 2 (1 of 2)", file: "208570-bid-drawings-part-2-1.pdf" },
+  { label: "Bid Drawings — Part 2 (2 of 2)", file: "208570-bid-drawings-part-2-2.pdf" },
 ];
 const ADDENDA: { label: string; file: string }[] = [
   { label: "Addendum No. 1", file: "208570-addendum-no-1.pdf" },
