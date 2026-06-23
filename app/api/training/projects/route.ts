@@ -18,6 +18,7 @@ import {
   ROLES,
   PROJECT_TYPES,
   projectTypeLabel,
+  trainingProjectName,
   type SimRole,
 } from "@/lib/simulation-constants";
 import { seedTrainingProjectManager } from "@/lib/training-seed";
@@ -72,7 +73,7 @@ export async function POST(req: NextRequest) {
   const { data: project, error } = await supabase
     .from("projects")
     .insert({
-      name: `Training: ${typeLabel}`,
+      name: trainingProjectName(projectType),
       description: `Sandbox training project for running a ${typeLabel.toLowerCase()} job end to end.`,
       sector: typeLabel,
       status: "active",

@@ -86,6 +86,18 @@ export function projectTypeLabel(type: string): string {
   return PROJECT_TYPES.find((p) => p.value === type)?.label ?? type;
 }
 
+/**
+ * Realistic, named training project per type. Falls back to a generic
+ * "Training: <Label>" for types without a bespoke name.
+ */
+const TRAINING_PROJECT_NAMES: Record<string, string> = {
+  higher_ed: "University of Washington - Kane Hall Update",
+};
+
+export function trainingProjectName(type: string): string {
+  return TRAINING_PROJECT_NAMES[type] ?? `Training: ${projectTypeLabel(type)}`;
+}
+
 /** Human label for an action_type slug across every role's menu. */
 export function actionTypeLabel(type: string): string {
   for (const list of Object.values(ROLE_ACTION_TYPES)) {
