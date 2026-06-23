@@ -73,6 +73,23 @@ const DEFAULT_BRIEF = { value: 40_000_000, size: "", scope: "a new construction 
 const OWNER = "Meridian Development Partners";
 const ARCHITECT = "Halford Studio Architects";
 
+// Bid addenda handed off with the email. The PDFs are served as static assets
+// from public/training, so the links are stable (no signed-URL expiry) and work
+// without any mailbox connection.
+const ADDENDA: { label: string; file: string }[] = [
+  { label: "Addendum No. 1", file: "208570-addendum-no-1.pdf" },
+  { label: "Addendum No. 2 — Final", file: "208570-addendum-no-2-final.pdf" },
+];
+
+/** Canonical app origin for absolute links in the stored email body. */
+function appBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.NEXT_PUBLIC_BASE_URL ??
+    "http://localhost:3000"
+  ).replace(/\/+$/, "");
+}
+
 function emailDomain(company: string): string {
   const slug = company.toLowerCase().replace(/[^a-z0-9]/g, "");
   return `${slug || "summitbuilders"}.com`;
@@ -122,6 +139,10 @@ function buildHandoffHtml(opts: {
   const ntp = formatLong(startDate);
   const subComplete = formatLong(addMonths(startDate, brief.months));
   const sizeLine = brief.size ? `${brief.size} — ` : "";
+  const base = appBaseUrl();
+  const addendaList = ADDENDA.map(
+    (a) => `  <li><a href="${base}/training/${a.file}">${a.label}</a> (PDF)</li>`,
+  ).join("\n");
 
   return `
 <p>Hi ${pmFirst},</p>
@@ -155,6 +176,12 @@ function buildHandoffHtml(opts: {
 
 <h3>Specifications</h3>
 <p>The complete project manual is attached — CSI Divisions 00 through 48, including the front-end (Division 00/01) general conditions and all technical sections. Load it into the Specifications tool so the team can reference it against submittals and RFIs.</p>
+
+<h3>Attachments — Bid Addenda</h3>
+<p>The following addenda were issued during procurement and are part of the contract documents. Review them and make sure we're building to the latest revisions:</p>
+<ul>
+${addendaList}
+</ul>
 
 <h3>Other Pertinent Info</h3>
 <ul>
