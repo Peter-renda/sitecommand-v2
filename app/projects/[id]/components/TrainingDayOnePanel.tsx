@@ -1,31 +1,48 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import type { SimRole } from "@/lib/simulation-constants";
 
 /**
- * "Day 1" onboarding panel shown in a Project-Manager training sandbox. It
- * surfaces the reference material the trainee needs to get started as a list of
- * links. The panel collapses to a small tab tucked against the right-hand edge
- * of the screen and remembers that choice per project (localStorage), so it
- * opens automatically when the sandbox is first launched but stays out of the
- * way once dismissed.
- *
- * The links are intentional placeholders for now — the underlying Company
- * Onboarding / Project Overview content isn't populated yet.
+ * "Day 1" onboarding panel shown in a training sandbox. It surfaces the
+ * role-specific company onboarding PDF the trainee needs before starting the
+ * simulation and remembers completion per project (localStorage).
  */
 
-const ITEMS = [{ label: "Company Onboarding" }, { label: "Project Overview" }];
+const ONBOARDING_BY_ROLE: Record<SimRole, { label: string; href: string }> = {
+  superintendent: {
+    label: "Superintendent Company Onboarding",
+    href: "/training/onboarding/superintendent",
+  },
+  project_manager: {
+    label: "Project Manager Company Onboarding",
+    href: "/training/onboarding/project_manager",
+  },
+  accounting: {
+    label: "Project Accounting Company Onboarding",
+    href: "/training/onboarding/accounting",
+  },
+};
 
-// Fired in-document when the collapsed flag changes (the native "storage" event
-// only fires in *other* tabs), so useSyncExternalStore re-reads the value.
+const PROJECT_OVERVIEW = { label: "Project Overview" };
+
+// Fired in-document when localStorage-backed flags change (the native "storage"
+// event only fires in *other* tabs), so useSyncExternalStore re-reads values.
 const CHANGE_EVENT = "sc-training-day1-change";
 
+function readFlag(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Reads/writes the per-project collapsed flag in localStorage via
- * useSyncExternalStore — SSR-safe (server snapshot defaults to expanded) and
- * without any setState-in-effect.
+ * Reads/writes a localStorage flag via useSyncExternalStore — SSR-safe (server
+ * snapshot defaults to false) and without any setState-in-effect.
  */
-function useCollapsedFlag(key: string): [boolean, (next: boolean) => void] {
+function useLocalStorageFlag(key: string): [boolean, (next: boolean) => void] {
   const subscribe = useCallback((onChange: () => void) => {
     window.addEventListener(CHANGE_EVENT, onChange);
     window.addEventListener("storage", onChange);
@@ -35,17 +52,10 @@ function useCollapsedFlag(key: string): [boolean, (next: boolean) => void] {
     };
   }, []);
 
-  const getSnapshot = useCallback(() => {
-    try {
-      return window.localStorage.getItem(key) === "1";
-    } catch {
-      return false;
-    }
-  }, [key]);
+  const getSnapshot = useCallback(() => readFlag(key), [key]);
+  const value = useSyncExternalStore(subscribe, getSnapshot, () => false);
 
-  const collapsed = useSyncExternalStore(subscribe, getSnapshot, () => false);
-
-  const setCollapsed = useCallback(
+  const setValue = useCallback(
     (next: boolean) => {
       try {
         window.localStorage.setItem(key, next ? "1" : "0");
@@ -57,11 +67,13 @@ function useCollapsedFlag(key: string): [boolean, (next: boolean) => void] {
     [key],
   );
 
-  return [collapsed, setCollapsed];
+  return [value, setValue];
 }
 
-export default function TrainingDayOnePanel({ projectId }: { projectId: string }) {
-  const [collapsed, setCollapsed] = useCollapsedFlag(`sc-training-day1-collapsed-${projectId}`);
+export default function TrainingDayOnePanel({ projectId, role }: { projectId: string; role: SimRole }) {
+  const [collapsed, setCollapsed] = useLocalStorageFlag(`sc-training-day1-collapsed-${projectId}`);
+  const [onboardingRead, setOnboardingRead] = useLocalStorageFlag(`sc-training-day1-onboarding-read-${projectId}`);
+  const onboarding = ONBOARDING_BY_ROLE[role];
 
   if (collapsed) {
     return (
@@ -107,18 +119,32 @@ export default function TrainingDayOnePanel({ projectId }: { projectId: string }
           Welcome to the project. Start with these — you&apos;ll need them to complete your first tasks.
         </p>
         <ol className="list-inside list-decimal space-y-2.5">
-          {ITEMS.map((item) => (
-            <li key={item.label} className="text-sm text-gray-800">
-              <a
-                href="#"
-                onClick={(e) => e.preventDefault()}
-                className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
-              >
-                {item.label}
-              </a>
-              <span className="ml-1.5 text-[11px] text-gray-400">(coming soon)</span>
-            </li>
-          ))}
+          <li className="text-sm text-gray-800">
+            <span className="mr-2 inline-flex h-4 w-4 items-center justify-center rounded border border-gray-300 align-[-2px] text-[10px] font-bold text-white data-[checked=true]:border-green-600 data-[checked=true]:bg-green-600" data-checked={onboardingRead} aria-hidden="true">
+              {onboardingRead ? "✓" : ""}
+            </span>
+            <a
+              href={onboarding.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOnboardingRead(true)}
+              className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
+            >
+              {onboarding.label}
+            </a>
+            <span className="ml-1.5 text-[11px] text-gray-400">(PDF)</span>
+          </li>
+          <li className="text-sm text-gray-800">
+            <span className="mr-2 inline-flex h-4 w-4 items-center justify-center rounded border border-gray-300 align-[-2px]" aria-hidden="true" />
+            <a
+              href="#"
+              onClick={(e) => e.preventDefault()}
+              className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
+            >
+              {PROJECT_OVERVIEW.label}
+            </a>
+            <span className="ml-1.5 text-[11px] text-gray-400">(coming soon)</span>
+          </li>
         </ol>
       </div>
     </aside>

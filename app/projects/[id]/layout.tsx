@@ -5,6 +5,11 @@ import { getSupabase } from "@/lib/supabase";
 import AssistWidget from "@/components/AssistWidget";
 import TrainingBanner from "./components/TrainingBanner";
 import TrainingDayOnePanel from "./components/TrainingDayOnePanel";
+import type { SimRole } from "@/lib/simulation-constants";
+
+function isTrainingRole(role: string | null): role is SimRole {
+  return role === "superintendent" || role === "project_manager" || role === "accounting";
+}
 
 export default async function ProjectLayout({
   children,
@@ -46,7 +51,7 @@ export default async function ProjectLayout({
       {isTraining && <TrainingBanner projectId={id} initialSavedAt={trainingSavedAt} />}
       {children}
       <AssistWidget projectId={id} />
-      {isTraining && trainingRole === "project_manager" && <TrainingDayOnePanel projectId={id} />}
+      {isTraining && isTrainingRole(trainingRole) && <TrainingDayOnePanel projectId={id} role={trainingRole} />}
     </>
   );
 }
