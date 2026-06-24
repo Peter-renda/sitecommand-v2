@@ -1905,30 +1905,31 @@ p           { text-wrap: pretty; }
   /* ── Form / info grids: stack on mobile ─────────────────────────────────────
      Hundreds of form rows use `grid grid-cols-2 gap-4` or `gap-3`. On a 375px
      phone those two columns are each ~160px — too narrow for most inputs and
-     labels. Collapse them all to a single column without touching 50+ files.
-     gap-2 is deliberately excluded (used for button groups / tile selectors
-     that intentionally stay side-by-side).                                    */
-  .grid.grid-cols-2.gap-4,
-  .grid.grid-cols-2.gap-3,
-  .grid.grid-cols-2.gap-x-8,
-  .grid.grid-cols-2.gap-x-4 {
+     labels. Collapse them to a single column without touching 50+ files.
+
+     The `:not([class*="…:grid-cols"])` guards mean we ONLY touch grids that
+     have no responsive variant of their own — i.e. the ones authored as a flat
+     `grid-cols-2` that never collapse. Grids that already declare
+     `sm:grid-cols-3` etc. (stat strips, dashboards) were authored with mobile
+     in mind, so we leave their intended mobile layout alone. gap-2 is excluded
+     (button groups / tile selectors that intentionally stay side-by-side).    */
+  .grid.grid-cols-2.gap-4:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]):not([class*="lg:grid-cols"]),
+  .grid.grid-cols-2.gap-3:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]):not([class*="lg:grid-cols"]),
+  .grid.grid-cols-2.gap-x-8:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]):not([class*="lg:grid-cols"]),
+  .grid.grid-cols-2.gap-x-4:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]):not([class*="lg:grid-cols"]) {
     grid-template-columns: 1fr !important;
   }
 
-  /* 4-column info panels (ERP accounting, detail pages) → 2-col */
-  .grid.grid-cols-4.gap-4,
-  .grid.grid-cols-4.gap-x-8 {
+  /* 4-column info panels (ERP accounting, meeting detail, etc.) → 2-col,
+     same guard so responsive 4-col grids keep their own breakpoints. */
+  .grid.grid-cols-4.gap-4:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]):not([class*="lg:grid-cols"]),
+  .grid.grid-cols-4.gap-x-8:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]):not([class*="lg:grid-cols"]) {
     grid-template-columns: repeat(2, 1fr) !important;
   }
 
-  /* Meeting detail 4-col (Date / Timezone / Start / End) — also 2-col */
-  .grid.grid-cols-4.gap-x-8.gap-y-5 {
-    grid-template-columns: repeat(2, 1fr) !important;
-  }
-
-  /* 3-column grids used in settings / admin panels → 1-col */
-  .grid.grid-cols-3.gap-4,
-  .grid.grid-cols-3.gap-3 {
+  /* 3-column grids used in settings / admin / ERP panels → 1-col */
+  .grid.grid-cols-3.gap-4:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]):not([class*="lg:grid-cols"]),
+  .grid.grid-cols-3.gap-3:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]):not([class*="lg:grid-cols"]) {
     grid-template-columns: 1fr !important;
   }
 

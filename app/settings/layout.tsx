@@ -23,7 +23,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
         </a>
       </header>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 flex gap-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row gap-6 sm:gap-8">
         <SettingsNav isSiteAdmin={isSiteAdmin} />
         <main className="flex-1 min-w-0">{children}</main>
       </div>
