@@ -87,6 +87,18 @@ const ADDENDA: { label: string; file: string }[] = [
   { label: "Addendum No. 2 — Final", file: "208570-addendum-no-2-final.pdf" },
 ];
 
+// Per-project-type specification / project-manual attachments. Unlike the
+// generic bid drawings/addenda above (shared by every type), these are scoped
+// to a project type, so a higher-ed spec only shows on the higher-ed handoff.
+const SPECS_BY_TYPE: Record<string, { label: string; file: string }[]> = {
+  higher_ed: [
+    {
+      label: "UW Kane Hall CAAMs — Bid Specifications",
+      file: "26-0415_UW Kane Hall CAAMs_Bid Spec.pdf",
+    },
+  ],
+};
+
 /** Canonical app origin for absolute links in the stored email body. */
 function appBaseUrl(): string {
   return (
@@ -147,9 +159,11 @@ function buildHandoffHtml(opts: {
   const sizeLine = brief.size ? `${brief.size} — ` : "";
   const base = appBaseUrl();
   const linkItem = (a: { label: string; file: string }) =>
-    `  <li><a href="${base}/training/${a.file}">${a.label}</a> (PDF)</li>`;
+    `  <li><a href="${base}/training/${encodeURIComponent(a.file)}">${a.label}</a> (PDF)</li>`;
   const drawingsList = DRAWINGS.map(linkItem).join("\n");
   const addendaList = ADDENDA.map(linkItem).join("\n");
+  const specs = SPECS_BY_TYPE[projectType] ?? [];
+  const specsList = specs.map(linkItem).join("\n");
 
   return `
 <p>Hi ${pmFirst},</p>
@@ -175,6 +189,7 @@ ${drawingsList}
 
 <h3>Specifications</h3>
 <p>The complete project manual is attached — CSI Divisions 00 through 48, including the front-end (Division 00/01) general conditions and all technical sections. Load it into the Specifications tool so the team can reference it against submittals and RFIs.</p>
+${specs.length ? `<ul>\n${specsList}\n</ul>` : ""}
 
 <h3>Attachments — Bid Addenda</h3>
 <p>The following addenda were issued during procurement and are part of the contract documents. Review them and make sure we're building to the latest revisions:</p>
