@@ -1713,7 +1713,7 @@ export default function ChangeEventsClient({
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
           onClick={(e) => { if (e.target === e.currentTarget) setPcoPickerOpen(false); }}
         >
-          <div className="bg-white rounded-lg shadow-xl w-[480px] max-h-[80vh] flex flex-col">
+          <div className="bg-white rounded-lg shadow-xl w-[min(480px,92vw)] max-h-[80vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
               <h2 className="text-sm font-semibold text-gray-900">Select a Prime Contract</h2>
@@ -1771,7 +1771,7 @@ export default function ChangeEventsClient({
       {romPopup && (
         <div
           ref={popupRef}
-          className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-xl w-[360px] p-4"
+          className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-xl w-[min(360px,92vw)] p-4"
           style={{ top: romPopup.top, left: romPopup.left }}
         >
           <div className="flex items-center justify-between mb-3">

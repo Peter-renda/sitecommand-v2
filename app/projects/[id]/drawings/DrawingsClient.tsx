@@ -2305,9 +2305,9 @@ function ReviewExtractedModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-white">
+    <div className="fixed inset-0 z-50 flex flex-col sm:flex-row bg-white overflow-auto">
       {/* Left panel: drawing list */}
-      <aside className="w-72 shrink-0 border-r border-black/[0.06] flex flex-col bg-white">
+      <aside className="w-full sm:w-72 shrink-0 border-b sm:border-b-0 sm:border-r border-black/[0.06] flex flex-col bg-white max-h-[30vh] sm:max-h-none">
         <div className="px-4 py-3 border-b border-black/[0.06] flex items-center justify-between gap-2">
           <span className="text-xs font-semibold" style={{ color: "var(--brand-600)" }}>
             {confirmedCount} of {rows.length} confirmed
@@ -2390,7 +2390,7 @@ function ReviewExtractedModal({
       </section>
 
       {/* Right panel: General information */}
-      <aside className="w-[440px] shrink-0 border-l border-black/[0.06] flex flex-col bg-white">
+      <aside className="w-full sm:w-[440px] shrink-0 border-t sm:border-t-0 sm:border-l border-black/[0.06] flex flex-col bg-white">
         <div className="px-5 py-4 border-b border-black/[0.06] flex items-start justify-between gap-2">
           <h2 className="text-base font-semibold text-gray-900">General information</h2>
           <button
