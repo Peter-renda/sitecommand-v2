@@ -122,7 +122,7 @@ export async function POST(
   const apiKey = await resolveElevenLabsKey(session.company_id);
   if (!apiKey) {
     // No voice configured — still deliver the message as a readable transcript.
-    return NextResponse.json({ title, text, audio: false, day: scheduledDay });
+    return NextResponse.json({ title, text, audio: false, reason: "no_key", day: scheduledDay });
   }
 
   const voiceId = process.env.ELEVENLABS_VOICE_ID || DEFAULT_VOICE_ID;
@@ -165,7 +165,14 @@ export async function POST(
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => "");
       console.error(`ElevenLabs TTS failed (${upstream.status}):`, detail.slice(0, 300));
-      return NextResponse.json({ title, text, audio: false, day: scheduledDay });
+      return NextResponse.json({
+        title,
+        text,
+        audio: false,
+        reason: "tts_failed",
+        status: upstream.status,
+        day: scheduledDay,
+      });
     }
 
     const audioBuffer = Buffer.from(await upstream.arrayBuffer());
@@ -174,19 +181,26 @@ export async function POST(
       .upload(storagePath, audioBuffer, { contentType: "audio/mpeg", upsert: true });
     if (uploadError) {
       console.error("Failed to cache narration audio:", uploadError.message);
-      return NextResponse.json({ title, text, audio: false, day: scheduledDay });
+      return NextResponse.json({
+        title,
+        text,
+        audio: false,
+        reason: "upload_failed",
+        detail: uploadError.message,
+        day: scheduledDay,
+      });
     }
 
     const { data: signed, error: signError } = await supabase.storage
       .from(STORAGE_BUCKET)
       .createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS);
     if (signError || !signed?.signedUrl) {
-      return NextResponse.json({ title, text, audio: false, day: scheduledDay });
+      return NextResponse.json({ title, text, audio: false, reason: "sign_failed", day: scheduledDay });
     }
 
     return NextResponse.json({ title, text, url: signed.signedUrl, audio: true, day: scheduledDay });
   } catch (e) {
     console.error("Narration synthesis error:", e);
-    return NextResponse.json({ title, text, audio: false, day: scheduledDay });
+    return NextResponse.json({ title, text, audio: false, reason: "synthesis_error", day: scheduledDay });
   }
 }
