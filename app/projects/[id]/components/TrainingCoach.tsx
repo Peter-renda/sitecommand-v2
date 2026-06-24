@@ -59,6 +59,8 @@ type NarrationData = {
   text: string;
   url?: string;
   audio: boolean;
+  /** When audio is false, why — "no_key" | "tts_failed" | "upload_failed" | … */
+  reason?: string;
 };
 
 export default function TrainingCoach({
@@ -150,6 +152,7 @@ export default function TrainingCoach({
           text: json.text ?? "",
           url: typeof json.url === "string" ? json.url : undefined,
           audio: !!json.audio,
+          reason: typeof json.reason === "string" ? json.reason : undefined,
         };
         cacheRef.current.set(day, nd);
         setData(nd);
@@ -365,9 +368,29 @@ export default function TrainingCoach({
                 </span>
               </div>
             ) : (
-              <p className="mb-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700">
-                Audio narration isn’t enabled — here’s your coach’s message:
-              </p>
+              <div className="mb-2 rounded-md bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
+                {data.reason === "no_key" ? (
+                  <p>
+                    Audio narration isn’t set up yet. Add an ElevenLabs API key under{" "}
+                    <a
+                      href="/settings/integrations"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium underline"
+                    >
+                      Settings → Integrations
+                    </a>{" "}
+                    to hear your coach. Here’s the message:
+                  </p>
+                ) : (
+                  <p className="flex flex-wrap items-center gap-x-1.5">
+                    <span>Audio couldn’t be generated right now — here’s your coach’s message.</span>
+                    <button type="button" onClick={handleStart} className="font-medium underline">
+                      Try again
+                    </button>
+                  </p>
+                )}
+              </div>
             )}
 
             <div className="max-h-56 overflow-y-auto whitespace-pre-line text-sm leading-relaxed text-gray-700">
