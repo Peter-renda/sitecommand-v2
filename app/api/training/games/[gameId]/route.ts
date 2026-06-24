@@ -37,29 +37,38 @@ export async function GET(
   if (!game) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const supabase = getSupabase();
-  const [{ data: days }, { data: actions }, { data: reports }] = await Promise.all([
-    supabase
-      .from("simulation_days")
-      .select("id, day_number, sim_date, weather, summary, events, required_actions, generated_at")
-      .eq("game_id", gameId)
-      .order("day_number", { ascending: true }),
-    supabase
-      .from("simulation_actions")
-      .select("id, day_id, day_number, required_action_id, action_type, title, content, score, max_score, feedback, created_at")
-      .eq("game_id", gameId)
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("simulation_score_reports")
-      .select("id, period_kind, label, from_day, to_day, score, max_score, grade, review, created_at")
-      .eq("game_id", gameId)
-      .order("to_day", { ascending: true }),
-  ]);
+  const [{ data: days }, { data: actions }, { data: reports }, { data: jobReviews }] =
+    await Promise.all([
+      supabase
+        .from("simulation_days")
+        .select("id, day_number, sim_date, weather, summary, events, required_actions, generated_at")
+        .eq("game_id", gameId)
+        .order("day_number", { ascending: true }),
+      supabase
+        .from("simulation_actions")
+        .select("id, day_id, day_number, required_action_id, action_type, title, content, score, max_score, feedback, auto_completed, created_at")
+        .eq("game_id", gameId)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("simulation_score_reports")
+        .select("id, period_kind, label, from_day, to_day, score, max_score, grade, review, created_at")
+        .eq("game_id", gameId)
+        .order("to_day", { ascending: true }),
+      supabase
+        .from("simulation_job_reviews")
+        .select(
+          "id, review_number, from_day, to_day, from_week, to_week, is_final, status, generated, score, max_score, grade, completed_count, missed_count, catch_up_count, created_at, acknowledged_at",
+        )
+        .eq("game_id", gameId)
+        .order("review_number", { ascending: true }),
+    ]);
 
   return NextResponse.json({
     game,
     days: days ?? [],
     actions: actions ?? [],
     reports: reports ?? [],
+    jobReviews: jobReviews ?? [],
   });
 }
 

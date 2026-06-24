@@ -179,15 +179,86 @@ export async function POST(
     completed,
   );
 
+  // Open a Job Review for any newly-completed 4-week block (and the final tail).
+  const pendingReviews = await ensureJobReviews(
+    supabase,
+    gameId,
+    game.total_days,
+    newCurrentDay,
+    completed,
+  );
+
   return NextResponse.json({
     days: newDays,
     reports: newReports,
+    pendingReviews,
     currentDay: newCurrentDay,
     completed,
     score: earned,
     maxScore: possible,
     simulated: newDays.length,
   });
+}
+
+const BLOCK_DAYS = 20; // 4 working weeks
+const WEEK_DAYS = 5;
+
+/**
+ * Ensure a `simulation_job_reviews` row exists for every 4-week block that has
+ * become reviewable. A block is reviewable once all of its days are simulated;
+ * on project completion the final (possibly partial) block is reviewable too.
+ * The row is created "open" and ungenerated — its AI content is produced lazily
+ * when the player opens the Job Review page. Returns the rows newly created on
+ * this advance so the client can pop the "review your project" prompt.
+ */
+async function ensureJobReviews(
+  supabase: Supa,
+  gameId: string,
+  totalDays: number,
+  currentDay: number,
+  completed: boolean,
+): Promise<unknown[]> {
+  const blocks = new Set<number>();
+  for (let b = 1; b <= Math.floor(currentDay / BLOCK_DAYS); b++) blocks.add(b);
+  if (completed) blocks.add(Math.max(1, Math.ceil(totalDays / BLOCK_DAYS)));
+  if (blocks.size === 0) return [];
+
+  const { data: existing } = await supabase
+    .from("simulation_job_reviews")
+    .select("review_number")
+    .eq("game_id", gameId);
+  const have = new Set((existing ?? []).map((r) => r.review_number as number));
+
+  const created: unknown[] = [];
+  for (const b of [...blocks].sort((x, y) => x - y)) {
+    if (have.has(b)) continue;
+    const fromDay = (b - 1) * BLOCK_DAYS + 1;
+    const toDay = Math.min(b * BLOCK_DAYS, totalDays);
+    if (fromDay > toDay) continue;
+    const fromWeek = (b - 1) * (BLOCK_DAYS / WEEK_DAYS) + 1;
+    const toWeek = Math.ceil(toDay / WEEK_DAYS);
+    const isFinal = toDay >= totalDays;
+
+    const { data: row } = await supabase
+      .from("simulation_job_reviews")
+      .insert({
+        game_id: gameId,
+        review_number: b,
+        from_day: fromDay,
+        to_day: toDay,
+        from_week: fromWeek,
+        to_week: toWeek,
+        is_final: isFinal,
+        status: "open",
+        generated: false,
+      })
+      .select(
+        "id, review_number, from_day, to_day, from_week, to_week, is_final, status, generated, created_at",
+      )
+      .single();
+    if (row) created.push(row);
+  }
+  return created;
 }
 
 /** Working-day offset → calendar offset, skipping weekends. Day index 0 = start. */
