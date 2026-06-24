@@ -255,7 +255,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
   {
     day: 7,
     phase: "Pre-Construction & Buyout",
-    timeframe: "Weeks 7-8",
+    timeframe: "Week 8",
     tasks: [
       {
         task: "Complete buyout — target 90-100% bought out before structure begins",
@@ -649,6 +649,165 @@ export const TRAINING_SCHEDULES: Partial<Record<SimRole, TrainingDay[]>> = {
 
 export function getTrainingSchedule(role: SimRole): TrainingDay[] {
   return TRAINING_SCHEDULES[role] ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Recurring cadence — standing tasks that layer on top of the phased schedule
+// throughout construction (not tied to a specific day).
+// ---------------------------------------------------------------------------
+
+export type RecurringTask = {
+  task: string;
+  category: string;
+  collaborators: string;
+};
+
+export type RecurringFrequency = "Daily" | "Weekly" | "Bi-weekly" | "Monthly";
+
+export type RecurringCadenceGroup = {
+  frequency: RecurringFrequency;
+  tasks: RecurringTask[];
+};
+
+const PROJECT_MANAGER_RECURRING_CADENCE: RecurringCadenceGroup[] = [
+  {
+    frequency: "Daily",
+    tasks: [
+      {
+        task: "Review superintendent daily logs (manpower, weather, deliveries, delays, incidents)",
+        category: "Field Ops",
+        collaborators: "PM",
+      },
+      {
+        task: "Walk the site for safety and quality spot-checks",
+        category: "Safety",
+        collaborators: "PM / Super",
+      },
+      {
+        task: "Respond to time-sensitive RFIs and field questions",
+        category: "RFI",
+        collaborators: "PM",
+      },
+      {
+        task: "Track deliveries and material status against the procurement log",
+        category: "Procurement",
+        collaborators: "PM",
+      },
+    ],
+  },
+  {
+    frequency: "Weekly",
+    tasks: [
+      {
+        task: "Subcontractor coordination meeting with 3-week look-ahead",
+        category: "Meetings",
+        collaborators: "PM / Super",
+      },
+      {
+        task: "Update and distribute the RFI log",
+        category: "RFI",
+        collaborators: "PM",
+      },
+      {
+        task: "Update and distribute the submittal log",
+        category: "Submittals",
+        collaborators: "PM",
+      },
+      {
+        task: "Update the 3-week look-ahead schedule with the superintendent",
+        category: "Schedule",
+        collaborators: "PM / Super",
+      },
+      {
+        task: "Conduct safety walk and review toolbox talks",
+        category: "Safety",
+        collaborators: "PM / Safety",
+      },
+      {
+        task: "Review change event log and status of pending PCOs",
+        category: "Change Mgmt",
+        collaborators: "PM",
+      },
+      {
+        task: "Maintain open-items / action-item log to closure",
+        category: "Coordination",
+        collaborators: "PM",
+      },
+    ],
+  },
+  {
+    frequency: "Bi-weekly",
+    tasks: [
+      {
+        task: "Owner-Architect-Contractor (OAC) meeting",
+        category: "Meetings",
+        collaborators: "PM / Owner",
+      },
+      {
+        task: "Long-lead procurement and delivery status review",
+        category: "Procurement",
+        collaborators: "PM",
+      },
+      {
+        task: "Quality inspection summary and nonconformance review",
+        category: "Quality",
+        collaborators: "PM",
+      },
+    ],
+  },
+  {
+    frequency: "Monthly",
+    tasks: [
+      {
+        task: "Prepare, submit, and walk owner through the pay application",
+        category: "Cost",
+        collaborators: "PM",
+      },
+      {
+        task: "Review / approve subcontractor pay apps; collect conditional & unconditional lien waivers",
+        category: "Cost",
+        collaborators: "PM",
+      },
+      {
+        task: "Update master CPM schedule and issue schedule narrative",
+        category: "Schedule",
+        collaborators: "PM",
+      },
+      {
+        task: "Issue cost report: budget vs. actual and cost-to-complete forecast",
+        category: "Cost",
+        collaborators: "PM",
+      },
+      {
+        task: "Reconcile change order log; update executed vs. pending COs",
+        category: "Change Mgmt",
+        collaborators: "PM",
+      },
+      {
+        task: "Issue owner project status report",
+        category: "Reporting",
+        collaborators: "PM",
+      },
+      {
+        task: "Conduct safety audit and review metrics (TRIR, near-misses)",
+        category: "Safety",
+        collaborators: "PM / Safety",
+      },
+      {
+        task: "Review COI / bond expirations and compliance status",
+        category: "Compliance",
+        collaborators: "PM",
+      },
+    ],
+  },
+];
+
+const RECURRING_CADENCES: Partial<Record<SimRole, RecurringCadenceGroup[]>> = {
+  project_manager: PROJECT_MANAGER_RECURRING_CADENCE,
+};
+
+export function getRecurringCadence(role: SimRole): RecurringCadenceGroup[] {
+  return RECURRING_CADENCES[role] ?? [];
 }
 
 /**
