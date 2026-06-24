@@ -241,25 +241,27 @@ export default function PracticeClient({ username }: { username: string }) {
   );
 }
 
-function ProjectRow({ project, reload }: { project: TrainingProject; reload: () => void }) {
+function ProjectRow({ project, reload }: { project: TrainingProject; reload: () => Promise<void> }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function remove() {
-    if (!confirm(`Delete "${project.name}"? This permanently removes the sandbox and can't be undone.`))
-      return;
     setDeleting(true);
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/training/projects/${project.id}`, { method: "DELETE" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to delete training project");
       }
-      // On success this row unmounts once the list reloads, so leave `deleting`
-      // set (avoids a state update after unmount); only reset it on failure.
-      reload();
+      // On success this row unmounts once the list reloads; leave `deleting`
+      // set to avoid a state update after unmount. Only reset on failure.
+      await reload();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete training project");
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete training project");
       setDeleting(false);
+      setConfirmDelete(false);
     }
   }
 
@@ -271,33 +273,58 @@ function ProjectRow({ project, reload }: { project: TrainingProject; reload: () 
     .join(" · ");
 
   return (
-    <div className="group rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all flex items-center">
-      <a
-        href={`/projects/${project.id}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex-1 min-w-0 flex items-center gap-4 p-4"
-      >
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-900 truncate">{project.name}</p>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {[meta, lastSavedLabel(project.training_last_saved_at)].filter(Boolean).join(" · ")}
-          </p>
-        </div>
-        <span className="shrink-0 text-xs font-medium text-gray-500 group-hover:text-gray-900">
-          Open ↗
-        </span>
-      </a>
-      {/* Real button OUTSIDE the anchor so the click can't trigger navigation. */}
-      <button
-        type="button"
-        onClick={remove}
-        disabled={deleting}
-        className="shrink-0 text-gray-300 hover:text-red-500 transition-colors px-3 py-4 disabled:opacity-50"
-        title="Delete sandbox"
-      >
-        {deleting ? "…" : "✕"}
-      </button>
+    <div className="rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all">
+      <div className="group flex items-center">
+        <a
+          href={`/projects/${project.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex-1 min-w-0 flex items-center gap-4 p-4"
+        >
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-900 truncate">{project.name}</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {[meta, lastSavedLabel(project.training_last_saved_at)].filter(Boolean).join(" · ")}
+            </p>
+          </div>
+          <span className="shrink-0 text-xs font-medium text-gray-500 group-hover:text-gray-900">
+            Open ↗
+          </span>
+        </a>
+        {/* Delete button is outside the anchor so clicks never trigger navigation */}
+        {confirmDelete ? (
+          <div className="shrink-0 flex items-center gap-1.5 px-3">
+            <button
+              type="button"
+              onClick={remove}
+              disabled={deleting}
+              className="rounded px-2 py-1 text-xs font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setConfirmDelete(false); setDeleteError(null); }}
+              disabled={deleting}
+              className="rounded px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="shrink-0 text-gray-300 hover:text-red-500 transition-colors px-3 py-4"
+            title="Delete sandbox"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      {deleteError && (
+        <p className="px-4 pb-3 text-xs text-red-600">{deleteError}</p>
+      )}
     </div>
   );
 }
