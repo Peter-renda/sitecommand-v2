@@ -259,6 +259,7 @@ function ProjectRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   async function remove() {
     setDeleting(true);
@@ -294,11 +295,30 @@ function ProjectRow({
   return (
     <div className="rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all">
       <div className="group flex items-center">
+        {/* Expand toggle — outside the anchor so it never triggers navigation */}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-label={expanded ? "Hide phase reviews" : "Show phase reviews"}
+          title={expanded ? "Hide phase reviews" : "Show phase reviews"}
+          className="shrink-0 py-4 pl-3 pr-1 text-gray-400 hover:text-gray-700 transition-colors"
+        >
+          <svg
+            className={`h-4 w-4 transition-transform ${expanded ? "rotate-90" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
         <a
           href={`/projects/${project.id}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-1 min-w-0 flex items-center gap-4 p-4"
+          className="flex-1 min-w-0 flex items-center gap-4 py-4 pr-2 pl-1"
         >
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{project.name}</p>
@@ -341,8 +361,105 @@ function ProjectRow({
           </button>
         )}
       </div>
+      {expanded && <ReviewsPanel projectId={project.id} />}
       {deleteError && (
         <p className="px-4 pb-3 text-xs text-red-600">{deleteError}</p>
+      )}
+    </div>
+  );
+}
+
+type SavedReview = {
+  id: string;
+  phase: string;
+  day: number;
+  completed: unknown[];
+  missed: unknown[];
+  closed_out: boolean;
+  updated_at: string;
+};
+
+/**
+ * Expanded under a training project row: the sandbox's saved phase Job Reviews.
+ * Each links to the review page in a new tab. Reviews are persisted server-side
+ * (training_phase_reviews), so they survive reloads and appear here regardless of
+ * which browser generated them.
+ */
+function ReviewsPanel({ projectId }: { projectId: string }) {
+  const [loading, setLoading] = useState(true);
+  const [reviews, setReviews] = useState<SavedReview[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/training/projects/${projectId}/reviews`, {
+          cache: "no-store",
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load reviews");
+        if (!cancelled) setReviews(data.reviews ?? []);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load reviews");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  return (
+    <div className="border-t border-gray-100 px-4 py-3">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+        Phase reviews
+      </p>
+      {loading ? (
+        <p className="text-sm text-gray-400">Loading reviews…</p>
+      ) : error ? (
+        <p className="text-sm text-red-600">{error}</p>
+      ) : reviews.length === 0 ? (
+        <p className="text-sm text-gray-400">
+          No saved reviews yet. A Job Review is saved here each time you complete a phase in the
+          sandbox.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {reviews.map((r) => {
+            const done = Array.isArray(r.completed) ? r.completed.length : 0;
+            const miss = Array.isArray(r.missed) ? r.missed.length : 0;
+            return (
+              <a
+                key={r.id}
+                href={`/training/review?project=${projectId}&day=${r.day}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between gap-3 rounded-md border border-gray-100 bg-gray-50/60 px-3 py-2 transition-colors hover:border-gray-300 hover:bg-white"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-gray-800">{r.phase}</p>
+                  <p className="mt-0.5 text-[11px] text-gray-500">
+                    {done} completed · {miss} missed
+                  </p>
+                </div>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                      r.closed_out ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    {r.closed_out ? "Closed out" : "Open"}
+                  </span>
+                  <span className="text-xs font-medium text-gray-400">View →</span>
+                </span>
+              </a>
+            );
+          })}
+        </div>
       )}
     </div>
   );

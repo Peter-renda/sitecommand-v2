@@ -50,6 +50,7 @@ export default async function TrainingReviewPage({
       role={project.training_role}
       projectName={project.name ?? "Training Project"}
       phase={phase}
+      day={schedule[idx].day}
     />
   );
 }

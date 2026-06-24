@@ -19,14 +19,6 @@ type PosTask = {
   deliverable: string;
 };
 
-type Cache = {
-  review: string;
-  highlights: Highlight[];
-  resolutions: Resolution[];
-  completed: PosTask[];
-  missed: PosTask[];
-};
-
 // ───────────────────────────── localStorage helpers ─────────────────────────────
 
 function readJSON<T>(key: string, fallback: T): T {
@@ -44,10 +36,6 @@ function writeJSON(key: string, value: unknown): void {
   } catch {
     /* ignore unavailable storage */
   }
-}
-
-function slug(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 // ───────────────────────────── Styling ─────────────────────────────
@@ -93,11 +81,13 @@ export default function TrainingReviewClient({
   role,
   projectName,
   phase,
+  day,
 }: {
   projectId: string;
   role: SimRole;
   projectName: string;
   phase: string;
+  day: number;
 }) {
   // Every scheduled task that belongs to this phase, with its day + index so we
   // can read/write the Day panel's localStorage checks.
@@ -114,7 +104,6 @@ export default function TrainingReviewClient({
 
   const tasksKey = `sc-training-tasks-${projectId}`;
   const reviewsKey = `sc-training-reviews-${projectId}`;
-  const cacheKey = `sc-training-review-${projectId}-${slug(phase)}`;
 
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -129,24 +118,57 @@ export default function TrainingReviewClient({
   useEffect(() => {
     let cancelled = false;
 
+    // Map a saved task (server snapshot — no position) back to its scheduled
+    // position so the lists render and close-out can tick the right boxes.
+    // Falls back to this phase's representative day with idx -1 (a harmless,
+    // non-matching key) if the task text no longer lines up with the schedule.
+    function toPos(list: Omit<PosTask, "day" | "idx">[]): PosTask[] {
+      const used = new Set<number>();
+      return list.map((t) => {
+        const hit = phaseTasks.findIndex(
+          (p, i) => !used.has(i) && p.task === t.task && p.category === t.category,
+        );
+        if (hit >= 0) {
+          used.add(hit);
+          return phaseTasks[hit];
+        }
+        return { day, idx: -1, ...t };
+      });
+    }
+
     async function run() {
       const reviewed = readJSON<string[]>(reviewsKey, []);
-      const cached = readJSON<Cache | null>(cacheKey, null);
 
-      if (cached && typeof cached.review === "string") {
-        if (cancelled) return;
-        setReview(cached.review);
-        setHighlights(cached.highlights ?? []);
-        setResolutions(cached.resolutions ?? []);
-        setCompleted(cached.completed ?? []);
-        setMissed(cached.missed ?? []);
-        setClosedOut(reviewed.includes(phase));
-        setStatus("ready");
-        return;
+      // 1. Server is the source of truth: a saved review survives reloads and
+      //    opens from the Training → Practice list, in any browser.
+      try {
+        const res = await fetch(`/api/training/projects/${projectId}/reviews`, {
+          cache: "no-store",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const saved = (data.reviews ?? []).find(
+            (r: { phase?: string }) => r.phase === phase,
+          );
+          if (saved && !cancelled) {
+            setReview(saved.review ?? "");
+            setHighlights(saved.highlights ?? []);
+            setResolutions(saved.resolutions ?? []);
+            setCompleted(toPos(saved.completed ?? []));
+            setMissed(toPos(saved.missed ?? []));
+            setClosedOut(!!saved.closed_out || reviewed.includes(phase));
+            setStatus("ready");
+            return;
+          }
+        }
+      } catch {
+        /* fall through to generate */
       }
+      if (cancelled) return;
 
-      // First open: split this phase's tasks into completed vs missed from the
-      // Day panel's stored check state, then ask the model for the review.
+      // 2. No saved review yet — split this phase's tasks into completed vs
+      //    missed from the Day panel's stored check state, then ask the model.
+      //    The POST persists the result so it's there next time.
       const checks = readJSON<Record<string, boolean>>(tasksKey, {});
       const comp: PosTask[] = [];
       const miss: PosTask[] = [];
@@ -169,7 +191,7 @@ export default function TrainingReviewClient({
         const res = await fetch(`/api/training/projects/${projectId}/phase-review`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phase, completed: comp.map(strip), missed: miss.map(strip) }),
+          body: JSON.stringify({ phase, day, completed: comp.map(strip), missed: miss.map(strip) }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to generate review");
@@ -179,13 +201,6 @@ export default function TrainingReviewClient({
         setResolutions(data.resolutions ?? []);
         setClosedOut(reviewed.includes(phase));
         setStatus("ready");
-        writeJSON(cacheKey, {
-          review: data.review ?? "",
-          highlights: data.highlights ?? [],
-          resolutions: data.resolutions ?? [],
-          completed: comp,
-          missed: miss,
-        });
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "Failed to generate review");
@@ -197,9 +212,9 @@ export default function TrainingReviewClient({
     return () => {
       cancelled = true;
     };
-  }, [projectId, phase, phaseTasks, tasksKey, reviewsKey, cacheKey]);
+  }, [projectId, phase, day, phaseTasks, tasksKey, reviewsKey]);
 
-  const closeOut = useCallback(() => {
+  const closeOut = useCallback(async () => {
     setClosing(true);
     // Auto-complete every missed task by checking it off in the same store the
     // Day panel reads — the project tab picks this up via the `storage` event.
@@ -211,9 +226,21 @@ export default function TrainingReviewClient({
     if (!reviewed.includes(phase)) reviewed.push(phase);
     writeJSON(reviewsKey, reviewed);
 
+    // Persist the close-out so it sticks across reloads and other browsers (the
+    // localStorage writes above only sync the Day panel in this browser).
+    try {
+      await fetch(`/api/training/projects/${projectId}/reviews`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phase, closedOut: true }),
+      });
+    } catch {
+      /* local catch-up already applied; non-fatal */
+    }
+
     setClosedOut(true);
     setClosing(false);
-  }, [missed, phase, tasksKey, reviewsKey]);
+  }, [missed, phase, projectId, tasksKey, reviewsKey]);
 
   function returnToProject() {
     window.close();

@@ -57,7 +57,7 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { phase?: string; completed?: unknown; missed?: unknown };
+  let body: { phase?: string; day?: unknown; completed?: unknown; missed?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -66,6 +66,8 @@ export async function POST(
 
   const phase = String(body.phase || "").slice(0, 120).trim();
   if (!phase) return NextResponse.json({ error: "Phase is required" }, { status: 400 });
+
+  const day = Number.isInteger(Number(body.day)) ? Number(body.day) : 0;
 
   const completed = cleanTasks(body.completed);
   const missed = cleanTasks(body.missed);
@@ -79,8 +81,9 @@ export async function POST(
 
   const role = (VALID_ROLES.has(project.training_role) ? project.training_role : "project_manager") as SimRole;
 
+  let result;
   try {
-    const result = await generatePhaseReview(
+    result = await generatePhaseReview(
       {
         role,
         projectType: project.training_project_type || "",
@@ -90,11 +93,36 @@ export async function POST(
       completed,
       missed,
     );
-    return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to generate review" },
       { status: 500 },
     );
   }
+
+  // Persist the review so it can be listed under the sandbox (Training →
+  // Practice) and reopened later, in any browser. Upsert by (project, phase);
+  // closed_out is intentionally omitted so re-generating never clears a phase the
+  // trainee already closed out. Best-effort and isolated — the trainee still gets
+  // the review on the response even if the save hiccups.
+  try {
+    await supabase.from("training_phase_reviews").upsert(
+      {
+        project_id: projectId,
+        phase,
+        day,
+        review: result.review,
+        highlights: result.highlights,
+        resolutions: result.resolutions,
+        completed,
+        missed,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "project_id,phase" },
+    );
+  } catch (e) {
+    console.error("Failed to persist training phase review:", e);
+  }
+
+  return NextResponse.json(result);
 }

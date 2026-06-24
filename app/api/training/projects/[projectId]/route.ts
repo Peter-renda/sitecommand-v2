@@ -93,13 +93,30 @@ export async function DELETE(
     .eq("id", projectId)
     .select("id");
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!deleted || deleted.length === 0) {
-    return NextResponse.json(
-      { error: "The sandbox could not be deleted. Please try again." },
-      { status: 500 },
-    );
+  if (!error && deleted && deleted.length > 0) {
+    return NextResponse.json({ ok: true });
   }
 
-  return NextResponse.json({ ok: true });
+  // The hard delete couldn't remove the row — most likely a child row in a table
+  // that references projects without ON DELETE CASCADE (migration 170 fixes the
+  // known one, invitations, but a sandbox the trainee actually ran can accumulate
+  // others). Rather than leave the sandbox stuck in the list forever, fall back to
+  // archiving it: the list query (GET, and /api/projects) filters archived_at IS
+  // NULL, so an archived sandbox disappears for good and never reappears.
+  const { error: archiveError } = await supabase
+    .from("projects")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("id", projectId)
+    .is("archived_at", null);
+
+  // Archived now (or already archived by a concurrent request) → either way the
+  // sandbox is excluded from the list for good.
+  if (!archiveError) {
+    return NextResponse.json({ ok: true, archived: true });
+  }
+
+  return NextResponse.json(
+    { error: error?.message || archiveError.message || "The sandbox could not be deleted." },
+    { status: 500 },
+  );
 }
