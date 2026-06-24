@@ -5,6 +5,7 @@ import { getSupabase } from "@/lib/supabase";
 import AssistWidget from "@/components/AssistWidget";
 import TrainingBanner from "./components/TrainingBanner";
 import TrainingDayPanel from "./components/TrainingDayPanel";
+import TrainingCoach from "./components/TrainingCoach";
 import type { SimRole } from "@/lib/simulation-constants";
 
 function isTrainingRole(role: string | null): role is SimRole {
@@ -54,7 +55,10 @@ export default async function ProjectLayout({
       {children}
       <AssistWidget projectId={id} />
       {isTraining && isTrainingRole(trainingRole) && (
-        <TrainingDayPanel projectId={id} role={trainingRole} initialDay={trainingDay} />
+        <>
+          <TrainingDayPanel projectId={id} role={trainingRole} initialDay={trainingDay} />
+          <TrainingCoach projectId={id} role={trainingRole} initialDay={trainingDay} />
+        </>
       )}
     </>
   );

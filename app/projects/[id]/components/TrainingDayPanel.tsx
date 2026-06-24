@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { SimRole } from "@/lib/simulation-constants";
 import {
   getTrainingSchedule,
@@ -278,6 +278,16 @@ export default function TrainingDayPanel({
   const [currentIndex, setCurrentIndex] = useState(() => resolveDayIndex(schedule, initialDay));
   const [advancing, setAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Broadcast the active scheduled day so the Coach narrator (a sibling in the
+  // project layout) can surface the right message — on mount and on each advance.
+  useEffect(() => {
+    if (currentIndex < 0) return;
+    const day = schedule[currentIndex]?.day;
+    if (typeof day === "number") {
+      writeString(`sc-training-active-day-${projectId}`, String(day));
+    }
+  }, [currentIndex, schedule, projectId]);
 
   // No schedule for this role yet — render nothing.
   if (currentIndex < 0) return null;
