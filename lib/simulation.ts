@@ -348,7 +348,7 @@ Grade it now.`;
 
 // ───────────────────────────── Score report ─────────────────────────────
 
-function letterGrade(pct: number): string {
+export function letterGrade(pct: number): string {
   if (pct >= 93) return "A";
   if (pct >= 90) return "A-";
   if (pct >= 87) return "B+";
@@ -425,4 +425,254 @@ Write the performance review.`;
   }
 
   return { grade, review, score: stats.earned, max_score: stats.possible };
+}
+
+// ───────────────────────────── Job review (every 4 weeks) ─────────────────────────────
+
+export type JobReviewHighlight = {
+  kind: "praise" | "warning" | "missed_submittal" | "missed_rfi" | "tip";
+  text: string;
+};
+
+export type JobReviewResolution = {
+  required_action_id: string;
+  action_type: string;
+  title: string;
+  resolution: string;
+};
+
+type CompletedTask = {
+  day_number: number;
+  week: number;
+  action_type: string;
+  title: string;
+  score: number;
+  max_score: number;
+};
+
+type MissedTask = {
+  required_action_id: string;
+  day_number: number;
+  week: number;
+  action_type: string;
+  title: string;
+  description: string;
+  points: number;
+};
+
+/** Action types that represent time-sensitive submittal work. */
+const SUBMITTAL_TYPES = new Set(["submittal_review", "submittal"]);
+/** Action types that represent asking/answering RFIs. */
+const RFI_TYPES = new Set(["rfi"]);
+
+/**
+ * Generate the every-four-weeks Job Review for a span of the project. Returns a
+ * letter grade, a narrative review that explicitly calls out missed submittals
+ * and missed RFIs, structured highlights, and — for every missed required task —
+ * a short "resolution" describing how the office quietly caught the project up
+ * (submittal approved, scheduling email sent/received, etc.). The resolutions
+ * become the auto-completed action content when the player closes out the review.
+ */
+export async function generateJobReview(
+  game: GameContext,
+  period: {
+    reviewNumber: number;
+    fromDay: number;
+    toDay: number;
+    fromWeek: number;
+    toWeek: number;
+    isFinal: boolean;
+  },
+  stats: { earned: number; possible: number; completed: CompletedTask[]; missed: MissedTask[] },
+): Promise<{
+  grade: string;
+  review: string;
+  highlights: JobReviewHighlight[];
+  resolutions: JobReviewResolution[];
+}> {
+  const pct = stats.possible > 0 ? (stats.earned / stats.possible) * 100 : 100;
+  const grade = letterGrade(pct);
+
+  const missedSubmittals = stats.missed.filter((m) => SUBMITTAL_TYPES.has(m.action_type));
+  const missedRfis = stats.missed.filter((m) => RFI_TYPES.has(m.action_type));
+
+  const periodLabel = period.isFinal
+    ? `the final stretch (weeks ${period.fromWeek}–${period.toWeek})`
+    : `weeks ${period.fromWeek}–${period.toWeek}`;
+
+  const systemInstruction = `You are a construction project executive sitting down with a ${roleLabel(
+    game.role,
+  )} trainee for their milestone Job Review covering ${periodLabel} of a ${projectTypeLabel(
+    game.project_type,
+  )} project. Produce:
+
+1. "review": a direct, specific 4-7 sentence performance review of this stretch. Lead with what they handled well, then be candid about what slipped. You MUST explicitly call it out when:
+   - submittals were not reviewed/approved on time (this delays fabrication and procurement), and/or
+   - an important RFI was never asked when the job clearly needed one (this risks rework or a schedule hit).
+   Tie misses to real consequences a ${roleLabel(game.role)} would face. Never break character.
+2. "highlights": 3-6 short structured callouts. Each has a "kind":
+   - praise            : something they did well
+   - warning           : a general risk or slippage
+   - missed_submittal  : a submittal that wasn't handled in time
+   - missed_rfi        : an important RFI that was never asked
+   - tip               : one concrete thing to do better next stretch
+   Keep each "text" to one sentence.
+3. "resolutions": for EACH missed task listed below (referenced by its missedNum), one or two sentences describing how the back office quietly caught the project up so work can continue — written as real construction activity (e.g. "Submittal 09 91 00 was reviewed and returned Approved as Noted; transmittal logged to the painting sub." or "RFI 022 was issued to the architect and a response was received confirming the revised header detail, then forwarded to the field to keep the schedule."). Reference fabricated but believable submittal numbers, RFI numbers, names, and scheduling emails. Return exactly one resolution per missedNum.`;
+
+  const completedText =
+    stats.completed.length > 0
+      ? stats.completed
+          .map(
+            (c) =>
+              `- Day ${c.day_number} (wk ${c.week}): ${c.title} [${c.action_type}] — scored ${c.score}/${c.max_score}`,
+          )
+          .join("\n")
+      : "(none completed this period)";
+
+  const missedText =
+    stats.missed.length > 0
+      ? stats.missed
+          .map(
+            (m, i) =>
+              `Missed ${i + 1} | type=${m.action_type} | worth ${m.points} pts | "${m.title}" — ${m.description}`,
+          )
+          .join("\n")
+      : "(nothing was missed this period)";
+
+  const userPrompt = `PROJECT: ${game.project_name} (${projectTypeLabel(game.project_type)}) in ${game.location}
+Reviewing ${periodLabel} for the ${roleLabel(game.role)}.
+Period score: ${Math.round(stats.earned * 10) / 10} of ${stats.possible} (${Math.round(pct)}%) → grade ${grade}
+Submittal tasks missed: ${missedSubmittals.length}. Important RFI tasks missed: ${missedRfis.length}.
+
+COMPLETED TASKS:
+${completedText}
+
+MISSED TASKS (write one resolution per missedNum):
+${missedText}
+
+Write the review, highlights, and resolutions now.`;
+
+  let review = "";
+  let highlights: JobReviewHighlight[] = [];
+  let resolutions: JobReviewResolution[] = [];
+
+  try {
+    const result = await ai().models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      config: {
+        systemInstruction,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            review: { type: Type.STRING },
+            highlights: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  kind: {
+                    type: Type.STRING,
+                    enum: ["praise", "warning", "missed_submittal", "missed_rfi", "tip"],
+                  },
+                  text: { type: Type.STRING },
+                },
+                required: ["kind", "text"],
+              },
+            },
+            resolutions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  missedNum: { type: Type.INTEGER },
+                  resolution: { type: Type.STRING },
+                },
+                required: ["missedNum", "resolution"],
+              },
+            },
+          },
+          required: ["review", "highlights", "resolutions"],
+        },
+      },
+    });
+
+    const parsed = JSON.parse((result.text ?? "").trim() || "{}");
+    review = String(parsed.review || "").slice(0, 2500);
+    highlights = (Array.isArray(parsed.highlights) ? parsed.highlights : [])
+      .map((h: Record<string, unknown>) => ({
+        kind: (["praise", "warning", "missed_submittal", "missed_rfi", "tip"].includes(String(h.kind))
+          ? h.kind
+          : "tip") as JobReviewHighlight["kind"],
+        text: String(h.text || "").slice(0, 400),
+      }))
+      .filter((h: JobReviewHighlight) => h.text)
+      .slice(0, 8);
+
+    const byNum = new Map<number, string>();
+    for (const r of Array.isArray(parsed.resolutions) ? parsed.resolutions : []) {
+      const n = Math.round(Number((r as Record<string, unknown>).missedNum) || 0);
+      const text = String((r as Record<string, unknown>).resolution || "").slice(0, 600);
+      if (n >= 1 && n <= stats.missed.length && text) byNum.set(n, text);
+    }
+    resolutions = stats.missed.map((m, i) => ({
+      required_action_id: m.required_action_id,
+      action_type: m.action_type,
+      title: m.title,
+      resolution: byNum.get(i + 1) || fallbackResolution(m),
+    }));
+  } catch {
+    review =
+      "Milestone review generated. Keep submittals and RFIs moving on time, and stay ahead of the schedule into the next stretch.";
+    highlights = [];
+    resolutions = stats.missed.map((m) => ({
+      required_action_id: m.required_action_id,
+      action_type: m.action_type,
+      title: m.title,
+      resolution: fallbackResolution(m),
+    }));
+  }
+
+  // Guarantee the headline misses surface even if the model's prose buried them.
+  const ensured: JobReviewHighlight[] = [];
+  if (missedSubmittals.length && !highlights.some((h) => h.kind === "missed_submittal")) {
+    ensured.push({
+      kind: "missed_submittal",
+      text: `${missedSubmittals.length} submittal ${
+        missedSubmittals.length === 1 ? "review was" : "reviews were"
+      } not turned around in time this period — that puts fabrication and procurement at risk.`,
+    });
+  }
+  if (missedRfis.length && !highlights.some((h) => h.kind === "missed_rfi")) {
+    ensured.push({
+      kind: "missed_rfi",
+      text: `${missedRfis.length} RFI ${
+        missedRfis.length === 1 ? "was" : "were"
+      } never asked when the job needed it — unresolved questions like these lead to rework.`,
+    });
+  }
+  highlights = [...ensured, ...highlights];
+
+  return { grade, review, highlights, resolutions };
+}
+
+/** Templated catch-up note used when the AI omits a resolution for a missed task. */
+function fallbackResolution(m: { action_type: string; title: string }): string {
+  switch (m.action_type) {
+    case "submittal_review":
+    case "submittal":
+      return `${m.title} was reviewed and returned Approved as Noted, and the transmittal was logged so fabrication can proceed.`;
+    case "rfi":
+      return `${m.title} was issued to the design team and a response was received and forwarded to the field.`;
+    case "email":
+      return `${m.title} was sent and a confirming reply was received so the schedule stays aligned.`;
+    case "pay_application":
+    case "billing":
+      return `${m.title} was prepared, reconciled, and submitted for the period.`;
+    case "daily_log":
+      return `${m.title} was reconstructed from field notes and filed for the record.`;
+    default:
+      return `${m.title} was handled by the back office and closed out to keep the project on track.`;
+  }
 }

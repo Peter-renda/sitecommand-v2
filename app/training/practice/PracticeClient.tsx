@@ -52,7 +52,28 @@ type Action = {
   score: number;
   max_score: number;
   feedback: string;
+  auto_completed?: boolean;
   created_at: string;
+};
+
+type JobReview = {
+  id: string;
+  review_number: number;
+  from_day: number;
+  to_day: number;
+  from_week: number;
+  to_week: number;
+  is_final: boolean;
+  status: "open" | "acknowledged";
+  generated: boolean;
+  score: number;
+  max_score: number;
+  grade: string;
+  completed_count: number;
+  missed_count: number;
+  catch_up_count: number;
+  created_at: string;
+  acknowledged_at: string | null;
 };
 
 type ScoreReport = {
@@ -85,7 +106,13 @@ type Game = {
   max_score: number;
 };
 
-type GameState = { game: Game; days: Day[]; actions: Action[]; reports: ScoreReport[] };
+type GameState = {
+  game: Game;
+  days: Day[];
+  actions: Action[];
+  reports: ScoreReport[];
+  jobReviews: JobReview[];
+};
 
 // ───────────────────────────── Helpers ─────────────────────────────
 
@@ -109,6 +136,19 @@ function gradeColor(grade: string): string {
   if (grade.startsWith("B")) return "text-blue-600";
   if (grade.startsWith("C")) return "text-amber-600";
   return "text-red-600";
+}
+
+/** 5 working days per week → the week a 1-indexed working day belongs to. */
+function weekOfDay(day: number): number {
+  return Math.max(1, Math.ceil(day / 5));
+}
+
+function reviewUrl(gameId: string, reviewId: string): string {
+  return `/training/practice/${gameId}/review/${reviewId}`;
+}
+
+function weekSpanLabel(r: JobReview): string {
+  return r.from_week === r.to_week ? `Week ${r.from_week}` : `Weeks ${r.from_week}–${r.to_week}`;
 }
 
 // ───────────────────────────── Component ─────────────────────────────
@@ -382,21 +422,44 @@ function GameView({ gameId, onBack }: { gameId: string; onBack: () => void }) {
   const [advancing, setAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [latestReportId, setLatestReportId] = useState<string | null>(null);
+  const [selectedWeek, setSelectedWeek] = useState(1);
+  const [pendingReview, setPendingReview] = useState<JobReview | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/training/games/${gameId}`);
-      const data = await res.json();
-      if (res.ok) setState(data);
-    } finally {
-      setLoading(false);
-    }
-  }, [gameId]);
+  const load = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      try {
+        const res = await fetch(`/api/training/games/${gameId}`);
+        const data = await res.json();
+        if (res.ok) setState(data);
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [gameId],
+  );
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Land on (and follow) the latest week as the project advances.
+  const currentDay = state?.game.current_day ?? 0;
+  useEffect(() => {
+    setSelectedWeek(weekOfDay(Math.max(1, currentDay)));
+  }, [currentDay]);
+
+  // When the player returns from the Job Review tab, silently refresh so the
+  // closed-out review and any auto-completed catch-up tasks show up here.
+  const hasOpenReview = (state?.jobReviews ?? []).some((r) => r.status === "open");
+  useEffect(() => {
+    if (!hasOpenReview) return;
+    function onFocus() {
+      load(true);
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [hasOpenReview, load]);
 
   const actionsByRequiredId = useMemo(() => {
     const map = new Map<string, Action>();
@@ -423,6 +486,7 @@ function GameView({ gameId, onBack }: { gameId: string; onBack: () => void }) {
       const res = await fetch(`/api/training/games/${gameId}/advance`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to advance");
+      const pending: JobReview[] = data.pendingReviews ?? [];
       setState((prev) =>
         prev
           ? {
@@ -436,11 +500,16 @@ function GameView({ gameId, onBack }: { gameId: string; onBack: () => void }) {
               },
               days: [...prev.days, ...(data.days ?? [])],
               reports: [...prev.reports, ...(data.reports ?? [])],
+              jobReviews: [...prev.jobReviews, ...pending],
             }
           : prev,
       );
       if (data.reports?.length) {
         setLatestReportId(data.reports[data.reports.length - 1].id);
+      }
+      // Surface the earliest new 4-week review as a popup.
+      if (pending.length) {
+        setPendingReview(pending[0]);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to advance");
@@ -493,12 +562,27 @@ function GameView({ gameId, onBack }: { gameId: string; onBack: () => void }) {
     );
   }
 
-  const { game, days, reports } = state;
+  const { game, days, reports, jobReviews } = state;
   const completed = game.status === "completed";
   const remaining = game.total_days - game.current_day;
   const advanceCount = Math.min(game.days_per_advance, remaining);
-  const orderedDays = [...days].sort((a, b) => b.day_number - a.day_number);
   const latestReport = reports.find((r) => r.id === latestReportId);
+
+  // Week model: 5 working days per week. The latest reached week is the only one
+  // you can still work in; earlier weeks are locked (view-only). A week also
+  // locks once a 4-week review covering it has been closed out.
+  const currentWeek = weekOfDay(Math.max(1, game.current_day));
+  const totalWeeks = Math.max(1, weekOfDay(game.total_days));
+  const acknowledgedThroughWeek = jobReviews
+    .filter((r) => r.status === "acknowledged")
+    .reduce((mx, r) => Math.max(mx, r.to_week), 0);
+  const week = Math.min(Math.max(1, selectedWeek), Math.max(1, currentWeek));
+  const weekEditable =
+    game.status === "active" && week === currentWeek && week > acknowledgedThroughWeek;
+  const weekDays = [...days]
+    .filter((d) => weekOfDay(d.day_number) === week)
+    .sort((a, b) => a.day_number - b.day_number);
+  const openReview = jobReviews.find((r) => r.status === "open") ?? null;
 
   return (
     <div>
@@ -598,6 +682,28 @@ function GameView({ gameId, onBack }: { gameId: string; onBack: () => void }) {
         {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
       </div>
 
+      {/* Open 4-week Job Review banner (persists until closed out) */}
+      {openReview && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 mb-5 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold text-indigo-900">
+              📋 Your 4-week Job Review is ready — {weekSpanLabel(openReview)}
+            </p>
+            <p className="text-xs text-indigo-700 mt-0.5">
+              Review how the project went, then close it out to catch up on anything missed.
+            </p>
+          </div>
+          <a
+            href={reviewUrl(gameId, openReview.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+          >
+            Review your project →
+          </a>
+        </div>
+      )}
+
       {/* Latest score report callout */}
       {latestReport && <ScoreReportCard report={latestReport} highlight onClose={() => setLatestReportId(null)} />}
 
@@ -610,22 +716,54 @@ function GameView({ gameId, onBack }: { gameId: string; onBack: () => void }) {
         </div>
       )}
 
-      {/* All score reports */}
-      {reports.length > 0 && (
+      {/* Job reviews (every 4 weeks) */}
+      {jobReviews.length > 0 && (
         <div className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-2">Score reports</h2>
+          <h2 className="text-sm font-semibold text-gray-900 mb-2">Job reviews</h2>
           <div className="space-y-2">
-            {[...reports]
-              .sort((a, b) => b.to_day - a.to_day)
+            {[...jobReviews]
+              .sort((a, b) => a.review_number - b.review_number)
               .map((r) => (
-                <ScoreReportCard key={r.id} report={r} />
+                <a
+                  key={r.id}
+                  href={reviewUrl(gameId, r.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block rounded-lg border border-gray-200 bg-white p-3.5 hover:border-gray-300 hover:shadow-sm transition-all"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900">
+                        {r.is_final && r.review_number > 1
+                          ? "Final Project Review"
+                          : `4-Week Review · ${weekSpanLabel(r)}`}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {r.status === "acknowledged" ? (
+                          <>
+                            Closed out · {r.completed_count} completed · {r.catch_up_count} caught up
+                          </>
+                        ) : (
+                          <span className="text-indigo-600 font-medium">Open — review your project</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      {r.generated && r.grade ? (
+                        <span className={`text-lg font-semibold ${gradeColor(r.grade)}`}>{r.grade}</span>
+                      ) : (
+                        <span className="text-xs text-gray-400">→</span>
+                      )}
+                    </div>
+                  </div>
+                </a>
               ))}
           </div>
         </div>
       )}
 
-      {/* Days */}
-      {orderedDays.length === 0 ? (
+      {/* Days — one week at a time */}
+      {game.current_day === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-200 p-10 text-center">
           <p className="text-sm text-gray-500">
             Your project is set up. Hit <span className="font-medium">Start day 1</span> to begin the
@@ -633,20 +771,119 @@ function GameView({ gameId, onBack }: { gameId: string; onBack: () => void }) {
           </p>
         </div>
       ) : (
-        <div className="space-y-5">
-          {orderedDays.map((day) => (
-            <DayCard
-              key={day.id}
-              gameId={gameId}
-              day={day}
-              actionsByRequiredId={actionsByRequiredId}
-              proactiveActions={(actionsByDay.get(day.day_number) ?? []).filter((a) => !a.required_action_id)}
-              role={game.role}
-              onSubmitted={onActionSubmitted}
-            />
-          ))}
+        <div>
+          {/* Week navigator */}
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedWeek((w) => Math.max(1, w - 1))}
+                disabled={week <= 1}
+                className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                aria-label="Previous week"
+              >
+                ←
+              </button>
+              <div className="text-center min-w-[120px]">
+                <p className="text-sm font-semibold text-gray-900">Week {week}</p>
+                <p className="text-[11px] text-gray-400">
+                  of {totalWeeks} · {weekEditable ? "current" : "locked"}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedWeek((w) => Math.min(currentWeek, w + 1))}
+                disabled={week >= currentWeek}
+                className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                aria-label="Next week"
+              >
+                →
+              </button>
+            </div>
+            {!weekEditable && (
+              <span className="text-[11px] font-medium text-gray-500 bg-gray-100 border border-gray-200 rounded-full px-2.5 py-1">
+                🔒 Viewing only — completed tasks can&apos;t be changed
+              </span>
+            )}
+            {week < currentWeek && (
+              <button
+                onClick={() => setSelectedWeek(currentWeek)}
+                className="text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
+              >
+                Jump to current week →
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-5">
+            {weekDays.map((day) => (
+              <DayCard
+                key={day.id}
+                gameId={gameId}
+                day={day}
+                actionsByRequiredId={actionsByRequiredId}
+                proactiveActions={(actionsByDay.get(day.day_number) ?? []).filter((a) => !a.required_action_id)}
+                role={game.role}
+                readOnly={!weekEditable}
+                onSubmitted={onActionSubmitted}
+              />
+            ))}
+          </div>
         </div>
       )}
+
+      {/* Every-4-weeks review popup */}
+      {pendingReview && (
+        <ReviewPopup
+          review={pendingReview}
+          gameId={gameId}
+          onClose={() => setPendingReview(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────────── Review popup ─────────────────────────────
+
+function ReviewPopup({
+  review,
+  gameId,
+  onClose,
+}: {
+  review: JobReview;
+  gameId: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200 p-6">
+        <div className="text-3xl mb-2">📋</div>
+        <h2 className="text-lg font-semibold text-gray-900">
+          {review.is_final && review.review_number > 1
+            ? "Time for your final project review"
+            : "Four weeks down — time for a review"}
+        </h2>
+        <p className="text-sm text-gray-600 mt-2">
+          You&apos;ve wrapped {weekSpanLabel(review)} on the job. Open your Job Review to see how you
+          did on every task, what slipped, and close it out to catch up on anything you missed.
+        </p>
+        <div className="mt-5 flex items-center gap-3">
+          <a
+            href={reviewUrl(gameId, review.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={onClose}
+            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors"
+          >
+            Review your project
+          </a>
+          <button
+            onClick={onClose}
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            Later
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -697,6 +934,7 @@ function DayCard({
   actionsByRequiredId,
   proactiveActions,
   role,
+  readOnly = false,
   onSubmitted,
 }: {
   gameId: string;
@@ -704,6 +942,7 @@ function DayCard({
   actionsByRequiredId: Map<string, Action>;
   proactiveActions: Action[];
   role: SimRole;
+  readOnly?: boolean;
   onSubmitted: (action: Action, score: number, maxScore: number) => void;
 }) {
   const [addingProactive, setAddingProactive] = useState(false);
@@ -778,6 +1017,7 @@ function DayCard({
                   dayNumber={day.day_number}
                   req={req}
                   existing={actionsByRequiredId.get(req.id) ?? null}
+                  readOnly={readOnly}
                   onSubmitted={onSubmitted}
                 />
               ))}
@@ -799,27 +1039,28 @@ function DayCard({
           </div>
         )}
 
-        {/* Add proactive action */}
-        {addingProactive ? (
-          <ActionEditor
-            gameId={gameId}
-            dayNumber={day.day_number}
-            requiredActionId={null}
-            role={role}
-            onCancel={() => setAddingProactive(false)}
-            onSubmitted={(action, score, maxScore) => {
-              onSubmitted(action, score, maxScore);
-              setAddingProactive(false);
-            }}
-          />
-        ) : (
-          <button
-            onClick={() => setAddingProactive(true)}
-            className="text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
-          >
-            + Take another action
-          </button>
-        )}
+        {/* Add proactive action (current week only) */}
+        {!readOnly &&
+          (addingProactive ? (
+            <ActionEditor
+              gameId={gameId}
+              dayNumber={day.day_number}
+              requiredActionId={null}
+              role={role}
+              onCancel={() => setAddingProactive(false)}
+              onSubmitted={(action, score, maxScore) => {
+                onSubmitted(action, score, maxScore);
+                setAddingProactive(false);
+              }}
+            />
+          ) : (
+            <button
+              onClick={() => setAddingProactive(true)}
+              className="text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
+            >
+              + Take another action
+            </button>
+          ))}
       </div>
     </div>
   );
@@ -830,32 +1071,63 @@ function RequiredActionItem({
   dayNumber,
   req,
   existing,
+  readOnly = false,
   onSubmitted,
 }: {
   gameId: string;
   dayNumber: number;
   req: RequiredAction;
   existing: Action | null;
+  readOnly?: boolean;
   onSubmitted: (action: Action, score: number, maxScore: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
 
   if (existing) {
+    const auto = Boolean(existing.auto_completed);
     return (
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+      <div
+        className={`rounded-lg border p-3 ${
+          auto ? "border-amber-200 bg-amber-50/50" : "border-emerald-200 bg-emerald-50/50"
+        }`}
+      >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-emerald-600">✓</span>
+            <span className={auto ? "text-amber-600" : "text-emerald-600"}>{auto ? "↺" : "✓"}</span>
             <span className="text-sm font-medium text-gray-900 truncate">{req.title}</span>
             <span className="text-[10px] uppercase tracking-wide text-gray-400 bg-white border border-gray-200 rounded px-1.5 py-0.5 shrink-0">
               {actionTypeLabel(req.action_type)}
             </span>
+            {auto && (
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5 shrink-0">
+                Auto
+              </span>
+            )}
           </div>
-          <span className="text-sm font-semibold text-emerald-700 shrink-0">
+          <span className={`text-sm font-semibold shrink-0 ${auto ? "text-amber-700" : "text-emerald-700"}`}>
             {existing.score}/{existing.max_score}
           </span>
         </div>
         {existing.feedback && <p className="text-xs text-gray-600 mt-2 italic">“{existing.feedback}”</p>}
+      </div>
+    );
+  }
+
+  // Locked (past/completed) week: an un-actioned required task reads as missed.
+  if (readOnly) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50/40 p-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-red-500">✕</span>
+            <span className="text-sm font-medium text-gray-900">{req.title}</span>
+            <span className="text-[10px] uppercase tracking-wide text-gray-400 bg-white border border-gray-200 rounded px-1.5 py-0.5">
+              {actionTypeLabel(req.action_type)}
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 mt-1">Not completed — missed this day.</p>
+        </div>
+        <span className="text-sm font-semibold text-red-600 shrink-0">0/{req.points}</span>
       </div>
     );
   }
