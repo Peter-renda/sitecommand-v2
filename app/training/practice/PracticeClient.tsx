@@ -70,12 +70,20 @@ export default function PracticeClient({ username }: { username: string }) {
   const loadProjects = useCallback(async () => {
     setLoadingList(true);
     try {
-      const res = await fetch("/api/training/projects");
+      // no-store so a freshly-deleted/launched sandbox is never masked by a
+      // cached list response.
+      const res = await fetch("/api/training/projects", { cache: "no-store" });
       const data = await res.json();
       setProjects(data.projects ?? []);
     } finally {
       setLoadingList(false);
     }
+  }, []);
+
+  // Drop a sandbox from the list the instant its delete is confirmed, so the row
+  // disappears immediately without waiting on (or trusting) a reload round-trip.
+  const removeProjectFromList = useCallback((id: string) => {
+    setProjects((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
   useEffect(() => {
@@ -232,7 +240,7 @@ export default function PracticeClient({ username }: { username: string }) {
         ) : (
           <div className="space-y-2">
             {projects.map((p) => (
-              <ProjectRow key={p.id} project={p} reload={loadProjects} />
+              <ProjectRow key={p.id} project={p} onDeleted={removeProjectFromList} />
             ))}
           </div>
         )}
@@ -241,7 +249,13 @@ export default function PracticeClient({ username }: { username: string }) {
   );
 }
 
-function ProjectRow({ project, reload }: { project: TrainingProject; reload: () => Promise<void> }) {
+function ProjectRow({
+  project,
+  onDeleted,
+}: {
+  project: TrainingProject;
+  onDeleted: (id: string) => void;
+}) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -250,14 +264,19 @@ function ProjectRow({ project, reload }: { project: TrainingProject; reload: () 
     setDeleting(true);
     setDeleteError(null);
     try {
-      const res = await fetch(`/api/training/projects/${project.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/training/projects/${project.id}`, {
+        method: "DELETE",
+        cache: "no-store",
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to delete training project");
       }
-      // On success this row unmounts once the list reloads; leave `deleting`
-      // set to avoid a state update after unmount. Only reset on failure.
-      await reload();
+      // Server confirmed the row was removed. Drop it from the list right away
+      // (the row unmounts), so we never depend on a reload that could be served
+      // a stale, cached copy still containing this project. `deleting` stays set
+      // to avoid a state update after unmount.
+      onDeleted(project.id);
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Failed to delete training project");
       setDeleting(false);
