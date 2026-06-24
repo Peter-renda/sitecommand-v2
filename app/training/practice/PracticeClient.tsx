@@ -25,6 +25,11 @@ import {
 const OFFERED_TYPES = PROJECT_TYPES.filter((p) => p.value === "higher_ed");
 const DEFAULT_TYPE = OFFERED_TYPES[0]?.value ?? "higher_ed";
 
+// Only the Project Manager experience is seeded today (directory + handoff
+// email + Day-1 flow). Superintendent and Project Accounting aren't wired up
+// yet, so their role cards render but are disabled with a "coming soon" hint.
+const AVAILABLE_ROLES = new Set<SimRole>(["project_manager"]);
+
 type TrainingProject = {
   id: string;
   name: string;
@@ -48,7 +53,7 @@ function lastSavedLabel(iso: string | null): string {
 }
 
 export default function PracticeClient({ username }: { username: string }) {
-  const [role, setRole] = useState<SimRole>("superintendent");
+  const [role, setRole] = useState<SimRole>("project_manager");
   const [projectType, setProjectType] = useState<string>(DEFAULT_TYPE);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,24 +123,43 @@ export default function PracticeClient({ username }: { username: string }) {
         {/* Role */}
         <label className="block text-xs font-medium text-gray-500 mb-2">Your role</label>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
-          {ROLES.map((r) => (
-            <button
-              key={r.value}
-              onClick={() => setRole(r.value)}
-              className={`text-left rounded-lg border p-3.5 transition-colors ${
-                role === r.value
-                  ? "border-gray-900 bg-gray-900 text-white"
-                  : "border-gray-200 hover:border-gray-300 bg-white"
-              }`}
-            >
-              <p className={`text-sm font-medium ${role === r.value ? "text-white" : "text-gray-900"}`}>
-                {r.label}
-              </p>
-              <p className={`mt-1 text-xs ${role === r.value ? "text-gray-300" : "text-gray-500"}`}>
-                {r.blurb}
-              </p>
-            </button>
-          ))}
+          {ROLES.map((r) => {
+            const available = AVAILABLE_ROLES.has(r.value);
+            const selected = role === r.value;
+            return (
+              <div key={r.value} className="relative group h-full">
+                <button
+                  type="button"
+                  onClick={() => available && setRole(r.value)}
+                  aria-disabled={!available}
+                  tabIndex={available ? undefined : -1}
+                  className={`w-full h-full text-left rounded-lg border p-3.5 transition-colors ${
+                    selected
+                      ? "border-gray-900 bg-gray-900 text-white"
+                      : available
+                        ? "border-gray-200 hover:border-gray-300 bg-white"
+                        : "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                  }`}
+                >
+                  <p className={`text-sm font-medium ${selected ? "text-white" : "text-gray-900"}`}>
+                    {r.label}
+                  </p>
+                  <p className={`mt-1 text-xs ${selected ? "text-gray-300" : "text-gray-500"}`}>
+                    {r.blurb}
+                  </p>
+                </button>
+                {!available && (
+                  <div
+                    role="tooltip"
+                    className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100"
+                  >
+                    Coming soon
+                    <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Project type */}
