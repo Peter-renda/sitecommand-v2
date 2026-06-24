@@ -325,7 +325,7 @@ export default function ProjectNav({
               </svg>
             </button>
             {open && (
-              <div className="absolute left-0 top-full mt-1 w-56 sm:w-[min(96vw,1120px)] bg-white border border-gray-100 rounded-xl shadow-xl z-[9999] p-5 max-h-[80vh] overflow-y-auto">
+              <div className="absolute left-0 top-full mt-1 w-[min(92vw,224px)] sm:w-[min(96vw,1120px)] bg-white border border-gray-100 rounded-xl shadow-xl z-[9999] p-5 max-h-[80vh] overflow-y-auto">
                 <div className="grid grid-cols-1 gap-1 sm:grid-cols-5 sm:gap-6">
                   {visibleSections.map((section) => (
                     <div key={section.label}>
@@ -370,7 +370,7 @@ export default function ProjectNav({
             </>
           )}
 
-          <div ref={searchRef} className="relative ml-auto shrink-0 w-64">
+          <div ref={searchRef} className="relative ml-auto shrink-0 w-36 sm:w-64">
             <svg
               className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
               fill="none"

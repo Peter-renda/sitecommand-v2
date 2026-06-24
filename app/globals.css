@@ -1901,5 +1901,41 @@ p           { text-wrap: pretty; }
   .flex > div > button {
     white-space: nowrap;
   }
+
+  /* ── Form / info grids: stack on mobile ─────────────────────────────────────
+     Hundreds of form rows use `grid grid-cols-2 gap-4` or `gap-3`. On a 375px
+     phone those two columns are each ~160px — too narrow for most inputs and
+     labels. Collapse them all to a single column without touching 50+ files.
+     gap-2 is deliberately excluded (used for button groups / tile selectors
+     that intentionally stay side-by-side).                                    */
+  .grid.grid-cols-2.gap-4,
+  .grid.grid-cols-2.gap-3,
+  .grid.grid-cols-2.gap-x-8,
+  .grid.grid-cols-2.gap-x-4 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* 4-column info panels (ERP accounting, detail pages) → 2-col */
+  .grid.grid-cols-4.gap-4,
+  .grid.grid-cols-4.gap-x-8 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Meeting detail 4-col (Date / Timezone / Start / End) — also 2-col */
+  .grid.grid-cols-4.gap-x-8.gap-y-5 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* 3-column grids used in settings / admin panels → 1-col */
+  .grid.grid-cols-3.gap-4,
+  .grid.grid-cols-3.gap-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Sticky page-header action rows: allow wrapping so buttons don't clip */
+  header.sticky .flex.gap-2,
+  header.sticky .flex.gap-3 {
+    flex-wrap: wrap;
+  }
 }
 
