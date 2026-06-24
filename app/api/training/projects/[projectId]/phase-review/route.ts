@@ -104,9 +104,12 @@ export async function POST(
   // Practice) and reopened later, in any browser. Upsert by (project, phase);
   // closed_out is intentionally omitted so re-generating never clears a phase the
   // trainee already closed out. Best-effort and isolated — the trainee still gets
-  // the review on the response even if the save hiccups.
+  // the review on the response even if the save hiccups. NB: supabase-js resolves
+  // (it doesn't throw) on a DB error, so the error has to be inspected explicitly
+  // or a failed save would be swallowed silently and the review would never show
+  // up in the Practice list.
   try {
-    await supabase.from("training_phase_reviews").upsert(
+    const { error: saveError } = await supabase.from("training_phase_reviews").upsert(
       {
         project_id: projectId,
         phase,
@@ -120,6 +123,7 @@ export async function POST(
       },
       { onConflict: "project_id,phase" },
     );
+    if (saveError) console.error("Failed to persist training phase review:", saveError.message);
   } catch (e) {
     console.error("Failed to persist training phase review:", e);
   }

@@ -39,6 +39,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
     .select("id, name, archived_at")
     .eq("company_id", current.company_id)
     .neq("id", projectId)
+    // Training sandboxes carry a company_id but are private to the user who
+    // launched them — keep them out of the company-wide Copy Directory picker.
+    .eq("is_training", false)
     .order("archived_at", { ascending: true, nullsFirst: true })
     .order("name", { ascending: true });
 

@@ -241,6 +241,40 @@ export default function TrainingDayPanel({
     [projectId],
   );
 
+  // Generate + persist the just-finished phase's Job Review in the background, so
+  // it shows up as a saved review on the Training → Practice list even when the
+  // trainee dismisses the popup instead of opening the review now. The split of
+  // completed vs. missed tasks is read from the same localStorage checks the Day
+  // panel writes. Idempotent server-side (upsert by project+phase), so later
+  // opening the review re-saves harmlessly.
+  const persistPhaseReview = useCallback(
+    (phaseName: string, repDay: number) => {
+      const completed: { task: string; category: string; collaborators: string; deliverable: string }[] = [];
+      const missed: typeof completed = [];
+      for (const d of schedule) {
+        if (d.phase !== phaseName) continue;
+        d.tasks.forEach((t, idx) => {
+          const entry = {
+            task: t.task,
+            category: t.category,
+            collaborators: t.collaborators,
+            deliverable: t.deliverable,
+          };
+          (checks[`${d.day}-${idx}`] ? completed : missed).push(entry);
+        });
+      }
+      if (completed.length + missed.length === 0) return;
+      void fetch(`/api/training/projects/${projectId}/phase-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phase: phaseName, day: repDay, completed, missed }),
+      }).catch(() => {
+        /* best-effort — the review still generates + persists when opened */
+      });
+    },
+    [schedule, checks, projectId],
+  );
+
   const [currentIndex, setCurrentIndex] = useState(() => resolveDayIndex(schedule, initialDay));
   const [advancing, setAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -288,6 +322,9 @@ export default function TrainingDayPanel({
       const completedDay = current.day;
       setCurrentIndex((i) => i + 1);
       if (finishesPhase) {
+        // Save the review now (background) so it's listed under the sandbox even
+        // if the trainee picks "Later" on the popup below.
+        persistPhaseReview(completedPhase, completedDay);
         setReviewPopup({ day: completedDay, phase: completedPhase });
       }
     } catch (e) {

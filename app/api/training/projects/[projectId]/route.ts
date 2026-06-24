@@ -83,6 +83,13 @@ export async function DELETE(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Clear the one FK to projects(id) that historically wasn't declared ON DELETE
+  // CASCADE (invitations.project_id — migration 170 fixes it, but a database that
+  // hasn't run 170 yet would block the hard delete below and the sandbox would
+  // reappear in the list). Doing it explicitly here makes delete work regardless
+  // of whether migration 170 has been applied. Best-effort: ignore the result.
+  await supabase.from("invitations").delete().eq("project_id", projectId);
+
   // .select() so we can confirm a row was actually removed. Without it a delete
   // that affected zero rows (e.g. blocked by a policy, or already gone) still
   // returns error=null and we'd report a false success — the client would then
