@@ -220,6 +220,27 @@ export default function TrainingDayPanel({
     [isRecurringOpen, setRecurringOpenRaw],
   );
 
+  // Phases already closed out in a Job Review (written by the review tab; synced
+  // here via the cross-tab `storage` event).
+  const [reviewedRaw] = useLocalStorageString(`sc-training-reviews-${projectId}`);
+  const reviewedPhases = useMemo<Set<string>>(() => {
+    try {
+      const arr = reviewedRaw ? (JSON.parse(reviewedRaw) as string[]) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+      return new Set();
+    }
+  }, [reviewedRaw]);
+
+  // Popup shown the moment a phase is finished.
+  const [reviewPopup, setReviewPopup] = useState<{ day: number; phase: string } | null>(null);
+  const openReview = useCallback(
+    (day: number) => {
+      window.open(`/training/review?project=${projectId}&day=${day}`, "_blank", "noopener");
+    },
+    [projectId],
+  );
+
   const [currentIndex, setCurrentIndex] = useState(() => resolveDayIndex(schedule, initialDay));
   const [advancing, setAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -237,6 +258,18 @@ export default function TrainingDayPanel({
     0,
   );
 
+  // Finishing this period crosses into a new phase → its Job Review is due.
+  const finishesPhase = !!nextDay && nextDay.phase !== current.phase;
+  // A prior phase was completed but hasn't been reviewed yet (persists across
+  // reloads / dismissing the popup).
+  const priorEntry = currentIndex > 0 ? schedule[currentIndex - 1] : null;
+  const pendingReview =
+    priorEntry && priorEntry.phase !== current.phase && !reviewedPhases.has(priorEntry.phase)
+      ? { day: priorEntry.day, phase: priorEntry.phase }
+      : null;
+  // On the final period, its review is the project closeout review.
+  const finalReviewDue = !nextDay && !reviewedPhases.has(current.phase);
+
   async function completeDay() {
     if (!nextDay) return;
     setAdvancing(true);
@@ -251,7 +284,12 @@ export default function TrainingDayPanel({
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to advance to the next period");
       }
+      const completedPhase = current.phase;
+      const completedDay = current.day;
       setCurrentIndex((i) => i + 1);
+      if (finishesPhase) {
+        setReviewPopup({ day: completedDay, phase: completedPhase });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to advance to the next period");
     } finally {
@@ -279,7 +317,41 @@ export default function TrainingDayPanel({
   }
 
   return (
-    <aside className="fixed right-0 top-1/2 z-40 flex max-h-[78vh] w-80 max-w-[calc(100vw-1.5rem)] -translate-y-1/2 flex-col overflow-hidden rounded-l-xl border border-amber-200 bg-white shadow-2xl">
+    <>
+      {reviewPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
+            <div className="mb-2 text-3xl">📋</div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              You wrapped up {reviewPopup.phase}
+            </h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Time for your Job Review — see how you ran this phase, what slipped, and close it out
+              to catch up on anything you missed.
+            </p>
+            <div className="mt-5 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  openReview(reviewPopup.day);
+                  setReviewPopup(null);
+                }}
+                className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800"
+              >
+                Review your project
+              </button>
+              <button
+                type="button"
+                onClick={() => setReviewPopup(null)}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
+              >
+                Later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <aside className="fixed right-0 top-1/2 z-40 flex max-h-[78vh] w-80 max-w-[calc(100vw-1.5rem)] -translate-y-1/2 flex-col overflow-hidden rounded-l-xl border border-amber-200 bg-white shadow-2xl">
       <header className="flex items-center justify-between rounded-tl-xl bg-amber-500 px-4 py-2.5 text-white">
         <div className="flex items-center gap-2">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -309,6 +381,21 @@ export default function TrainingDayPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {pendingReview && (
+          <button
+            type="button"
+            onClick={() => openReview(pendingReview.day)}
+            className="mb-4 block w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-left transition-colors hover:bg-indigo-100"
+          >
+            <p className="text-xs font-semibold text-indigo-900">
+              📋 Job Review ready — {pendingReview.phase}
+            </p>
+            <p className="mt-0.5 text-[11px] text-indigo-700">
+              Review how you ran that phase, then close it out to catch up. →
+            </p>
+          </button>
+        )}
+
         {isFirstDay && (
           <div className="mb-4">
             <p className="mb-2 text-xs font-medium text-gray-500">Start here</p>
@@ -397,12 +484,26 @@ export default function TrainingDayPanel({
               Next: {nextDay.timeframe} — {nextDay.phase}
             </p>
           </>
+        ) : finalReviewDue ? (
+          <>
+            <button
+              type="button"
+              onClick={() => openReview(current.day)}
+              className="w-full rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+            >
+              Review your project →
+            </button>
+            <p className="mt-1.5 text-center text-[11px] text-gray-400">
+              Close out the final phase to wrap up the job.
+            </p>
+          </>
         ) : (
           <div className="rounded-md bg-green-50 px-3 py-2 text-center text-sm font-medium text-green-700">
             🎉 Project complete — all periods finished
           </div>
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
