@@ -4,7 +4,7 @@ import { canAccessProject } from "@/lib/project-access";
 import { getSupabase } from "@/lib/supabase";
 import AssistWidget from "@/components/AssistWidget";
 import TrainingBanner from "./components/TrainingBanner";
-import TrainingDayOnePanel from "./components/TrainingDayOnePanel";
+import TrainingDayPanel from "./components/TrainingDayPanel";
 import type { SimRole } from "@/lib/simulation-constants";
 
 function isTrainingRole(role: string | null): role is SimRole {
@@ -29,6 +29,7 @@ export default async function ProjectLayout({
   let isTraining = false;
   let trainingRole: string | null = null;
   let trainingSavedAt: string | null = null;
+  let trainingDay = 0;
   if (session.user_type !== "demo") {
     const hasAccess = await canAccessProject(id, session);
     if (!hasAccess) redirect("/dashboard");
@@ -38,12 +39,13 @@ export default async function ProjectLayout({
     // environment, not a real project.
     const { data: project } = await getSupabase()
       .from("projects")
-      .select("is_training, training_role, training_last_saved_at")
+      .select("is_training, training_role, training_last_saved_at, training_day")
       .eq("id", id)
       .maybeSingle();
     isTraining = !!project?.is_training;
     trainingRole = project?.training_role ?? null;
     trainingSavedAt = project?.training_last_saved_at ?? null;
+    trainingDay = project?.training_day ?? 0;
   }
 
   return (
@@ -51,7 +53,9 @@ export default async function ProjectLayout({
       {isTraining && <TrainingBanner projectId={id} initialSavedAt={trainingSavedAt} />}
       {children}
       <AssistWidget projectId={id} />
-      {isTraining && isTrainingRole(trainingRole) && <TrainingDayOnePanel projectId={id} role={trainingRole} />}
+      {isTraining && isTrainingRole(trainingRole) && (
+        <TrainingDayPanel projectId={id} role={trainingRole} initialDay={trainingDay} />
+      )}
     </>
   );
 }
