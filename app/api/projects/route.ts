@@ -20,27 +20,16 @@ async function withSchedules(
   return projects.map((p) => ({ ...p, has_schedule: scheduled.has(p.id) }));
 }
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = getSupabase();
 
-  // Training mode: while the user is working inside a training sandbox (cookie
-  // set by the sandbox banner), the dashboard/project list is scoped to their own
-  // training projects instead of their live projects — so they stay "in training"
-  // even when they navigate back to the dashboard.
-  const trainingMode = req.cookies.get("sc_training_mode")?.value === "1";
-  if (trainingMode) {
-    const { data } = await supabase
-      .from("projects")
-      .select("*")
-      .eq("is_training", true)
-      .eq("training_owner_id", session.id)
-      .is("archived_at", null)
-      .order("created_at", { ascending: false });
-    return NextResponse.json(await withSchedules(supabase, Array.isArray(data) ? data : []));
-  }
+  // Training sandboxes (is_training = true) never appear in the dashboard /
+  // project list — they're reached only from Training → Practice. Every branch
+  // below filters them out. (Listing the user's own sandboxes is the dedicated
+  // job of GET /api/training/projects.)
 
   // Org-level admins see all projects under their company
   const isOrgAdmin =

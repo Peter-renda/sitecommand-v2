@@ -382,7 +382,6 @@ type CompanyOption = { id: string; name: string; role: string; isCurrent: boolea
 export default function DashboardClient({ username, email, role, companyRole, userType, companyId }: { username: string; email: string; role: string; companyRole: string | null; userType: string; companyId: string | null }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [trainingMode, setTrainingMode] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [companyUsers, setCompanyUsers] = useState<Member[]>([]);
   const [scheduleProgressByProject, setScheduleProgressByProject] = useState<Record<string, number | null>>({});
@@ -576,19 +575,14 @@ export default function DashboardClient({ username, email, role, companyRole, us
     setLoading(false);
   }
 
-  // While the user is "in training mode" (set when they're inside a sandbox), the
-  // project list above is already scoped to their training projects server-side;
-  // this just surfaces the banner + exit control. Read once on mount.
+  // Legacy cleanup: older sandbox visits set an "sc_training_mode" cookie that used
+  // to scope the dashboard to training sandboxes. That behavior was removed (sandboxes
+  // are reached only from Training → Practice), so clear any lingering cookie.
   useEffect(() => {
-    setTrainingMode(document.cookie.split("; ").includes("sc_training_mode=1"));
+    if (document.cookie.split("; ").some((c) => c.startsWith("sc_training_mode="))) {
+      document.cookie = "sc_training_mode=; path=/; max-age=0; samesite=lax";
+    }
   }, []);
-
-  function exitTrainingMode() {
-    document.cookie = "sc_training_mode=; path=/; max-age=0; samesite=lax";
-    setTrainingMode(false);
-    setLoading(true);
-    loadProjects();
-  }
 
   async function loadUsers() {
     const res = await fetch("/api/users");
@@ -1163,23 +1157,6 @@ export default function DashboardClient({ username, email, role, companyRole, us
           );
         })()}
 
-        {/* Training mode banner — scoped to the user's sandboxes, with a way out */}
-        {trainingMode && (
-          <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
-            <p className="text-sm text-amber-900">
-              <span aria-hidden>🎓</span>{" "}
-              <span className="font-semibold">Training mode</span> — showing only your training
-              sandboxes, not your live projects.
-            </p>
-            <button
-              onClick={exitTrainingMode}
-              className="shrink-0 rounded-md border border-amber-400 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 transition-colors"
-            >
-              Exit training mode
-            </button>
-          </div>
-        )}
-
         {/* Projects section header */}
         <div className="flex items-end justify-between mb-5">
           <div>
@@ -1192,7 +1169,7 @@ export default function DashboardClient({ username, email, role, companyRole, us
               <span className="num">{formatCurrencyDisplay(totalValue)}</span> in flight
             </p>
           </div>
-          {canManageProjects && !trainingMode && (
+          {canManageProjects && (
             <button
               onClick={() => { loadUsers(); setShowModal(true); }}
               className="inline-flex items-center gap-1.5 px-3 py-2 bg-[color:var(--ink)] text-white text-[12px] font-semibold rounded-md hover:bg-gray-800 transition-colors"
