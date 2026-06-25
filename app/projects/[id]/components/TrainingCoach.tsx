@@ -61,6 +61,10 @@ type NarrationData = {
   audio: boolean;
   /** When audio is false, why — "no_key" | "tts_failed" | "upload_failed" | … */
   reason?: string;
+  /** HTTP status from ElevenLabs when reason === "tts_failed". */
+  status?: number;
+  /** Human-readable detail (ElevenLabs error / storage error) for failures. */
+  message?: string;
 };
 
 export default function TrainingCoach({
@@ -153,6 +157,8 @@ export default function TrainingCoach({
           url: typeof json.url === "string" ? json.url : undefined,
           audio: !!json.audio,
           reason: typeof json.reason === "string" ? json.reason : undefined,
+          status: typeof json.status === "number" ? json.status : undefined,
+          message: typeof json.message === "string" ? json.message : undefined,
         };
         cacheRef.current.set(day, nd);
         setData(nd);
@@ -383,12 +389,21 @@ export default function TrainingCoach({
                     to hear your coach. Here’s the message:
                   </p>
                 ) : (
-                  <p className="flex flex-wrap items-center gap-x-1.5">
-                    <span>Audio couldn’t be generated right now — here’s your coach’s message.</span>
-                    <button type="button" onClick={handleStart} className="font-medium underline">
-                      Try again
-                    </button>
-                  </p>
+                  <div className="space-y-1">
+                    <p className="flex flex-wrap items-center gap-x-1.5">
+                      <span>Audio couldn’t be generated right now — here’s your coach’s message.</span>
+                      <button type="button" onClick={handleStart} className="font-medium underline">
+                        Try again
+                      </button>
+                    </p>
+                    {(data.message || data.status) && (
+                      <p className="text-[10px] leading-snug text-amber-700/80">
+                        {data.reason === "tts_failed" ? "ElevenLabs" : "Server"}
+                        {data.status ? ` ${data.status}` : ""}
+                        {data.message ? `: ${data.message}` : ""}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}

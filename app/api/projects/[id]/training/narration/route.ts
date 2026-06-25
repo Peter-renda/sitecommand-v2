@@ -30,7 +30,20 @@ const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 const DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB";
 const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
 
-/** company_integrations → platform_settings → env, mirroring the STT route. */
+/** A non-blank, trimmed key — or undefined. Stops an empty/whitespace settings
+ *  row from being treated as a real key (which would shadow the Vercel env key
+ *  and either fail outright or silently disable audio). */
+function cleanKey(value: unknown): string | undefined {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Resolve the ElevenLabs key: company_integrations → platform_settings → the
+ * Vercel/host env var (ELEVENLABS_API_KEY), mirroring the STT route. Blank DB
+ * values are skipped so they never shadow the env key. `.maybeSingle()` (not
+ * `.single()`) so a missing row is a clean "no value", not a logged error.
+ */
 async function resolveElevenLabsKey(companyId: string | null): Promise<string | undefined> {
   let apiKey: string | undefined;
   try {
@@ -41,21 +54,45 @@ async function resolveElevenLabsKey(companyId: string | null): Promise<string | 
         .select("value")
         .eq("company_id", companyId)
         .eq("key", "ELEVENLABS_API_KEY")
-        .single();
-      apiKey = data?.value ?? undefined;
+        .maybeSingle();
+      apiKey = cleanKey(data?.value);
     }
     if (!apiKey) {
       const { data } = await supabase
         .from("platform_settings")
         .select("value")
         .eq("key", "ELEVENLABS_API_KEY")
-        .single();
-      apiKey = data?.value ?? undefined;
+        .maybeSingle();
+      apiKey = cleanKey(data?.value);
     }
   } catch {
     // DB unavailable — fall through to env var.
   }
-  return apiKey ?? process.env.ELEVENLABS_API_KEY;
+  return apiKey ?? cleanKey(process.env.ELEVENLABS_API_KEY);
+}
+
+/** Pull a concise human-readable message out of an ElevenLabs error body. The
+ *  API returns shapes like {detail:{status,message}} or {detail:"..."}. */
+function extractElevenLabsError(raw: string): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as {
+      detail?: unknown;
+      message?: unknown;
+    };
+    const detail = parsed.detail;
+    if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object") {
+      const msg = (detail as { message?: unknown }).message;
+      const status = (detail as { status?: unknown }).status;
+      if (typeof msg === "string") return msg;
+      if (typeof status === "string") return status;
+    }
+    if (typeof parsed.message === "string") return parsed.message;
+  } catch {
+    // Not JSON — return a trimmed snippet.
+  }
+  return raw.slice(0, 200) || null;
 }
 
 export async function POST(
@@ -164,13 +201,15 @@ export async function POST(
 
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => "");
-      console.error(`ElevenLabs TTS failed (${upstream.status}):`, detail.slice(0, 300));
+      const message = extractElevenLabsError(detail) || `ElevenLabs returned ${upstream.status}.`;
+      console.error(`ElevenLabs TTS failed (${upstream.status}):`, detail.slice(0, 500));
       return NextResponse.json({
         title,
         text,
         audio: false,
         reason: "tts_failed",
         status: upstream.status,
+        message,
         day: scheduledDay,
       });
     }
@@ -186,7 +225,7 @@ export async function POST(
         text,
         audio: false,
         reason: "upload_failed",
-        detail: uploadError.message,
+        message: uploadError.message,
         day: scheduledDay,
       });
     }
