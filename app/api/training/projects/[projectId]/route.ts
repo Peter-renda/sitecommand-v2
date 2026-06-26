@@ -84,13 +84,20 @@ export async function PATCH(
 
   // Recover an archived sandbox: clear archived_at so it returns to the active
   // "Your training projects" list. Bump the save checkpoint for a fresh indicator.
+  // .select() the row back and confirm archived_at really cleared, so a write that
+  // silently affected zero rows surfaces as an error instead of a false success.
   if (body.action === "recover") {
-    const { error } = await supabase
+    const { data: row, error } = await supabase
       .from("projects")
       .update({ archived_at: null, training_last_saved_at: new Date().toISOString() })
-      .eq("id", projectId);
+      .eq("id", projectId)
+      .select("id, archived_at")
+      .maybeSingle();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!row || row.archived_at !== null) {
+      return NextResponse.json({ error: "Failed to recover sandbox" }, { status: 500 });
+    }
     return NextResponse.json({ ok: true, recovered: true });
   }
 
@@ -147,14 +154,21 @@ export async function DELETE(
   // "Archived projects" list and can be recovered. This is a plain UPDATE, so —
   // unlike a hard DELETE — it can never be blocked by a non-cascading foreign key
   // and the sandbox reliably stays gone from the active list until recovered.
+  // .select() the row back and confirm archived_at is actually set, so a write
+  // that silently affected zero rows surfaces as an error instead of a false
+  // success (which would let the sandbox "reappear" on the next list load).
   if (!permanent) {
-    const { error } = await supabase
+    const { data: row, error } = await supabase
       .from("projects")
       .update({ archived_at: new Date().toISOString() })
       .eq("id", projectId)
-      .is("archived_at", null);
+      .select("id, archived_at")
+      .maybeSingle();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!row || !row.archived_at) {
+      return NextResponse.json({ error: "Failed to archive sandbox" }, { status: 500 });
+    }
     return NextResponse.json({ ok: true, archived: true });
   }
 
