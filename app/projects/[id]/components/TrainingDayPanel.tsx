@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { SimRole } from "@/lib/simulation-constants";
 import {
   getTrainingSchedule,
@@ -295,6 +295,33 @@ export default function TrainingDayPanel({
     if (schedule.length === 0) return;
     writeString(`sc-training-active-day-${projectId}`, String(currentDay));
   }, [currentDay, schedule.length, projectId]);
+
+  // Reconcile against the authoritative training_day on mount, with a no-store
+  // fetch, so the saved day always wins on reopen — even if the server-rendered
+  // initialDay was served stale by any cache. Only ever bumps *forward* to the
+  // server's value: a legitimate in-session advance (which already persisted)
+  // is never pulled back, and a stale low initialDay can never strand the
+  // trainee on Day 1.
+  const reconciledRef = useRef(false);
+  useEffect(() => {
+    if (reconciledRef.current || schedule.length === 0) return;
+    reconciledRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/training/projects/${projectId}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const serverDay = clampTrainingDay(schedule, Number(data.training_day) || 0);
+        if (!cancelled) setCurrentDay((prev) => (serverDay > prev ? serverDay : prev));
+      } catch {
+        /* keep the server-rendered value */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, schedule]);
 
   // No schedule for this role yet — render nothing.
   if (schedule.length === 0) return null;

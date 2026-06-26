@@ -655,30 +655,45 @@ function ReviewsPanel({ projectId }: { projectId: string }) {
             const done = Array.isArray(r.completed) ? r.completed.length : 0;
             const miss = Array.isArray(r.missed) ? r.missed.length : 0;
             return (
-              <a
+              <div
                 key={r.id}
-                href={`/training/review?project=${projectId}&day=${r.day}`}
-                target="_blank"
-                rel="noopener noreferrer"
                 className="flex items-center justify-between gap-3 rounded-md border border-gray-100 bg-gray-50/60 px-3 py-2 transition-colors hover:border-gray-300 hover:bg-white"
               >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-gray-800">{r.phase}</p>
-                  <p className="mt-0.5 text-[11px] text-gray-500">
-                    {done} completed · {miss} missed
-                  </p>
-                </div>
-                <span className="flex shrink-0 items-center gap-2">
+                <a
+                  href={`/training/review?project=${projectId}&day=${r.day}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group/review flex min-w-0 flex-1 items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-800">{r.phase}</p>
+                    <p className="mt-0.5 text-[11px] text-gray-500">
+                      {done} completed · {miss} missed
+                    </p>
+                  </div>
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
                       r.closed_out ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
                     }`}
                   >
                     {r.closed_out ? "Closed out" : "Open"}
                   </span>
-                  <span className="text-xs font-medium text-gray-400">View →</span>
-                </span>
-              </a>
+                </a>
+                {/* Opens the review as a stored PDF in a new tab (generated + saved
+                    on first open, re-served from storage thereafter). */}
+                <a
+                  href={`/api/training/projects/${projectId}/reviews/${r.id}/pdf`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open this Job Review as a PDF"
+                  className="flex shrink-0 items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:border-gray-300 hover:text-gray-900"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 4H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V18a2 2 0 01-2 2z" />
+                  </svg>
+                  PDF ↗
+                </a>
+              </div>
             );
           })}
         </div>
