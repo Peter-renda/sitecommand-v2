@@ -1,17 +1,52 @@
 /**
  * Training → Practice: manage a "SiteCommand Training" sandbox project.
  *
+ * GET    /api/training/projects/[projectId] — read the sandbox's authoritative
+ *        in-sim day (training_day). The Day panel reconciles against this on
+ *        mount so a stale server-render can never strand the trainee on Day 1.
  * PATCH  /api/training/projects/[projectId] — advance the in-sim day
  *        (training_day) as the trainee completes each day in the Day panel.
  * DELETE /api/training/projects/[projectId] — permanently removes a sandbox the
  *        current user launched (cascades to all of its project data).
  *
- * Both are owner-only and training-flagged-projects-only (never a real project).
+ * All are owner-only and training-flagged-projects-only (never a real project).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
+
+// Always read live — progress must never be served from a cache.
+export const dynamic = "force-dynamic";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> },
+) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { projectId } = await params;
+  const supabase = getSupabase();
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, is_training, training_owner_id, training_day, training_last_saved_at")
+    .eq("id", projectId)
+    .maybeSingle();
+
+  if (!project || !project.is_training) {
+    return NextResponse.json({ error: "Sandbox project not found" }, { status: 404 });
+  }
+  if (project.training_owner_id !== session.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  return NextResponse.json({
+    training_day: project.training_day ?? 0,
+    training_last_saved_at: project.training_last_saved_at ?? null,
+  });
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -49,15 +84,23 @@ export async function PATCH(
   }
 
   // Bump the save checkpoint too so the "All changes saved" indicator reflects
-  // the day change.
-  const { error } = await supabase
+  // the day change. .select() back the persisted value so a write that silently
+  // affected zero rows surfaces as an error instead of a false success (the same
+  // hardening the DELETE handler uses) — this is what guarantees progress is
+  // actually saved, not just optimistically advanced in the UI.
+  const { data: saved, error } = await supabase
     .from("projects")
     .update({ training_day: trainingDay, training_last_saved_at: new Date().toISOString() })
-    .eq("id", projectId);
+    .eq("id", projectId)
+    .select("training_day")
+    .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!saved) {
+    return NextResponse.json({ error: "Failed to save day progress" }, { status: 500 });
+  }
 
-  return NextResponse.json({ training_day: trainingDay });
+  return NextResponse.json({ training_day: saved.training_day });
 }
 
 export async function DELETE(

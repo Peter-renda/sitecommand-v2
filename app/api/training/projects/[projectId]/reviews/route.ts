@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
+import { storePhaseReviewPdf } from "@/lib/training-review-pdf";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Confirms the project exists, is a training sandbox, and is owned by the caller.
@@ -84,12 +85,37 @@ export async function PATCH(
   const phase = String(body.phase || "").slice(0, 120).trim();
   if (!phase) return NextResponse.json({ error: "Phase is required" }, { status: 400 });
 
-  const { error } = await supabase
+  const closedOut = body.closedOut !== false;
+
+  const { data: updated, error } = await supabase
     .from("training_phase_reviews")
-    .update({ closed_out: body.closedOut !== false, updated_at: new Date().toISOString() })
+    .update({ closed_out: closedOut, updated_at: new Date().toISOString() })
     .eq("project_id", projectId)
-    .eq("phase", phase);
+    .eq("phase", phase)
+    .select("id, phase, review, highlights, resolutions, completed, missed, closed_out")
+    .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Re-render the stored PDF so it reflects the caught-up (auto-completed) state.
+  // Best-effort — the close-out itself already succeeded above.
+  if (updated?.id) {
+    const { data: project } = await supabase
+      .from("projects")
+      .select("name")
+      .eq("id", projectId)
+      .maybeSingle();
+    await storePhaseReviewPdf(supabase, projectId, updated.id, {
+      projectName: project?.name || "Training Project",
+      phase: updated.phase || phase,
+      review: updated.review || "",
+      highlights: Array.isArray(updated.highlights) ? updated.highlights : [],
+      resolutions: Array.isArray(updated.resolutions) ? updated.resolutions : [],
+      completed: Array.isArray(updated.completed) ? updated.completed : [],
+      missed: Array.isArray(updated.missed) ? updated.missed : [],
+      closedOut: !!updated.closed_out,
+    });
+  }
+
   return NextResponse.json({ ok: true });
 }

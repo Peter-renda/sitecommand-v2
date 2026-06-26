@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
 import { generatePhaseReview, type PhaseTask } from "@/lib/training-review";
+import { storePhaseReviewPdf } from "@/lib/training-review-pdf";
 import type { SimRole } from "@/lib/simulation-constants";
 
 export const maxDuration = 120;
@@ -109,21 +110,40 @@ export async function POST(
   // or a failed save would be swallowed silently and the review would never show
   // up in the Practice list.
   try {
-    const { error: saveError } = await supabase.from("training_phase_reviews").upsert(
-      {
-        project_id: projectId,
+    const { data: savedRow, error: saveError } = await supabase
+      .from("training_phase_reviews")
+      .upsert(
+        {
+          project_id: projectId,
+          phase,
+          day,
+          review: result.review,
+          highlights: result.highlights,
+          resolutions: result.resolutions,
+          completed,
+          missed,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "project_id,phase" },
+      )
+      .select("id, closed_out")
+      .maybeSingle();
+    if (saveError) console.error("Failed to persist training phase review:", saveError.message);
+
+    // Pre-render + store the PDF rendition so the "Open PDF" link on the Practice
+    // list is ready without waiting for a first-click generation. Best-effort.
+    if (savedRow?.id) {
+      await storePhaseReviewPdf(supabase, projectId, savedRow.id, {
+        projectName: project.name || "Training Project",
         phase,
-        day,
         review: result.review,
         highlights: result.highlights,
         resolutions: result.resolutions,
         completed,
         missed,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "project_id,phase" },
-    );
-    if (saveError) console.error("Failed to persist training phase review:", saveError.message);
+        closedOut: !!savedRow.closed_out,
+      });
+    }
   } catch (e) {
     console.error("Failed to persist training phase review:", e);
   }
