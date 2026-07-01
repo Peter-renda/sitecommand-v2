@@ -1713,6 +1713,25 @@ The **Training → Guides** section (left-nav tree, alongside Practice and Video
 - `app/training/TrainingNav.tsx` — Guides node links to `/training/guides`.
 - `app/training/guides/page.tsx` (passes `canManage`/`hasCompany`) + `GuidesClient.tsx` (TOC, "Assigned to you", upload form, the `AssignModal`, and the `BestPracticesSection`).
 
+## Training – Lessons (Workflow & Concept Curriculum)
+
+### Overview
+**Training → Lessons** is a hand-authored curriculum that teaches new project managers both **how to run SiteCommand's workflows** (RFIs, Submittals, Buyout, Change Events, Commitments, Cost & Billing, Field Ops, Closeout) and **the construction concepts those workflows assume** (reading drawings, RCP, MEP systems, CSI MasterFormat, long-lead procurement, contract types, retainage/lien waivers, RFI vs. Submittal). It is distinct from Best Practice Templates (company-specific policy that feeds the AI) and from Practice (the hands-on sandbox) — Lessons is the read-and-learn curriculum that prepares a user for both.
+
+### Content Model
+- Lesson content is **static and curated**, not user-editable or database-stored — it lives in `lib/training-lessons.ts` (client-safe, imported by both the page and any future nav wiring). Each `Lesson` has an `id`, a `track` (`"workflow" | "concept"`), a `category` (groups lessons within a track, e.g. "Requests for Information", "Building Systems"), `title`, `summary`, estimated `minutes`, optional `keyTerms`, a `body` of ordered content blocks (`heading` + `paragraphs`/`bullets`/`ordered`), optional `relatedLessonIds` (cross-links, rendered as chips), and optional `links` (e.g. a "Practice this in your training sandbox" link to `/training/practice`).
+- 16 lessons ship today: 8 **Workflows** (RFIs, Submittals, Buyout, Change Events/PCOs/Change Orders, Commitments, Schedule of Values & Pay Applications, Daily Logs/Meetings/Look-Ahead, Punch List & Closeout) and 8 **Concepts** (Reading Drawings, RCP, MEP Systems, CSI MasterFormat, Long-Lead Items, Contract Types, Retainage & Lien Waivers, RFI vs. Submittal).
+- Helpers: `getLesson(id)`, `lessonsByTrack(track)`, `lessonCategories(track)`, `TRACK_LABELS`.
+
+### Progress Tracking
+- Any logged-in user (company membership not required) can browse lessons and mark them complete — per-user, not company-scoped.
+- Schema: `training_lesson_progress` (migration `173_training_lesson_progress.sql`) — `user_id`, `lesson_id` (free-text key matching `Lesson.id`, not a foreign key since lessons aren't DB rows), `completed_at`, `UNIQUE(user_id, lesson_id)`.
+- API: `GET /api/training/lessons/progress` → `{ completedIds }`. `POST /api/training/lessons/progress` body `{ lessonId, completed }` → upserts or deletes the row, returns the refreshed `{ completedIds }`.
+
+### UI (SiteCommand)
+- `app/training/TrainingNav.tsx` — **Lessons** node links to `/training/lessons`.
+- `app/training/lessons/page.tsx` (session gate only) + `LessonsClient.tsx` — a docs-browser layout: left pane has Workflows/Concepts track tabs plus a category-grouped lesson list with per-lesson completion checkmarks and an overall progress bar; right pane renders the selected lesson (key terms callout, body blocks, related-lesson chips, external links, Mark Complete toggle, prev/next navigation within the active track).
+
 ## Training – Best Practice Templates (Company Standards that feed the AI)
 
 ### Overview
