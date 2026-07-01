@@ -15,6 +15,7 @@ import {
   type RecurringCadenceGroup,
   type RecurringFrequency,
 } from "@/lib/training-schedule";
+import { INBOX_SENDERS, inboxEmailsForDay } from "@/lib/training-inbox";
 
 /**
  * Day-by-day task panel shown in a training sandbox. It surfaces the tasks
@@ -344,6 +345,20 @@ export default function TrainingDayPanel({
     0,
   );
 
+  // Inbound emails (owner / vendors / accounting) that landed today — delivered
+  // server-side by the day-advance PATCH; this hint points the trainee at them.
+  const todaysMail = inboxEmailsForDay(currentDay);
+  const mailSenders = Array.from(
+    new Set(
+      todaysMail
+        .map((m) => {
+          const s = INBOX_SENDERS[m.senderKey];
+          return s ? (s.internal ? "Accounting" : s.company) : "";
+        })
+        .filter(Boolean),
+    ),
+  ).join(", ");
+
   // Advancing to tomorrow crosses into a new phase → today wraps a phase, so its
   // Job Review is due.
   const nextPhase = hasNextDay ? phaseForDay(schedule, currentDay + 1) : currentPhase;
@@ -489,6 +504,19 @@ export default function TrainingDayPanel({
               Review how you ran that phase, then close it out to catch up. →
             </p>
           </button>
+        )}
+
+        {todaysMail.length > 0 && (
+          <a
+            href={`/projects/${projectId}/emails`}
+            className="mb-4 block rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 transition-colors hover:bg-blue-100"
+          >
+            <p className="text-xs font-semibold text-blue-900">
+              📬 {todaysMail.length === 1 ? "New email" : `${todaysMail.length} new emails`} in your
+              inbox
+            </p>
+            <p className="mt-0.5 text-[11px] text-blue-700">From {mailSenders} — open Emails →</p>
+          </a>
         )}
 
         {isFirstDay && (

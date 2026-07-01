@@ -28,6 +28,13 @@ import {
   buildBuyoutOutreachHtml,
   buildSeededBidResponseHtml,
 } from "@/lib/training-emails";
+import {
+  INBOX_SENDERS,
+  TRAINING_INBOX_EMAILS,
+  inboxSenderEmail,
+  inboxConversationId,
+  type InboxCtx,
+} from "@/lib/training-inbox";
 
 type SeedOpts = {
   projectId: string;
@@ -55,6 +62,7 @@ const TEAM: { first: string; last: string; title: string; phone: string }[] = [
   { first: "Marcus", last: "Bennett", title: "Project Executive", phone: "(404) 555-0123" },
   { first: "Frank", last: "Russo", title: "Superintendent", phone: "(404) 555-0156" },
   { first: "Luis", last: "Ortega", title: "Assistant Superintendent", phone: "(404) 555-0171" },
+  { first: "Janet", last: "Kim", title: "Accounting Manager", phone: "(404) 555-0195" },
 ];
 
 /** Per-project-type flavor for the handoff email so it reads like a real job. */
@@ -346,6 +354,141 @@ export async function seedTrainingProjectManager(
     pmFirst,
     projectLabel: label,
   });
+
+  // 4) External inbox senders — the owner's rep and the vendors who will email
+  // the trainee as days advance (see lib/training-inbox.ts). Seeded into the
+  // Directory with email + phone so the trainee can reach out to them.
+  // (Internal senders like the accounting manager are part of TEAM above.)
+  const externalSenders = Object.values(INBOX_SENDERS).filter((s) => !s.internal);
+  const externalContacts = externalSenders.map((s) => ({
+    project_id: projectId,
+    type: "user" as const,
+    first_name: s.first,
+    last_name: s.last,
+    email: inboxSenderEmail(s, domain),
+    phone: s.phone,
+    company: s.company,
+    job_title: s.title,
+  }));
+  await supabase.from("directory_contacts").insert(externalContacts);
+}
+
+/**
+ * Delivers every scheduled inbound email (lib/training-inbox.ts) whose day is
+ * ≤ the sandbox's current in-sim day and that hasn't been delivered yet.
+ * Called from the day-advance PATCH so mail "arrives" as the trainee completes
+ * days; the ≤ + catch-up shape makes it idempotent (dedupe by deterministic
+ * graph_conversation_id) and self-healing if a delivery was ever missed.
+ * Best-effort — callers should not let a failure block the day advance.
+ */
+export async function deliverTrainingInboxThroughDay(
+  supabase: SupabaseClient,
+  opts: { projectId: string; day: number },
+): Promise<void> {
+  const due = TRAINING_INBOX_EMAILS.filter((e) => e.day <= opts.day);
+  if (due.length === 0) return;
+
+  // Which inbox threads already exist for this project?
+  const { data: existing } = await supabase
+    .from("project_email_threads")
+    .select("graph_conversation_id")
+    .eq("project_id", opts.projectId)
+    .like("graph_conversation_id", "training-inbox-%");
+  const have = new Set(
+    ((existing ?? []) as { graph_conversation_id: string }[]).map(
+      (r) => r.graph_conversation_id,
+    ),
+  );
+  const missing = due.filter((e) => !have.has(inboxConversationId(e.slug)));
+  if (missing.length === 0) return;
+
+  // Resolve the PM + GC company context (same shape as the launch seeding).
+  const { data: project } = await supabase
+    .from("projects")
+    .select("training_owner_id, training_project_type, company_id")
+    .eq("id", opts.projectId)
+    .maybeSingle();
+  if (!project?.training_owner_id) return;
+
+  let companyName = DEFAULT_COMPANY;
+  if (project.company_id) {
+    const { data: company } = await supabase
+      .from("companies")
+      .select("name")
+      .eq("id", project.company_id)
+      .maybeSingle();
+    if (company?.name) companyName = company.name;
+  }
+  const domain = emailDomain(companyName);
+
+  const { data: owner } = await supabase
+    .from("users")
+    .select("first_name, last_name, email, username")
+    .eq("id", project.training_owner_id)
+    .maybeSingle();
+  const pmName =
+    [owner?.first_name, owner?.last_name].filter(Boolean).join(" ").trim() ||
+    owner?.username ||
+    "Project Manager";
+  const pmEmail = owner?.email || emailFor("project", "manager", domain);
+  const pmFirst = (owner?.first_name || pmName).split(/\s+/)[0] || "there";
+
+  const ctx: InboxCtx = {
+    pmFirst,
+    pmName,
+    projectLabel: projectTypeLabel(project.training_project_type ?? ""),
+    companyName,
+  };
+
+  // Older scheduled days deliver first; stagger sent_at by a minute so the
+  // thread list orders deterministically when several land in one catch-up.
+  const sorted = [...missing].sort((a, b) => a.day - b.day);
+  const baseMs = Date.now() - sorted.length * 60_000;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const e = sorted[i];
+    const sender = INBOX_SENDERS[e.senderKey];
+    if (!sender) continue;
+    const senderName = `${sender.first} ${sender.last}`;
+    const senderAddr = inboxSenderEmail(sender, domain);
+    const convId = inboxConversationId(e.slug);
+    const bodyHtml = e.html(ctx);
+    const bodyText = htmlToText(bodyHtml);
+    const sentIso = new Date(baseMs + i * 60_000).toISOString();
+
+    const { data: thread } = await supabase
+      .from("project_email_threads")
+      .insert({
+        project_id: opts.projectId,
+        graph_conversation_id: convId,
+        subject: e.subject,
+        participants: [senderName, pmName],
+        latest_message_preview: bodyText.slice(0, 280),
+        latest_received_at: sentIso,
+        message_count: 1,
+        linked_by: project.training_owner_id,
+        linked_at: sentIso,
+      })
+      .select("id")
+      .single();
+    if (!thread?.id) continue;
+
+    await supabase.from("project_email_messages").insert({
+      thread_id: thread.id,
+      project_id: opts.projectId,
+      provider_message_id: `${convId}-1`,
+      from_name: senderName,
+      from_address: senderAddr,
+      to_recipients: [{ name: pmName, address: pmEmail }],
+      cc_recipients: [],
+      subject: e.subject,
+      sent_at: sentIso,
+      body_text: bodyText,
+      body_html: bodyHtml,
+      snippet: bodyText.slice(0, 200),
+      synced_at: sentIso,
+    });
+  }
 }
 
 function tradeSlug(trade: string): string {

@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
+import { deliverTrainingInboxThroughDay } from "@/lib/training-seed";
 
 // Always read live — progress must never be served from a cache.
 export const dynamic = "force-dynamic";
@@ -121,6 +122,16 @@ export async function PATCH(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!saved) {
     return NextResponse.json({ error: "Failed to save day progress" }, { status: 500 });
+  }
+
+  // Deliver any scheduled inbound emails (owner / vendors / accounting) whose
+  // day has now arrived — see lib/training-inbox.ts. Best-effort: a delivery
+  // hiccup must never block the day advance (the ≤-day catch-up in the
+  // deliverer means a missed batch lands on the next advance anyway).
+  try {
+    await deliverTrainingInboxThroughDay(supabase, { projectId, day: trainingDay });
+  } catch {
+    /* best-effort */
   }
 
   return NextResponse.json({ training_day: saved.training_day });
