@@ -1713,15 +1713,20 @@ The **Training → Guides** section (left-nav tree, alongside Practice and Video
 - `app/training/TrainingNav.tsx` — Guides node links to `/training/guides`.
 - `app/training/guides/page.tsx` (passes `canManage`/`hasCompany`) + `GuidesClient.tsx` (TOC, "Assigned to you", upload form, the `AssignModal`, and the `BestPracticesSection`).
 
-## Training – Lessons (Workflow & Concept Curriculum)
+## Training – Lessons (Six-Track PM Curriculum)
 
 ### Overview
-**Training → Lessons** is a hand-authored curriculum that teaches new project managers both **how to run SiteCommand's workflows** (RFIs, Submittals, Buyout, Change Events, Commitments, Cost & Billing, Field Ops, Closeout) and **the construction concepts those workflows assume** (reading drawings, RCP, MEP systems, CSI MasterFormat, long-lead procurement, contract types, retainage/lien waivers, RFI vs. Submittal). It is distinct from Best Practice Templates (company-specific policy that feeds the AI) and from Practice (the hands-on sandbox) — Lessons is the read-and-learn curriculum that prepares a user for both.
+**Training → Lessons** is a hand-authored curriculum that teaches new project managers **how to run SiteCommand's workflows** (RFIs, Submittals, Buyout, Change Events, Commitments, Cost & Billing, Field Ops, Closeout, plus Budget, Scheduling, Permits, Quality, Safety, Risk), **the construction concepts those workflows assume** (reading drawings/specs, RCP, MEP, CSI, lifecycle, contract types, retainage), and four deeper tracks built from the PM learning curriculum: **Building the Work** (means & methods in build sequence), **Site & Civil** (site analysis, grading, E&S/SWPPP, stormwater/LID, utilities, streets/parking, ADA routes, landscape, wetlands, ESAs, entitlements, design-side PM), **Contracts & Commercial** (delivery methods, AIA documents, key clauses, subcontract administration, liens/bonds, claims), and **Professional Skills** (financial literacy, estimating, leadership, communication, codes, ethics). It is distinct from Best Practice Templates (company-specific policy that feeds the AI) and from Practice (the hands-on sandbox) — Lessons is the read-and-learn curriculum that prepares a user for both.
 
 ### Content Model
-- Lesson content is **static and curated**, not user-editable or database-stored — it lives in `lib/training-lessons.ts` (client-safe, imported by both the page and any future nav wiring). Each `Lesson` has an `id`, a `track` (`"workflow" | "concept"`), a `category` (groups lessons within a track, e.g. "Requests for Information", "Building Systems"), `title`, `summary`, estimated `minutes`, optional `keyTerms`, a `body` of ordered content blocks (`heading` + `paragraphs`/`bullets`/`ordered`), optional `relatedLessonIds` (cross-links, rendered as chips), and optional `links` (e.g. a "Practice this in your training sandbox" link to `/training/practice`).
-- 16 lessons ship today: 8 **Workflows** (RFIs, Submittals, Buyout, Change Events/PCOs/Change Orders, Commitments, Schedule of Values & Pay Applications, Daily Logs/Meetings/Look-Ahead, Punch List & Closeout) and 8 **Concepts** (Reading Drawings, RCP, MEP Systems, CSI MasterFormat, Long-Lead Items, Contract Types, Retainage & Lien Waivers, RFI vs. Submittal).
+- Lesson content is **static and curated**, not user-editable or database-stored. Types + helpers + the original 16 core lessons live in `lib/training-lessons.ts`; the newer content is split by track into `lib/training-lessons-process.ts` (workflow/concept additions), `-technical.ts`, `-sitework.ts`, `-commercial.ts`, `-foundations.ts` — each importing only *types* from the main file (no runtime cycle) and aggregated there into `LESSONS`. Each `Lesson` has an `id`, a `track` (`"workflow" | "concept" | "technical" | "sitework" | "commercial" | "foundations"`), a `category` (groups lessons within a track), `title`, `summary`, estimated `minutes`, optional `keyTerms`, a `body` of ordered content blocks (`heading` + `paragraphs`/`bullets`/`ordered`), optional `relatedLessonIds` (cross-links, rendered as chips), and optional `links` (e.g. a "Practice this in your training sandbox" link to `/training/practice`).
+- 59 lessons ship today: 14 **Workflows**, 10 **Concepts**, 11 **Building the Work** (sitework → foundations/concrete → steel/framing → envelope → MEP/fire → finishes/elevators-low-voltage → testing & commissioning), 12 **Site & Civil**, 6 **Contracts & Commercial**, 6 **Professional Skills**. Id prefixes by track: `wf-`, `cn-`, `tech-`, `sc-`, `com-`, `pf-`.
 - Helpers: `getLesson(id)`, `lessonsByTrack(track)`, `lessonCategories(track)`, `TRACK_LABELS`.
+
+### Simulation Tie-In (Recommended Lessons per Day)
+- `TrainingDay` in `lib/training-schedule.ts` carries optional `lessonIds` — every scheduled PM day (Days 1-7, 14, 28, 42, 56, 70) lists 3-4 lessons matched to that day's task batch (e.g. Day 14 "Foundations & Site Utilities" → grading plans, sitework, foundations, concrete).
+- `TrainingDayPanel` resolves them via `getLesson` (unknown ids silently dropped) and renders a green **📖 Recommended lessons** card under the task list, deep-linking each to `/training/lessons?lesson=<id>` in a new tab.
+- `LessonsClient` reads the `?lesson=` query param on mount (from `window.location`, avoiding a Suspense boundary) and preselects that lesson + its track.
 
 ### Progress Tracking
 - Any logged-in user (company membership not required) can browse lessons and mark them complete — per-user, not company-scoped.
@@ -1730,7 +1735,7 @@ The **Training → Guides** section (left-nav tree, alongside Practice and Video
 
 ### UI (SiteCommand)
 - `app/training/TrainingNav.tsx` — **Lessons** node links to `/training/lessons`.
-- `app/training/lessons/page.tsx` (session gate only) + `LessonsClient.tsx` — a docs-browser layout: left pane has Workflows/Concepts track tabs plus a category-grouped lesson list with per-lesson completion checkmarks and an overall progress bar; right pane renders the selected lesson (key terms callout, body blocks, related-lesson chips, external links, Mark Complete toggle, prev/next navigation within the active track).
+- `app/training/lessons/page.tsx` (session gate only) + `LessonsClient.tsx` — a docs-browser layout: left pane has a 2-column grid of six track tabs (Workflows / Concepts / Building the Work / Site & Civil / Contracts & Commercial / Professional Skills) plus a category-grouped lesson list with per-lesson completion checkmarks and an overall progress bar; right pane renders the selected lesson (key terms callout, body blocks, related-lesson chips, external links, Mark Complete toggle, prev/next navigation within the active track).
 
 ## Training – Best Practice Templates (Company Standards that feed the AI)
 

@@ -45,6 +45,19 @@ export default function LessonsClient() {
     void load();
   }, [load]);
 
+  // Deep link: /training/lessons?lesson=<id> preselects a lesson (used by the
+  // training sandbox Day panel's "Recommended lessons" links). Read from
+  // window.location on mount to avoid a Suspense boundary for useSearchParams.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("lesson");
+    if (!id) return;
+    const l = getLesson(id);
+    if (l) {
+      setTrack(l.track);
+      setSelectedId(l.id);
+    }
+  }, []);
+
   const lesson: Lesson | undefined = getLesson(selectedId);
   const trackLessons = useMemo(() => lessonsByTrack(track), [track]);
   const categories = useMemo(() => lessonCategories(track), [track]);
@@ -97,8 +110,9 @@ export default function LessonsClient() {
     <div>
       <h1 className="text-2xl font-semibold text-gray-900">Lessons</h1>
       <p className="mt-1 text-sm text-gray-500 max-w-2xl">
-        Learn the SiteCommand workflows and the construction concepts behind them — built for
-        project managers new to the role.
+        Learn the SiteCommand workflows, the construction concepts behind them, and the deeper
+        curriculum — means &amp; methods, site &amp; civil, contracts, and professional skills —
+        built for project managers new to the role.
       </p>
 
       <div className="mt-2 flex items-center gap-2">
@@ -116,12 +130,12 @@ export default function LessonsClient() {
       <div className="mt-5 flex flex-col lg:flex-row gap-5">
         {/* Left: track tabs + grouped lesson list */}
         <div className="lg:w-72 shrink-0">
-          <div className="flex rounded-lg border border-gray-200 bg-white p-0.5 text-sm">
+          <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-gray-200 bg-white p-0.5 text-[13px]">
             {(Object.keys(TRACK_LABELS) as LessonTrack[]).map((t) => (
               <button
                 key={t}
                 onClick={() => selectTrack(t)}
-                className={`flex-1 rounded-md px-3 py-1.5 font-medium transition-colors ${
+                className={`rounded-md px-2 py-1.5 font-medium transition-colors ${
                   track === t ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-900"
                 }`}
               >

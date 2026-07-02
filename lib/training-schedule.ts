@@ -33,6 +33,11 @@ export type TrainingDay = {
   /** Original schedule timeframe (e.g. "Week 1", "Months 2-4"). */
   timeframe: string;
   tasks: TrainingTask[];
+  /**
+   * Lessons (Training → Lessons ids) recommended alongside this day's tasks.
+   * The Day panel renders them as deep links (/training/lessons?lesson=<id>).
+   */
+  lessonIds?: string[];
 };
 
 /**
@@ -46,6 +51,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 1,
     phase: "Pre-Construction & Buyout",
     timeframe: "Week 1",
+    lessonIds: ["cn-lifecycle", "cn-drawings", "wf-rfis", "wf-budget"],
     tasks: [
       {
         task: "Meet with preconstruction team to review bid results and develop short-list of vendors by trade",
@@ -83,6 +89,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 2,
     phase: "Pre-Construction & Buyout",
     timeframe: "Week 2",
+    lessonIds: ["wf-buyout", "cn-longlead", "pf-estimating"],
     tasks: [
       {
         task: "Level (scope-check) bids by trade; prepare bid comparison sheets and identify scope gaps",
@@ -120,6 +127,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 3,
     phase: "Pre-Construction & Buyout",
     timeframe: "Week 3",
+    lessonIds: ["wf-commitments", "wf-submittals", "cn-specs", "com-documents"],
     tasks: [
       {
         task: "Award subcontracts for foundation, structure / framing, and underground utilities",
@@ -163,6 +171,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 4,
     phase: "Pre-Construction & Buyout",
     timeframe: "Week 4",
+    lessonIds: ["wf-permits", "com-sub-admin", "cn-rfi-vs-submittal"],
     tasks: [
       {
         task: "Continue subcontract awards (sitework, concrete, plumbing, electrical, mechanical)",
@@ -194,6 +203,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 5,
     phase: "Pre-Construction & Buyout",
     timeframe: "Week 5",
+    lessonIds: ["sc-site-analysis", "sc-esc", "sc-utilities"],
     tasks: [
       {
         task: "Mobilize site: field office, fencing, erosion control / SWPPP, staging and laydown",
@@ -219,6 +229,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 6,
     phase: "Pre-Construction & Buyout",
     timeframe: "Week 6",
+    lessonIds: ["wf-scheduling", "wf-sov-payapp", "wf-quality", "com-liens-bonds"],
     tasks: [
       {
         task: "Develop and baseline the CPM schedule with the superintendent; distribute to subs",
@@ -256,6 +267,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 7,
     phase: "Pre-Construction & Buyout",
     timeframe: "Week 8",
+    lessonIds: ["pf-leadership", "pf-communication", "wf-risk"],
     tasks: [
       {
         task: "Complete buyout — target 90-100% bought out before structure begins",
@@ -275,6 +287,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 14,
     phase: "Foundations & Site Utilities",
     timeframe: "Months 2-4",
+    lessonIds: ["sc-grading", "tech-sitework", "tech-foundations", "tech-concrete"],
     tasks: [
       {
         task: "Install underground utilities: storm, sanitary, water, and dry utilities",
@@ -348,6 +361,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 28,
     phase: "Vertical Structure / Framing",
     timeframe: "Months 4-9",
+    lessonIds: ["tech-steel", "tech-framing", "wf-change-events", "com-clauses"],
     tasks: [
       {
         task: "Erect vertical structure / wood framing floor-by-floor per sequence",
@@ -415,6 +429,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 42,
     phase: "Envelope / MEP Rough-In / Dry-In",
     timeframe: "Months 7-13",
+    lessonIds: ["tech-envelope", "tech-mep-coordination", "tech-fire"],
     tasks: [
       {
         task: "Complete building dry-in: roofing, windows, exterior doors, flashing, and sealants",
@@ -476,6 +491,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 56,
     phase: "Interior Finishes",
     timeframe: "Months 11-18",
+    lessonIds: ["tech-finishes", "sc-pedestrian-ada", "tech-vertical-lv"],
     tasks: [
       {
         task: "Prime and paint walls, ceilings, and trim",
@@ -549,6 +565,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 70,
     phase: "Site Completion, Commissioning & Closeout",
     timeframe: "Months 16-20",
+    lessonIds: ["wf-punch-closeout", "tech-testing-cx", "sc-landscape", "cn-retainage"],
     tasks: [
       {
         task: "Complete sitework: paving, curbs, sidewalks, hardscape, striping, and signage",

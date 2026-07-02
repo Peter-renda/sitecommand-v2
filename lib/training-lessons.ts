@@ -1,17 +1,39 @@
 /**
  * Training → Lessons: a hand-authored curriculum that teaches new project
- * managers (a) the core SiteCommand workflows (RFIs, Submittals, Buyout, …)
- * and (b) the underlying construction concepts those workflows assume you
- * already know (RCP, MEP, CSI divisions, contract types, …).
+ * managers (a) the core SiteCommand workflows (RFIs, Submittals, Buyout, …),
+ * (b) the underlying construction concepts those workflows assume you
+ * already know (RCP, MEP, CSI divisions, contract types, …), and (c) four
+ * deeper tracks built from the PM learning curriculum: Building the Work
+ * (means & methods in build sequence), Site & Civil (site planning, grading,
+ * SWPPP, stormwater, ADA routes, landscape), Contracts & Commercial (AIA
+ * documents, clauses, liens, claims), and Professional Skills (financial
+ * literacy, estimating, leadership, codes, ethics).
  *
  * This module is client-safe (no server-only imports) — it's the single
  * source of truth for both the Lessons page (app/training/lessons) and the
  * left-nav tree (TrainingNav.tsx). Content is static/curated, not
  * user-editable; per-user completion state is tracked separately in
  * training_lesson_progress (see app/api/training/lessons/progress).
+ *
+ * Content is split by track to keep files reviewable: this file holds the
+ * original core lessons + types/helpers; the sibling training-lessons-*.ts
+ * files hold the newer tracks and are aggregated into LESSONS below. Those
+ * files import only types from here, so there is no runtime import cycle.
  */
 
-export type LessonTrack = "workflow" | "concept";
+import { PROCESS_LESSONS } from "./training-lessons-process";
+import { TECHNICAL_LESSONS } from "./training-lessons-technical";
+import { SITEWORK_LESSONS } from "./training-lessons-sitework";
+import { COMMERCIAL_LESSONS } from "./training-lessons-commercial";
+import { FOUNDATIONS_LESSONS } from "./training-lessons-foundations";
+
+export type LessonTrack =
+  | "workflow"
+  | "concept"
+  | "technical"
+  | "sitework"
+  | "commercial"
+  | "foundations";
 
 export type LessonBlock = {
   heading?: string;
@@ -40,7 +62,7 @@ const PRACTICE_LINK: LessonLink = {
   href: "/training/practice",
 };
 
-export const LESSONS: Lesson[] = [
+const CORE_LESSONS: Lesson[] = [
   // ───────────────────────────── Workflows ─────────────────────────────
   {
     id: "wf-rfis",
@@ -834,6 +856,21 @@ export const LESSONS: Lesson[] = [
   },
 ];
 
+/**
+ * Full curriculum. Workflow/concept additions from the process file merge
+ * into the two core tracks; the other four files each own a whole track.
+ * Order matters: lessonsByTrack preserves array order, which drives the
+ * left-nav grouping and prev/next navigation.
+ */
+export const LESSONS: Lesson[] = [
+  ...CORE_LESSONS,
+  ...PROCESS_LESSONS,
+  ...TECHNICAL_LESSONS,
+  ...SITEWORK_LESSONS,
+  ...COMMERCIAL_LESSONS,
+  ...FOUNDATIONS_LESSONS,
+];
+
 export function getLesson(id: string): Lesson | undefined {
   return LESSONS.find((l) => l.id === id);
 }
@@ -853,4 +890,8 @@ export function lessonCategories(track: LessonTrack): string[] {
 export const TRACK_LABELS: Record<LessonTrack, string> = {
   workflow: "Workflows",
   concept: "Concepts",
+  technical: "Building the Work",
+  sitework: "Site & Civil",
+  commercial: "Contracts & Commercial",
+  foundations: "Professional Skills",
 };
