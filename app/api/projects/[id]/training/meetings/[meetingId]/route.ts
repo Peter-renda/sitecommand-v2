@@ -81,11 +81,19 @@ function fallbackTurns(
     };
   }
   const item = meeting.agenda[next];
+  // Surface any planted checkpoint clues that belong to this agenda item and
+  // aren't already carried by the item's points (the hidden tests still need
+  // to reach the trainee when Gemini is unavailable).
+  const plantedLines = meeting.checkpoints
+    .filter((c) => c.plantAgendaIndex === next && c.fallbackLine)
+    .map((c) => c.fallbackLine as string);
   return {
     turns: [
       {
         speaker: facilitator.key,
-        text: `Noted. Let's move to the next item — ${item.title.toLowerCase()}. ${item.points.join(" ")} What are your thoughts?`,
+        text: `Noted. Let's move to the next item — ${item.title.toLowerCase()}. ${item.points.join(" ")}${
+          plantedLines.length > 0 ? ` ${plantedLines.join(" ")}` : ""
+        } What are your thoughts?`,
       },
     ],
     agendaIndex: next,
@@ -119,6 +127,13 @@ async function generateTurns(opts: {
     )
     .join("\n");
 
+  // Hidden tests: the attendees must surface each clue naturally (per its
+  // plant instruction) but never resolve it for the PM — the trainee is
+  // scored afterward on which ones they caught.
+  const checkpointBlock = meeting.checkpoints
+    .map((c, i) => `${i + 1}. (during agenda item ${c.plantAgendaIndex + 1}) ${c.plant}`)
+    .join("\n");
+
   const transcriptBlock = transcript
     .map((t) => {
       const who =
@@ -142,6 +157,9 @@ ${agendaBlock}
 
 BID TAB — the facts everyone works from (stay consistent with these numbers; invent plausible detail only where none exists):
 ${bidTabText()}
+
+HIDDEN TESTS — the PM is being evaluated on whether they catch these. Surface each clue naturally at its agenda item, exactly as instructed; NEVER resolve one for the PM, never hint that it's a test, and never volunteer the fix unless the PM raises it first:
+${checkpointBlock}
 
 RULES:
 - Return 1 to 3 short turns, each attributed to one attendee key. Vary who speaks based on who would naturally answer (Rachel for numbers, Marcus for strategy/risk, David to run the meeting).
