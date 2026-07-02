@@ -295,7 +295,7 @@ export const TECHNICAL_LESSONS: Lesson[] = [
         ],
       },
     ],
-    relatedLessonIds: ["cn-mep", "cn-longlead", "tech-fire", "tech-testing-cx"],
+    relatedLessonIds: ["cn-mep", "cn-longlead", "mep-activity-pattern", "mep-coordination-scheduling"],
   },
   {
     id: "tech-fire",
@@ -333,7 +333,7 @@ export const TECHNICAL_LESSONS: Lesson[] = [
         ],
       },
     ],
-    relatedLessonIds: ["tech-framing", "tech-mep-coordination", "wf-permits"],
+    relatedLessonIds: ["tech-framing", "mep-fire-suppression", "mep-security-fire-alarm", "wf-permits"],
   },
 
   // ───────────────────────────── Interiors ─────────────────────────────
@@ -412,7 +412,7 @@ export const TECHNICAL_LESSONS: Lesson[] = [
         ],
       },
     ],
-    relatedLessonIds: ["cn-longlead", "tech-fire", "wf-permits"],
+    relatedLessonIds: ["cn-longlead", "mep-low-voltage", "wf-permits"],
   },
 
   // ─────────────────────── Testing & Commissioning ───────────────────────

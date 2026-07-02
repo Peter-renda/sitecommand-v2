@@ -5,9 +5,11 @@
  * already know (RCP, MEP, CSI divisions, contract types, …), and (c) four
  * deeper tracks built from the PM learning curriculum: Building the Work
  * (means & methods in build sequence), Site & Civil (site planning, grading,
- * SWPPP, stormwater, ADA routes, landscape), Contracts & Commercial (AIA
- * documents, clauses, liens, claims), and Professional Skills (financial
- * literacy, estimating, leadership, codes, ethics).
+ * SWPPP, stormwater, ADA routes, landscape), MEP Systems (every system as
+ * schedule logic — activity chains, hold points, the CO dependency web),
+ * Contracts & Commercial (AIA documents, clauses, liens, claims), and
+ * Professional Skills (financial literacy, estimating, leadership, codes,
+ * ethics).
  *
  * This module is client-safe (no server-only imports) — it's the single
  * source of truth for both the Lessons page (app/training/lessons) and the
@@ -24,6 +26,7 @@
 import { PROCESS_LESSONS } from "./training-lessons-process";
 import { TECHNICAL_LESSONS } from "./training-lessons-technical";
 import { SITEWORK_LESSONS } from "./training-lessons-sitework";
+import { MEP_LESSONS } from "./training-lessons-mep";
 import { COMMERCIAL_LESSONS } from "./training-lessons-commercial";
 import { FOUNDATIONS_LESSONS } from "./training-lessons-foundations";
 
@@ -32,6 +35,7 @@ export type LessonTrack =
   | "concept"
   | "technical"
   | "sitework"
+  | "mep"
   | "commercial"
   | "foundations";
 
@@ -867,6 +871,7 @@ export const LESSONS: Lesson[] = [
   ...PROCESS_LESSONS,
   ...TECHNICAL_LESSONS,
   ...SITEWORK_LESSONS,
+  ...MEP_LESSONS,
   ...COMMERCIAL_LESSONS,
   ...FOUNDATIONS_LESSONS,
 ];
@@ -892,6 +897,7 @@ export const TRACK_LABELS: Record<LessonTrack, string> = {
   concept: "Concepts",
   technical: "Building the Work",
   sitework: "Site & Civil",
+  mep: "MEP Systems",
   commercial: "Contracts & Commercial",
   foundations: "Professional Skills",
 };
