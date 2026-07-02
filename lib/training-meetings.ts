@@ -41,6 +41,39 @@ export type MeetingTurn = {
   text: string;
 };
 
+/**
+ * A hidden "test" planted in the meeting. The attendees surface the clue
+ * naturally (per `plant`) but never resolve it themselves — the checkpoint is
+ * whether the PM catches it (flags it, asks about it, turns it into a
+ * decision/action). Scored when the meeting adjourns; results land in the
+ * saved minutes and the phase Job Review.
+ */
+export type MeetingCheckpoint = {
+  id: string;
+  /** Short label shown in the score card. */
+  title: string;
+  /** What catching it looks like — shown in the minutes and used for scoring. */
+  expectation: string;
+  /**
+   * LLM-only instruction for how the attendees drop the clue in conversation
+   * (never shown to the trainee, never dumped into fallback dialogue).
+   */
+  plant: string;
+  /** Agenda item (0-based) where the clue belongs. */
+  plantAgendaIndex: number;
+  /**
+   * Natural sentence appended to the canned fallback turn for that agenda item
+   * so the clue still surfaces when Gemini is unavailable. Omit when the clue
+   * is already carried by the agenda points / bid tab.
+   */
+  fallbackLine?: string;
+  /**
+   * Degraded scoring heuristic when Gemini is unavailable: the checkpoint
+   * counts as caught if any PM turn contains any of these (case-insensitive).
+   */
+  keywords: string[];
+};
+
 export type TrainingMeeting = {
   id: string;
   role: SimRole;
@@ -54,6 +87,8 @@ export type TrainingMeeting = {
   /** Attendees other than the PM. The first entry runs the meeting. */
   speakers: MeetingSpeaker[];
   agenda: MeetingAgendaItem[];
+  /** Hidden tests scored against the transcript when the meeting adjourns. */
+  checkpoints: MeetingCheckpoint[];
   /**
    * Deterministic opening turns (served without an LLM call) that run the
    * meeting up to the first point where the PM is expected to respond.
@@ -253,6 +288,60 @@ const BID_REVIEW_MEETING: TrainingMeeting = {
         "Roofing pricing must be locked before the 45-day hold expires.",
         "Target: awards out by end of next week; the documented bid tab / short-list is the deliverable from this meeting.",
       ],
+    },
+  ],
+  checkpoints: [
+    {
+      id: "slab-milestone",
+      title: "30-day slab-pour milestone",
+      expectation:
+        "Catches the owner-agreement milestone (first slab-on-grade poured within 30 days of contract start) and connects it to expediting the concrete award — awarding Bedrock immediately and getting mobilization moving.",
+      plant:
+        "While the concrete trade is being discussed, have Marcus Bennett mention IN PASSING that the owner agreement carries a milestone with liquidated damages: the first slab-on-grade must be poured within 30 days of contract start (NTP). Drop it as a side remark and move on — do NOT spell out what it means for buyout sequencing and do NOT propose the fix yourselves. If the PM never picks it up, let it go unresolved.",
+      plantAgendaIndex: 1,
+      fallbackLine:
+        "Marcus also flagged something buried in the owner agreement — a milestone with liquidated damages requiring the first slab pour within 30 days of contract start.",
+      keywords: ["slab", "30 day", "30-day", "thirty day", "liquidated", "milestone"],
+    },
+    {
+      id: "steel-scope-gap",
+      title: "Steel apparent-low scope gap",
+      expectation:
+        "Doesn't take Palmetto's apparent-low steel bid at face value — picks Ironclad, or requires the metal-deck / Addendum 2 gap plugged before any award to Palmetto.",
+      plant:
+        "The bid tab already carries this: Palmetto Steel is apparent low but missed Addendum 2 and excludes metal deck. Present the numbers factually and let the PM make the call — don't make the decision for them.",
+      plantAgendaIndex: 1,
+      keywords: ["ironclad", "palmetto", "deck", "addendum"],
+    },
+    {
+      id: "roofing-price-hold",
+      title: "Roofing 45-day price hold",
+      expectation:
+        "Acts on the roofing price hold — commits to awarding Summit Ridge or locking their pricing before the 45-day manufacturer hold expires.",
+      plant:
+        "The bid tab already carries the 45-day manufacturer price hold on Summit Ridge's number. State it as a fact; let the PM decide the urgency.",
+      plantAgendaIndex: 1,
+      keywords: ["price hold", "45-day", "45 day", "lock roofing", "lock pricing", "lock the roofing"],
+    },
+    {
+      id: "switchgear-lead",
+      title: "Switchgear long-lead release",
+      expectation:
+        "Flags the ~42-week switchgear lead time and calls for an early electrical award, LOI, or early switchgear release to protect the schedule.",
+      plant:
+        "The bid tab already carries Voltura's ~42-week switchgear lead. Mention it with the electrical numbers; don't propose the early release yourselves.",
+      plantAgendaIndex: 2,
+      keywords: ["switchgear", "loi", "early release", "long lead", "long-lead"],
+    },
+    {
+      id: "glazing-risk",
+      title: "Glazing apparent-low risk",
+      expectation:
+        "Avoids MetroGlass's scope-gapped low bid — short-lists ClearSpan, or requires engineering and the field mock-up included before considering MetroGlass.",
+      plant:
+        "The bid tab already carries MetroGlass's exclusions (engineering calcs, field mock-up) and their submittal history. Present it factually and let the PM decide.",
+      plantAgendaIndex: 1,
+      keywords: ["clearspan", "metroglass", "mock-up", "mockup"],
     },
   ],
   opening: [

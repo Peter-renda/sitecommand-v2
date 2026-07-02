@@ -2,12 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getTrainingSchedule } from "@/lib/training-schedule";
+import { TRAINING_MEETINGS } from "@/lib/training-meetings";
 import type { SimRole } from "@/lib/simulation-constants";
 
 // ───────────────────────────── Types ─────────────────────────────
 
 type Highlight = { kind: string; text: string };
 type Resolution = { index: number; task: string; category: string; resolution: string };
+
+/** Saved-minutes summary for a meeting held during this phase. */
+type MeetingMinutesSummary = {
+  meetingId: string;
+  title: string;
+  day: number;
+  scoreCaught: number;
+  scoreTotal: number;
+  completedAt: string;
+};
 
 /** A scheduled task plus its position (so we can match localStorage checks). */
 type PosTask = {
@@ -101,6 +112,37 @@ export default function TrainingReviewClient({
     }
     return out;
   }, [role, phase]);
+
+  // Meetings scheduled during this phase (by day), and their saved minutes.
+  const phaseMeetings = useMemo(() => {
+    const phaseDays = new Set(
+      getTrainingSchedule(role)
+        .filter((d) => d.phase === phase)
+        .map((d) => d.day),
+    );
+    return TRAINING_MEETINGS.filter((m) => m.role === role && phaseDays.has(m.day));
+  }, [role, phase]);
+  const [meetingMinutes, setMeetingMinutes] = useState<MeetingMinutesSummary[]>([]);
+
+  useEffect(() => {
+    if (phaseMeetings.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/training/meetings/minutes`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setMeetingMinutes(data.minutes ?? []);
+      } catch {
+        /* the section just shows meetings without minutes */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, phaseMeetings.length]);
 
   const tasksKey = `sc-training-tasks-${projectId}`;
   const reviewsKey = `sc-training-reviews-${projectId}`;
@@ -273,15 +315,24 @@ export default function TrainingReviewClient({
       )}
 
       {status === "error" && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-5 mb-5">
-          <p className="text-sm text-red-700">{error}</p>
-          <button
-            onClick={returnToProject}
-            className="mt-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            Back to project
-          </button>
-        </div>
+        <>
+          <div className="rounded-xl border border-red-200 bg-red-50 p-5 mb-5">
+            <p className="text-sm text-red-700">{error}</p>
+            <button
+              onClick={returnToProject}
+              className="mt-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Back to project
+            </button>
+          </div>
+          {/* The saved meeting minutes stay reachable even when the AI review
+              couldn't be generated. */}
+          <MeetingMinutesSection
+            projectId={projectId}
+            phaseMeetings={phaseMeetings}
+            meetingMinutes={meetingMinutes}
+          />
+        </>
       )}
 
       {status === "ready" && (
@@ -350,6 +401,13 @@ export default function TrainingReviewClient({
             )}
           </div>
 
+          {/* Meetings held this phase — hyperlink to the saved minutes + score */}
+          <MeetingMinutesSection
+            projectId={projectId}
+            phaseMeetings={phaseMeetings}
+            meetingMinutes={meetingMinutes}
+          />
+
           {/* Completed */}
           <div className="mb-5">
             <h2 className="text-sm font-semibold text-gray-900 mb-2">
@@ -406,6 +464,72 @@ export default function TrainingReviewClient({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function MeetingMinutesSection({
+  projectId,
+  phaseMeetings,
+  meetingMinutes,
+}: {
+  projectId: string;
+  phaseMeetings: { id: string; title: string; day: number }[];
+  meetingMinutes: MeetingMinutesSummary[];
+}) {
+  if (phaseMeetings.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 mb-5">
+      <h2 className="text-sm font-semibold text-gray-900 mb-2">Meeting minutes</h2>
+      <div className="space-y-2">
+        {phaseMeetings.map((m) => {
+          const saved = meetingMinutes.find((mm) => mm.meetingId === m.id);
+          const pct =
+            saved && saved.scoreTotal > 0
+              ? Math.round((saved.scoreCaught / saved.scoreTotal) * 100)
+              : 0;
+          return (
+            <div
+              key={m.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2"
+            >
+              <div className="min-w-0">
+                <a
+                  href={`/training/meeting?project=${projectId}&meeting=${m.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  {m.title}
+                  <span className="ml-1 text-[11px] font-normal text-gray-400">
+                    · Day {m.day} {saved ? "· open minutes ↗" : "· join meeting ↗"}
+                  </span>
+                </a>
+              </div>
+              {saved ? (
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    pct >= 80
+                      ? "bg-emerald-100 text-emerald-800"
+                      : pct >= 50
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-red-100 text-red-700"
+                  }`}
+                >
+                  {saved.scoreCaught}/{saved.scoreTotal} caught
+                </span>
+              ) : (
+                <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">
+                  not held
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-gray-400">
+        Each meeting contained planted issues to catch — the score shows how many you spotted.
+      </p>
     </div>
   );
 }
