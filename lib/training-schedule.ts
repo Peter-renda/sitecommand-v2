@@ -429,7 +429,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 42,
     phase: "Envelope / MEP Rough-In / Dry-In",
     timeframe: "Months 7-13",
-    lessonIds: ["tech-envelope", "tech-mep-coordination", "tech-fire"],
+    lessonIds: ["tech-envelope", "mep-activity-pattern", "mep-coordination-scheduling", "mep-electrical-distribution"],
     tasks: [
       {
         task: "Complete building dry-in: roofing, windows, exterior doors, flashing, and sealants",
@@ -491,7 +491,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 56,
     phase: "Interior Finishes",
     timeframe: "Months 11-18",
-    lessonIds: ["tech-finishes", "sc-pedestrian-ada", "tech-vertical-lv"],
+    lessonIds: ["tech-finishes", "sc-pedestrian-ada", "mep-bms", "mep-security-fire-alarm"],
     tasks: [
       {
         task: "Prime and paint walls, ceilings, and trim",
@@ -565,7 +565,7 @@ const PROJECT_MANAGER_SCHEDULE: TrainingDay[] = [
     day: 70,
     phase: "Site Completion, Commissioning & Closeout",
     timeframe: "Months 16-20",
-    lessonIds: ["wf-punch-closeout", "tech-testing-cx", "sc-landscape", "cn-retainage"],
+    lessonIds: ["wf-punch-closeout", "mep-startup-cx", "tech-testing-cx", "sc-landscape"],
     tasks: [
       {
         task: "Complete sitework: paving, curbs, sidewalks, hardscape, striping, and signage",
