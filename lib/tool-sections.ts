@@ -51,6 +51,7 @@ export const TOOL_SECTIONS = [
     label: "Development",
     items: [
       { name: "Zoning Analysis", slug: "zoning-analysis" },
+      { name: "Site Plan", slug: "site-plan" },
     ],
   },
   {

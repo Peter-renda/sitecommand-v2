@@ -29,6 +29,9 @@ function isToolEnabled(slug: string, enabledFeatures: string[] | null | undefine
   // Development → Zoning Analysis launched after many existing company
   // allowlists were created, so default to visible unless explicitly removed.
   if (slug === "zoning-analysis") return true;
+  // Development → Site Plan likewise launched after existing allowlists, so
+  // default to visible unless explicitly removed.
+  if (slug === "site-plan") return true;
   // Core Tools → Emails launched after existing company allowlists were
   // created, so it shows everywhere by default until allowlists are updated.
   if (slug === "emails") return true;
