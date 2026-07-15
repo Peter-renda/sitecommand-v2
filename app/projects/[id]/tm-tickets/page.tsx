@@ -1,10 +1,17 @@
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import UnderConstructionNotice from "../components/UnderConstructionNotice";
+import TMTicketsClient from "./TMTicketsClient";
+import UnderConstructionPopup from "@/app/components/UnderConstructionPopup";
 
 export default async function TMTicketsPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) redirect("/login");
-  await params;
-  return <UnderConstructionNotice title="T&M Tickets" />;
+
+  const { id } = await params;
+  return (
+    <>
+      <TMTicketsClient projectId={id} username={session.username} />
+      <UnderConstructionPopup featureName="T&M Tickets" />
+    </>
+  );
 }

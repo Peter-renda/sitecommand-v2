@@ -1,6 +1,7 @@
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import UnderConstructionNotice from "../components/UnderConstructionNotice";
+import PrequalificationClient from "./PrequalificationClient";
+import UnderConstructionPopup from "@/app/components/UnderConstructionPopup";
 
 export default async function PrequalificationPage({
   params,
@@ -9,6 +10,12 @@ export default async function PrequalificationPage({
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
-  await params;
-  return <UnderConstructionNotice title="Prequalification" />;
+
+  const { id } = await params;
+  return (
+    <>
+      <PrequalificationClient projectId={id} role={session.role} username={session.username} />
+      <UnderConstructionPopup featureName="Prequalification" />
+    </>
+  );
 }
