@@ -109,7 +109,7 @@ export default function EstimatingPage() {
         <div className="max-w-7xl mx-auto">
           <div className="max-w-3xl">
             <div className="animate-fade-up inline-flex items-center gap-2 mb-8">
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
               <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Preconstruction</span>
             </div>
             <h1 className="font-display animate-fade-up delay-100" style={{ fontSize: "clamp(2.8rem,6.5vw,5rem)", lineHeight: "0.96" }}>
@@ -145,7 +145,7 @@ export default function EstimatingPage() {
             {features.map((f) => (
               <div key={f.title} className="rounded-2xl" style={{ background: "linear-gradient(145deg, rgba(255,255,255,0.95) 0%, rgba(235,235,233,0.5) 100%)", border: "1px solid rgba(0,0,0,0.055)", boxShadow: "0 2px 8px rgba(0,0,0,0.04), 0 1px 0 rgba(255,255,255,0.7) inset", padding: "1.5px" }}>
                 <div className="h-full rounded-[14px] p-6 flex flex-col gap-4" style={{ background: "#FFFFFF", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)" }}>
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: "rgba(212,80,10,0.08)", color: "#D4500A" }}>
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: "rgba(37,99,235,0.08)", color: "#2563EB" }}>
                     {f.icon}
                   </div>
                   <div>
@@ -172,8 +172,8 @@ export default function EstimatingPage() {
             {steps.map((step) => (
               <div key={step.number}>
                 <div className="inline-flex items-center gap-2 mb-5">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
-                  <span className="text-xs font-medium tracking-widest uppercase" style={{ color: "#D4500A" }}>{step.number}</span>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
+                  <span className="text-xs font-medium tracking-widest uppercase" style={{ color: "#2563EB" }}>{step.number}</span>
                 </div>
                 <h3 className="text-lg font-semibold mb-2" style={{ color: "#111110" }}>{step.title}</h3>
                 <p className="text-sm text-gray-500 leading-relaxed">{step.description}</p>

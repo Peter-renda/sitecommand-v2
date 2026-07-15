@@ -7,6 +7,7 @@ export const TOOL_SECTIONS = [
       { name: "Documents", slug: "documents" },
       { name: "Directory", slug: "directory" },
       { name: "Tasks", slug: "tasks" },
+      { name: "Emails", slug: "emails" },
       { name: "Quick Notes", slug: "quick-notes" },
       { name: "Assist", slug: "assist" },
       { name: "Admin", slug: "admin" },
@@ -27,6 +28,7 @@ export const TOOL_SECTIONS = [
       { name: "Drawings", slug: "drawings" },
       { name: "BIM Viewer", slug: "bim" },
       { name: "Specifications", slug: "specifications" },
+      { name: "Permit Applications", slug: "permit-applications" },
     ],
   },
   {
@@ -46,6 +48,13 @@ export const TOOL_SECTIONS = [
     ],
   },
   {
+    label: "Development",
+    items: [
+      { name: "Zoning Analysis", slug: "zoning-analysis" },
+      { name: "Site Plan", slug: "site-plan" },
+    ],
+  },
+  {
     label: "Financial Management",
     items: [
       { name: "Prime Contracts", slug: "prime-contracts" },
@@ -54,6 +63,12 @@ export const TOOL_SECTIONS = [
       { name: "Scope of Work", slug: "scope-of-work" },
       { name: "Change Orders", slug: "change-orders" },
       { name: "Change Events", slug: "change-events" },
+    ],
+  },
+  {
+    label: "Accounting",
+    items: [
+      { name: "Transaction Orders", slug: "transaction-orders" },
     ],
   },
 ];

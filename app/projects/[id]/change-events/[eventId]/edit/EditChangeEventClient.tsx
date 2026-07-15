@@ -773,7 +773,7 @@ export default function EditChangeEventClient({
 
   if (loadingEvent) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Loading…</div>
       </div>
@@ -782,7 +782,7 @@ export default function EditChangeEventClient({
 
   if (loadError) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-red-500">{loadError}</div>
       </div>
@@ -790,7 +790,7 @@ export default function EditChangeEventClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <ProjectNav projectId={projectId} />
 
       {/* ── Breadcrumb + Title ────────────────────────────────────────────────── */}
@@ -823,7 +823,7 @@ export default function EditChangeEventClient({
           <h2 className="text-sm font-semibold text-gray-900 mb-5">General Information</h2>
 
           {/* Row 1: Number | Title | Status | Origin */}
-          <div className="grid grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
             <Field>
               <Label text="Number" />
               <input
@@ -878,7 +878,7 @@ export default function EditChangeEventClient({
           </div>
 
           {/* Row 2: Type | Change Reason | Scope */}
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field>
               <Label text="Type" />
               <div className="relative flex items-center">
@@ -917,7 +917,7 @@ export default function EditChangeEventClient({
           </div>
 
           {/* Row 3: Expecting Revenue | Line Item Revenue Source | Prime Contract */}
-          <div className="grid grid-cols-3 gap-4 mb-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
             <Field>
               <Label text="Expecting Revenue" />
               <div className="flex items-center gap-5 mt-1">

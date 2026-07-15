@@ -77,6 +77,14 @@ function uid(): string {
   return Math.random().toString(36).slice(2);
 }
 
+// Returns true when rich-text HTML contains at least one non-whitespace character.
+function htmlHasText(html: string): boolean {
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .trim().length > 0;
+}
+
 // ── Section wrapper ───────────────────────────────────────────────────────────
 
 function Section({
@@ -349,6 +357,7 @@ function SovTable({
   method,
   budgetItems,
   changeEvents,
+  showBilledColumns,
   onMethodChange,
   onAdd,
   onAddGroup,
@@ -359,6 +368,7 @@ function SovTable({
   method: "unit_quantity" | "amount";
   budgetItems: BudgetItem[];
   changeEvents: ChangeEventOption[];
+  showBilledColumns: boolean;
   onMethodChange: (m: "unit_quantity" | "amount") => void;
   onAdd: () => void;
   onAddGroup: () => void;
@@ -433,8 +443,12 @@ function SovTable({
                   </>
                 ) : null}
                 <th className={thCls}>Amount</th>
-                <th className={thCls}>Billed to Date</th>
-                <th className={thCls}>Amount Remaining</th>
+                {showBilledColumns && (
+                  <>
+                    <th className={thCls}>Billed to Date</th>
+                    <th className={thCls}>Amount Remaining</th>
+                  </>
+                )}
                 <th className={thCls} style={{ width: 32 }} />
               </tr>
             </thead>
@@ -442,7 +456,7 @@ function SovTable({
               {lines.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={method === "unit_quantity" ? 10 : 7}
+                    colSpan={(method === "unit_quantity" ? 10 : 7) - (showBilledColumns ? 0 : 2)}
                     className="py-16 text-center"
                   >
                     <div className="flex flex-col items-center gap-3">
@@ -472,7 +486,7 @@ function SovTable({
                       <tr key={line._key} className="bg-gray-50">
                         <td className={cellCls} />
                         <td
-                          colSpan={method === "unit_quantity" ? 8 : 5}
+                          colSpan={(method === "unit_quantity" ? 8 : 5) - (showBilledColumns ? 0 : 2)}
                           className={cellCls}
                         >
                           <input
@@ -503,8 +517,6 @@ function SovTable({
                       .filter((l) => !l.is_group_header)
                       .indexOf(line) + 1;
                   const computed = calcAmount(line);
-                  const billed = numVal(line.qty); // billed_to_date placeholder
-                  const remaining = computed - billed;
 
                   return (
                     <tr key={line._key} className="hover:bg-gray-50 group">
@@ -527,35 +539,32 @@ function SovTable({
                               </option>
                             ))}
                           </select>
-                          <select
-                            value={line.change_event_line_item_id}
-                            onChange={(e) => {
-                              const selectedEvent = changeEvents.find(
-                                (event) => event.id === line.change_event_id
-                              );
-                              const selectedLineItem = selectedEvent?.lineItems.find(
-                                (item) => item.id === e.target.value
-                              );
-                              onUpdate(line._key, "change_event_line_item_id", e.target.value);
-                              if (!selectedLineItem) return;
-                              onUpdate(line._key, "change_event_line_item", selectedLineItem.label);
-                              onUpdate(line._key, "budget_code", selectedLineItem.budget_code);
-                              onUpdate(line._key, "description", selectedLineItem.description);
-                              onUpdate(line._key, "qty", selectedLineItem.qty);
-                              onUpdate(line._key, "uom", selectedLineItem.uom);
-                              onUpdate(line._key, "unit_cost", selectedLineItem.unit_cost);
-                              onUpdate(line._key, "amount", selectedLineItem.amount);
-                            }}
-                            className="w-full border border-gray-200 rounded px-1.5 py-1 bg-white focus:outline-none"
-                            disabled={!line.change_event_id}
-                          >
-                            <option value="">Select SOV line item…</option>
-                            {(changeEvents.find((event) => event.id === line.change_event_id)?.lineItems ?? []).map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.label}
-                              </option>
-                            ))}
-                          </select>
+                          {line.change_event_id && (
+                            <select
+                              value={line.change_event_line_item_id}
+                              onChange={(e) => {
+                                const selectedEvent = changeEvents.find(
+                                  (event) => event.id === line.change_event_id
+                                );
+                                const selectedLineItem = selectedEvent?.lineItems.find(
+                                  (item) => item.id === e.target.value
+                                );
+                                onUpdate(line._key, "change_event_line_item_id", e.target.value);
+                                if (!selectedLineItem) return;
+                                onUpdate(line._key, "change_event_line_item", selectedLineItem.label);
+                                onUpdate(line._key, "budget_code", selectedLineItem.budget_code);
+                                onUpdate(line._key, "description", selectedLineItem.description);
+                              }}
+                              className="w-full border border-gray-200 rounded px-1.5 py-1 bg-white focus:outline-none"
+                            >
+                              <option value="">Select SOV line item…</option>
+                              {(changeEvents.find((event) => event.id === line.change_event_id)?.lineItems ?? []).map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </div>
                       </td>
                       <td className={cellCls}>
@@ -636,12 +645,16 @@ function SovTable({
                       <td className={cellCls + " tabular-nums text-gray-900"}>
                         ${fmt(computed)}
                       </td>
-                      <td className={cellCls + " tabular-nums text-gray-400"}>
-                        $0.00
-                      </td>
-                      <td className={cellCls + " tabular-nums text-gray-900"}>
-                        ${fmt(computed)}
-                      </td>
+                      {showBilledColumns && (
+                        <>
+                          <td className={cellCls + " tabular-nums text-gray-400"}>
+                            $0.00
+                          </td>
+                          <td className={cellCls + " tabular-nums text-gray-900"}>
+                            ${fmt(computed)}
+                          </td>
+                        </>
+                      )}
                       <td className={cellCls}>
                         <button
                           type="button"
@@ -679,8 +692,12 @@ function SovTable({
           <div className="flex items-center gap-6 text-xs font-medium text-gray-700">
             <span>Total:</span>
             <span className="tabular-nums">${fmt(totalAmount)}</span>
-            <span className="tabular-nums">$0.00</span>
-            <span className="tabular-nums">${fmt(totalAmount)}</span>
+            {showBilledColumns && (
+              <>
+                <span className="tabular-nums">$0.00</span>
+                <span className="tabular-nums">${fmt(totalAmount)}</span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -771,11 +788,12 @@ export default function NewCommitmentClient({
 
   // SOV
   const [sovMethod, setSovMethod] = useState<"unit_quantity" | "amount">(
-    "unit_quantity"
+    "amount"
   );
   const [sovLines, setSovLines] = useState<SovLine[]>([]);
 
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
 
   // Fetch project-level commitment settings to apply defaults
   useEffect(() => {
@@ -917,6 +935,28 @@ export default function NewCommitmentClient({
   }
 
   async function handleSave() {
+    // Subcontracts require a complete set of fields before they can be created.
+    if (commitmentType === "subcontract") {
+      const missing: string[] = [];
+      if (!title.trim()) missing.push("Title");
+      if (!contractCompany.trim()) missing.push("Contract Company");
+      const retainageRaw = defaultRetainage.trim();
+      if (retainageRaw === "" || !Number.isFinite(Number(retainageRaw))) {
+        missing.push("Default Retainage (number)");
+      }
+      if (!htmlHasText(description)) missing.push("Description");
+      if (sovLines.filter((l) => !l.is_group_header).length === 0) {
+        missing.push("at least one Schedule of Values line item");
+      }
+      if (missing.length > 0) {
+        setFormError(
+          `Please complete the following before creating the subcontract: ${missing.join(", ")}.`
+        );
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+    }
+    setFormError("");
     setSaving(true);
     try {
       const sovTotal = sovLines
@@ -1031,9 +1071,9 @@ export default function NewCommitmentClient({
     commitmentType === "purchase_order" ? "Purchase Order" : "Subcontract";
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a
           href="/dashboard"
           className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors"
@@ -1084,11 +1124,23 @@ export default function NewCommitmentClient({
         </div>
       </div>
 
+      {/* Validation error banner */}
+      {formError && (
+        <div className="bg-red-50 border-b border-red-200 px-8 py-3">
+          <div className="max-w-5xl mx-auto flex items-start gap-2 text-sm text-red-700">
+            <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span>{formError}</span>
+          </div>
+        </div>
+      )}
+
       {/* Form body */}
       <div className="max-w-5xl mx-auto px-8">
         {/* ── General Information ── */}
         <Section title="General Information">
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field label="Contract #">
               <input
                 type="text"
@@ -1097,7 +1149,7 @@ export default function NewCommitmentClient({
                 className={inputCls}
               />
             </Field>
-            <Field label="Contract Company">
+            <Field label="Contract Company" required={commitmentType === "subcontract"}>
               <select
                 value={contractCompany}
                 onChange={(e) => setContractCompany(e.target.value)}
@@ -1111,7 +1163,7 @@ export default function NewCommitmentClient({
                 ))}
               </select>
             </Field>
-            <Field label="Title">
+            <Field label="Title" required={commitmentType === "subcontract"}>
               <input
                 type="text"
                 value={title}
@@ -1136,7 +1188,7 @@ export default function NewCommitmentClient({
             </label>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field label="Status" required>
               <select
                 value={status}
@@ -1163,7 +1215,7 @@ export default function NewCommitmentClient({
           </div>
 
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <Field label="Default Retainage">
+            <Field label="Default Retainage" required={commitmentType === "subcontract"}>
               <div className="flex items-center">
                 <input
                   type="text"
@@ -1236,7 +1288,7 @@ export default function NewCommitmentClient({
             </div>
           )}
 
-          <Field label="Description" className="mb-4">
+          <Field label="Description" required={commitmentType === "subcontract"} className="mb-4">
             <RichTextEditor
               value={description}
               onChange={setDescription}
@@ -1285,11 +1337,17 @@ export default function NewCommitmentClient({
               <strong>Accounting method cannot be changed after the contract is created.</strong> It applies to all change orders and invoices for this contract. Choose before adding line items.
             </span>
           </div>
+          {commitmentType === "subcontract" && (
+            <p className="text-xs text-gray-500 mb-3">
+              <span className="text-red-500">*</span> At least one line item is required to create a subcontract.
+            </p>
+          )}
           <SovTable
             lines={sovLines}
             method={sovMethod}
             budgetItems={budgetItems}
             changeEvents={commitmentType === "subcontract" ? changeEvents : []}
+            showBilledColumns={commitmentType !== "subcontract"}
             onMethodChange={setSovMethod}
             onAdd={addSovLine}
             onAddGroup={addSovGroup}

@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { PRIME_CONTRACT_REPORT_FIELDS } from "@/lib/report-fields";
 import {
   Bold, Italic, Underline, Strikethrough,
   AlignLeft, AlignCenter, AlignRight,
@@ -150,6 +152,7 @@ export default function EditPrimeContractClient({
     is_private: true,
     sov_view_allowed: false,
   });
+  const [reportFields, setReportFields] = useState<ReportFieldValues>({});
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}/prime-contracts/${contractId}`)
@@ -178,6 +181,7 @@ export default function EditPrimeContractClient({
             is_private: data.is_private ?? true,
             sov_view_allowed: data.sov_view_allowed ?? false,
           });
+          setReportFields(data.report_fields ?? {});
           setSovItems(
             (data.sov_items ?? []).map((item: any) => ({
               budget_code: item.budget_code ?? "",
@@ -234,6 +238,7 @@ export default function EditPrimeContractClient({
       ...formData,
       default_retainage: formData.default_retainage !== "" ? Number(formData.default_retainage) : 0,
       sov_items: sovItems,
+      report_fields: reportFields,
     };
     for (const field of DATE_FIELDS) {
       if (!payload[field]) payload[field] = null;
@@ -259,7 +264,7 @@ export default function EditPrimeContractClient({
 
   if (loadingData) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading…</div>
       </div>
@@ -268,7 +273,7 @@ export default function EditPrimeContractClient({
 
   if (loadError) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-red-500 text-sm">{loadError}</div>
       </div>
@@ -276,7 +281,7 @@ export default function EditPrimeContractClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <ProjectNav projectId={projectId} />
 
       <form onSubmit={handleSubmit} className="flex-1 flex flex-col">
@@ -311,7 +316,7 @@ export default function EditPrimeContractClient({
           <SectionBlock>
             <SectionTitle>General Information</SectionTitle>
 
-            <div className="grid grid-cols-3 gap-5 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-5">
               <div>
                 <Label>Owner/Client</Label>
                 <Input
@@ -332,7 +337,7 @@ export default function EditPrimeContractClient({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-5 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-5">
               <div>
                 <Label required>Status</Label>
                 <Select value={formData.status} onChange={(e) => set("status", e.target.value)}>
@@ -371,7 +376,7 @@ export default function EditPrimeContractClient({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-5 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-5">
               <div>
                 <Label>Contractor</Label>
                 <Input
@@ -573,7 +578,7 @@ export default function EditPrimeContractClient({
           {/* Contract Dates */}
           <SectionBlock>
             <SectionTitle>Contract Dates</SectionTitle>
-            <div className="grid grid-cols-3 gap-5 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-5">
               <div>
                 <Label>Start Date</Label>
                 <Input type="date" value={formData.start_date} onChange={(e) => set("start_date", e.target.value)} />
@@ -587,7 +592,7 @@ export default function EditPrimeContractClient({
                 <Input type="date" value={formData.actual_completion_date} onChange={(e) => set("actual_completion_date", e.target.value)} />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
               <div>
                 <Label>Signed Contract Received Date</Label>
                 <Input type="date" value={formData.signed_contract_received_date} onChange={(e) => set("signed_contract_received_date", e.target.value)} />
@@ -625,6 +630,18 @@ export default function EditPrimeContractClient({
               />
               <label htmlFor="allow_sov" className="text-sm text-gray-600">Allow non-admin users to view the SOV items.</label>
             </div>
+          </SectionBlock>
+
+          <SectionBlock>
+            <SectionTitle>Report Fields</SectionTitle>
+            <ReportFieldsSection
+              title="Report Fields"
+              description="Extra prime contract attributes surfaced as columns in 360 Reports."
+              fields={PRIME_CONTRACT_REPORT_FIELDS}
+              values={reportFields}
+              onChange={(key, value) => setReportFields((prev) => ({ ...prev, [key]: value }))}
+              columns={3}
+            />
           </SectionBlock>
 
         </div>

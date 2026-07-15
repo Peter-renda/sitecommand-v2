@@ -212,6 +212,18 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
     return codeA.localeCompare(codeB);
   });
 
+  // Largest division by total cost (for stat strip)
+  let largestDivisionTotal = 0;
+  let largestDivisionLabel = "";
+  divisionKeys.forEach((key) => {
+    const [divCode, divName] = key.split("|");
+    const t = grouped[key].reduce((sum, it) => sum + (Number(it.total_cost) || 0), 0);
+    if (t > largestDivisionTotal) {
+      largestDivisionTotal = t;
+      largestDivisionLabel = `${divCode} — ${divName}`;
+    }
+  });
+
   // ── Add Item ────────────────────────────────────────────────────────────────
   function startAddInDivision(divisionCode: string) {
     const div = CSI_DIVISIONS.find((d) => d.code === divisionCode);
@@ -428,7 +440,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <ProjectNav projectId={projectId} />
 
       {/* Toast */}
@@ -584,74 +596,118 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
       )}
 
       {/* Page content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-7xl mx-auto px-6 py-8">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
           <div>
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Estimating</h1>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Build and organize your project cost estimate by CSI division
-            </p>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
+              Estimating
+            </h1>
+            {!loading && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">
+                  Cost estimate by CSI division
+                </span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>
+                  {items.length}
+                </span>{" "}
+                line item{items.length !== 1 ? "s" : ""}
+                <span className="sep">·</span>
+                <span className="num">{divisionKeys.length}</span> division
+                {divisionKeys.length !== 1 ? "s" : ""}
+                <span className="sep">·</span>
+                <span className="num font-mono tabular-nums">{fmt(grandTotal)}</span> total
+              </p>
+            )}
           </div>
-          <div className="text-right">
-            <p className="text-xs text-gray-400 uppercase tracking-widest font-medium">
-              Total Estimate
-            </p>
-            <p className="text-2xl font-bold text-gray-900">{fmt(grandTotal)}</p>
+          <div className="flex items-center gap-2">
+            {/* Import from Excel */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="btn-secondary flex items-center gap-1.5"
+            >
+              <Upload className="w-4 h-4" />
+              Import from Excel
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+
+            {/* Add Line Item with division picker */}
+            <div ref={divPickerRef} className="relative">
+              <button
+                onClick={() => setShowDivisionPicker((v) => !v)}
+                className="btn-primary flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                Add Line Item
+              </button>
+              {showDivisionPicker && (
+                <div className="absolute right-0 top-full mt-1 w-72 bg-white border border-black/[0.08] rounded-xl shadow-xl z-30 max-h-72 overflow-y-auto">
+                  <p className="px-4 py-2 mono-label border-b border-black/[0.06]">
+                    Select Division
+                  </p>
+                  {CSI_DIVISIONS.map((div) => (
+                    <button
+                      key={div.code}
+                      onClick={() => startAddInDivision(div.code)}
+                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors"
+                    >
+                      <span className="font-mono font-semibold text-[color:var(--ink)] mr-2">
+                        {div.code}
+                      </span>
+                      {div.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-3 mb-6">
-          {/* Add Line Item with division picker */}
-          <div ref={divPickerRef} className="relative">
-            <button
-              onClick={() => setShowDivisionPicker((v) => !v)}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Add Line Item
-            </button>
-            {showDivisionPicker && (
-              <div className="absolute left-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-72 overflow-y-auto">
-                <p className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-widest border-b border-gray-100">
-                  Select Division
-                </p>
-                {CSI_DIVISIONS.map((div) => (
-                  <button
-                    key={div.code}
-                    onClick={() => startAddInDivision(div.code)}
-                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    <span className="font-medium text-gray-900 mr-2">{div.code}</span>
-                    {div.name}
-                  </button>
-                ))}
+        {/* Stat strip */}
+        {!loading && (
+          <div className="stats mb-6">
+            <div className="stat alert">
+              <div className="lbl">Total Estimate</div>
+              <div className="val font-mono tabular-nums">{fmt(grandTotal)}</div>
+              <div className="delta">
+                {items.length} line item{items.length !== 1 ? "s" : ""}
               </div>
-            )}
+            </div>
+            <div className="stat">
+              <div className="lbl">Divisions</div>
+              <div className="val">{divisionKeys.length}</div>
+              <div className="delta">CSI divisions in scope</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Avg / Line Item</div>
+              <div className="val font-mono tabular-nums">
+                {fmt(items.length ? grandTotal / items.length : 0)}
+              </div>
+              <div className="delta">across all divisions</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Largest Division</div>
+              <div className="val font-mono tabular-nums">{fmt(largestDivisionTotal)}</div>
+              <div className="delta">
+                {largestDivisionLabel || "—"}
+              </div>
+            </div>
           </div>
+        )}
 
-          {/* Import from Excel */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <Upload className="w-4 h-4" />
-            Import from Excel
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-
-          {/* Push to Budget */}
+        {/* Push to Budget toolbar */}
+        <div className="flex items-center justify-end mb-6">
           <button
             onClick={() => setShowPushConfirm(true)}
             disabled={pushLoading || items.length === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50 ml-auto"
+            className="btn-secondary flex items-center gap-1.5 disabled:opacity-50"
           >
             <ArrowRightCircle className="w-4 h-4" />
             {pushLoading ? "Pushing..." : "Push to Budget"}
@@ -660,15 +716,20 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
 
         {/* Table */}
         {loading ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-400">
+          <div className="card card-pad text-center text-sm text-gray-400">
             Loading estimate...
           </div>
         ) : divisionKeys.length === 0 && addingToDivision === null ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-            <p className="text-gray-400 text-sm mb-4">No estimate items yet.</p>
+          <div className="card card-pad py-12 text-center">
+            <p className="font-display text-[20px] text-[color:var(--ink)] mb-1">
+              No estimate items yet
+            </p>
+            <p className="text-sm text-gray-400 mb-4">
+              Start building your cost estimate by adding a line item.
+            </p>
             <button
               onClick={() => setShowDivisionPicker(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
+              className="btn-primary inline-flex items-center gap-1.5"
             >
               <Plus className="w-4 h-4" />
               Add your first line item
@@ -686,10 +747,10 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
               const isCollapsed = collapsedDivisions.has(key);
 
               return (
-                <div key={key} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div key={key} className="card overflow-hidden">
                   {/* Division header */}
                   <div
-                    className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200 cursor-pointer select-none"
+                    className="flex items-center justify-between px-5 py-3 bg-[color:var(--surface-sunken)] border-b border-black/[0.06] cursor-pointer select-none"
                     onClick={() =>
                       setCollapsedDivisions((prev) => {
                         const next = new Set(prev);
@@ -705,25 +766,30 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                       ) : (
                         <ChevronUp className="w-4 h-4 text-gray-400" />
                       )}
-                      <span className="text-sm font-semibold text-gray-900">
-                        {divCode} — {divName}
+                      <span className="font-mono text-sm font-semibold text-[color:var(--brand-700)]">
+                        {divCode}
                       </span>
-                      <span className="text-xs text-gray-400">{divItems.length} item{divItems.length !== 1 ? "s" : ""}</span>
+                      <span className="font-display text-[16px] text-[color:var(--ink)]">
+                        {divName}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {divItems.length} item{divItems.length !== 1 ? "s" : ""}
+                      </span>
                     </div>
-                    <span className="text-sm font-semibold text-gray-900">{fmt(divTotal)}</span>
+                    <span className="font-mono tabular-nums text-sm font-semibold text-[color:var(--ink)]">
+                      {fmt(divTotal)}
+                    </span>
                   </div>
 
                   {!isCollapsed && (
                     <>
                       {/* Column headers */}
-                      <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-2 border-b border-gray-100 bg-gray-50/50">
-                        {["Cost Code", "Description", "Qty", "Unit", "Unit Cost", "Total", ""].map(
+                      <div className="grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-2 border-b border-black/[0.06] bg-[color:var(--surface-sunken)]/60">
+                        {["#", "Cost Code", "Description", "Qty", "Unit", "Unit Cost", "Total", ""].map(
                           (h, i) => (
                             <div
                               key={i}
-                              className={`text-xs font-medium text-gray-400 uppercase tracking-widest ${
-                                i >= 2 && i <= 5 ? "text-right" : ""
-                              } ${i === 0 ? "col-span-1" : ""}`}
+                              className={`mono-label ${i >= 3 && i <= 6 ? "text-right" : ""}`}
                             >
                               {h}
                             </div>
@@ -732,11 +798,12 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                       </div>
 
                       {/* Items */}
-                      {divItems.map((item) => (
+                      {divItems.map((item, rowIdx) => (
                         <div key={item.id}>
                           {editingId === item.id ? (
                             // Edit row
-                            <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-2.5 border-b border-gray-100 bg-orange-50 items-center gap-2">
+                            <div className="grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-2.5 border-b border-black/[0.06] bg-[color:var(--brand-50)] items-center gap-2">
+                              <div className="idx-italic answered">{rowIdx + 1}</div>
                               <input
                                 value={editForm.cost_code}
                                 onChange={(e) =>
@@ -759,7 +826,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                                 onChange={(e) =>
                                   setEditForm((f) => ({ ...f, quantity: e.target.value }))
                                 }
-                                className="px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                className="px-2 py-1 border border-gray-200 rounded text-sm text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-orange-400"
                               />
                               <input
                                 value={editForm.unit}
@@ -774,9 +841,9 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                                 onChange={(e) =>
                                   setEditForm((f) => ({ ...f, unit_cost: e.target.value }))
                                 }
-                                className="px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                className="px-2 py-1 border border-gray-200 rounded text-sm text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-orange-400"
                               />
-                              <div className="text-sm text-right text-gray-500">
+                              <div className="text-sm text-right text-gray-500 font-mono tabular-nums">
                                 {fmt(
                                   (parseFloat(editForm.quantity) || 0) *
                                     (parseFloat(editForm.unit_cost) || 0)
@@ -802,19 +869,22 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                             </div>
                           ) : (
                             // View row
-                            <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors items-center group">
-                              <div className="text-sm text-gray-500">{item.cost_code || "—"}</div>
-                              <div className="text-sm text-gray-900 font-medium">
+                            <div className="grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-3 border-b border-black/[0.06] hover:bg-[color:var(--surface-sunken)] transition-colors items-center group">
+                              <div className="idx-italic answered">{rowIdx + 1}</div>
+                              <div className="text-sm text-gray-500 font-mono">
+                                {item.cost_code || "—"}
+                              </div>
+                              <div className="text-sm text-[color:var(--ink)] font-medium">
                                 {item.description}
                               </div>
-                              <div className="text-sm text-gray-700 text-right">
+                              <div className="text-sm text-gray-700 text-right font-mono tabular-nums">
                                 {Number(item.quantity).toLocaleString()}
                               </div>
                               <div className="text-sm text-gray-500">{item.unit}</div>
-                              <div className="text-sm text-gray-700 text-right">
+                              <div className="text-sm text-gray-700 text-right font-mono tabular-nums">
                                 {fmt(Number(item.unit_cost))}
                               </div>
-                              <div className="text-sm font-medium text-gray-900 text-right">
+                              <div className="text-sm font-semibold text-[color:var(--ink)] text-right font-mono tabular-nums">
                                 {fmt(Number(item.total_cost))}
                               </div>
                               <div className="flex items-center gap-1.5 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
@@ -840,7 +910,8 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
 
                       {/* Add item row for this division */}
                       {addingToDivision === divCode ? (
-                        <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-2.5 border-b border-gray-100 bg-blue-50 items-center gap-2">
+                        <div className="grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-2.5 border-b border-black/[0.06] bg-[color:var(--surface-sunken)] items-center gap-2">
+                          <div className="idx-italic draft">{divItems.length + 1}</div>
                           <input
                             value={addForm.cost_code}
                             onChange={(e) =>
@@ -864,7 +935,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                             onChange={(e) =>
                               setAddForm((f) => ({ ...f, quantity: e.target.value }))
                             }
-                            className="px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-1 focus:ring-gray-900"
+                            className="px-2 py-1 border border-gray-200 rounded text-sm text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-gray-900"
                           />
                           <input
                             value={addForm.unit}
@@ -877,9 +948,9 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                             onChange={(e) =>
                               setAddForm((f) => ({ ...f, unit_cost: e.target.value }))
                             }
-                            className="px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-1 focus:ring-gray-900"
+                            className="px-2 py-1 border border-gray-200 rounded text-sm text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-gray-900"
                           />
-                          <div className="text-sm text-right text-gray-500">
+                          <div className="text-sm text-right text-gray-500 font-mono tabular-nums">
                             {fmt(
                               (parseFloat(addForm.quantity) || 0) *
                                 (parseFloat(addForm.unit_cost) || 0)
@@ -906,7 +977,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                       ) : (
                         <button
                           onClick={() => startAddInDivision(divCode)}
-                          className="w-full flex items-center gap-2 px-5 py-2.5 text-sm text-gray-400 hover:text-gray-700 hover:bg-gray-50 transition-colors"
+                          className="w-full flex items-center gap-2 px-5 py-2.5 text-sm text-gray-400 hover:text-[color:var(--ink)] hover:bg-[color:var(--surface-sunken)] transition-colors"
                         >
                           <Plus className="w-3.5 h-3.5" />
                           Add item to {divCode} — {divName}
@@ -921,13 +992,17 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
             {/* Add form for a new division not yet in table */}
             {addingToDivision !== null &&
               !divisionKeys.some((k) => k.startsWith(`${addingToDivision}|`)) && (
-                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
-                    <span className="text-sm font-semibold text-gray-900">
-                      {addingToDivision} — {getDivisionName(addingToDivision)}
+                <div className="card overflow-hidden">
+                  <div className="flex items-center gap-3 px-5 py-3 bg-[color:var(--surface-sunken)] border-b border-black/[0.06]">
+                    <span className="font-mono text-sm font-semibold text-[color:var(--brand-700)]">
+                      {addingToDivision}
+                    </span>
+                    <span className="font-display text-[16px] text-[color:var(--ink)]">
+                      {getDivisionName(addingToDivision)}
                     </span>
                   </div>
-                  <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-2.5 bg-blue-50 items-center gap-2">
+                  <div className="grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_1fr_80px] px-5 py-2.5 bg-[color:var(--surface-sunken)] items-center gap-2">
+                    <div className="idx-italic draft">1</div>
                     <input
                       value={addForm.cost_code}
                       onChange={(e) => setAddForm((f) => ({ ...f, cost_code: e.target.value }))}
@@ -945,7 +1020,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                       type="number"
                       value={addForm.quantity}
                       onChange={(e) => setAddForm((f) => ({ ...f, quantity: e.target.value }))}
-                      className="px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      className="px-2 py-1 border border-gray-200 rounded text-sm text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-gray-900"
                     />
                     <input
                       value={addForm.unit}
@@ -956,9 +1031,9 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
                       type="number"
                       value={addForm.unit_cost}
                       onChange={(e) => setAddForm((f) => ({ ...f, unit_cost: e.target.value }))}
-                      className="px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      className="px-2 py-1 border border-gray-200 rounded text-sm text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-gray-900"
                     />
-                    <div className="text-sm text-right text-gray-500">
+                    <div className="text-sm text-right text-gray-500 font-mono tabular-nums">
                       {fmt(
                         (parseFloat(addForm.quantity) || 0) * (parseFloat(addForm.unit_cost) || 0)
                       )}
@@ -985,7 +1060,7 @@ export default function EstimatingClient({ projectId }: { projectId: string }) {
               )}
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }

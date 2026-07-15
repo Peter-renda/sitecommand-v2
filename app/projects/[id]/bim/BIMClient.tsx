@@ -31,12 +31,12 @@ const STATUS_LABELS: Record<TranslationStatus, string> = {
   timeout: "Timed Out",
 };
 
-const STATUS_COLORS: Record<TranslationStatus, string> = {
-  pending: "bg-yellow-50 text-yellow-700 border-yellow-200",
-  inprogress: "bg-blue-50 text-blue-700 border-blue-200",
-  success: "bg-green-50 text-green-700 border-green-200",
-  failed: "bg-red-50 text-red-700 border-red-200",
-  timeout: "bg-gray-50 text-gray-600 border-gray-200",
+const STATUS_PILLS: Record<TranslationStatus, string> = {
+  pending: "pill-warn",
+  inprogress: "pill-info",
+  success: "pill-open",
+  failed: "pill-danger",
+  timeout: "pill-post",
 };
 
 export default function BIMClient({
@@ -193,12 +193,39 @@ export default function BIMClient({
     setUploadError("");
 
     try {
-      const form = new FormData();
-      form.append("file", file);
-
-      const uploadRes = await fetch(`/api/projects/${projectId}/bim/upload`, {
+      const startRes = await fetch(`/api/projects/${projectId}/bim/upload-url`, {
         method: "POST",
-        body: form,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start", filename: file.name, contentType: file.type }),
+      });
+
+      const startData = await startRes.json();
+      if (!startRes.ok) {
+        if (startRes.status === 503) setApsConfigured(false);
+        setUploadError(startData.error ?? "Failed to prepare upload");
+        return;
+      }
+
+      const s3Res = await fetch(startData.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+
+      if (!s3Res.ok) {
+        setUploadError("Failed to upload file data");
+        return;
+      }
+
+      const uploadRes = await fetch(`/api/projects/${projectId}/bim/upload-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "complete",
+          filename: file.name,
+          objectKey: startData.objectKey,
+          uploadKey: startData.uploadKey,
+        }),
       });
 
       const uploadData = await uploadRes.json();
@@ -296,61 +323,84 @@ export default function BIMClient({
     });
   }
 
+  const readyCount = models.filter((m) => m.translation_status === "success").length;
+  const processingCount = models.filter(
+    (m) => m.translation_status === "pending" || m.translation_status === "inprogress"
+  ).length;
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 104px)" }}>
         {/* Sidebar */}
-        <aside className="w-72 bg-white border-r border-gray-100 flex flex-col shrink-0">
+        <aside className="w-72 bg-white border-r border-[color:var(--border)] flex flex-col shrink-0">
           {/* Sidebar header */}
-          <div className="px-4 py-4 border-b border-gray-100 flex items-center justify-between">
-            <div>
-              <h1 className="font-display text-[18px] leading-tight text-[color:var(--ink)]">BIM Viewer</h1>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {models.length} model{models.length !== 1 ? "s" : ""}
-              </p>
+          <div className="px-4 py-4 border-b border-[color:var(--border)]">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h1 className="font-display text-[22px] leading-tight tracking-[-0.012em] text-[color:var(--ink)]">Model coordination</h1>
+                <p className="sub mt-1 text-[12px]">
+                  <em>Federated project models</em>
+                  <span className="sep">·</span>
+                  <span className="num" style={{ color: "var(--brand-500)" }}>{readyCount}</span> ready
+                  <span className="sep">·</span>
+                  <span className="num">{models.length}</span> total
+                </p>
+              </div>
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".dwg,.rvt,.ifc,.nwd,.nwc,.dxf,.dwf"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="btn-primary flex items-center gap-1.5 text-xs disabled:opacity-50"
+                >
+                  {uploading ? (
+                    <>
+                      <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      Uploading
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                      Upload
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-            <div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".dwg,.rvt,.ifc,.nwd,.nwc,.dxf,.dwf"
-                className="hidden"
-                onChange={handleFileUpload}
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[color:var(--ink)] text-white text-xs font-medium rounded-md hover:bg-black transition-colors disabled:opacity-50"
-              >
-                {uploading ? (
-                  <>
-                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                    </svg>
-                    Uploading
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                    </svg>
-                    Upload
-                  </>
-                )}
-              </button>
-            </div>
+            {models.length > 0 && (
+              <div className="stats mt-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                <div className={`stat${readyCount > 0 ? " calm" : ""}`}>
+                  <div className="lbl">Ready</div>
+                  <div className="val">{readyCount}</div>
+                </div>
+                <div className={`stat${processingCount > 0 ? " warn" : ""}`}>
+                  <div className="lbl">Processing</div>
+                  <div className="val">{processingCount}</div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Error banner */}
           {uploadError && (
-            <div className="mx-3 mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-md">
-              <p className="text-xs text-red-700">{uploadError}</p>
+            <div className="mx-3 mt-3 px-3 py-2 bg-[color:var(--danger-50)] border border-[color:var(--danger-100)] rounded-md">
+              <p className="text-xs text-[color:var(--danger-500)]">{uploadError}</p>
               {!apsConfigured && (
-                <p className="text-xs text-red-500 mt-1">
+                <p className="text-xs text-[color:var(--danger-500)] mt-1 opacity-80">
                   APS credentials are not set. A site admin can configure them at{" "}
                   <a href="/settings/integrations" className="underline font-medium">
                     Settings → Integrations
@@ -363,8 +413,9 @@ export default function BIMClient({
 
           {/* Model list */}
           <div className="flex-1 overflow-y-auto py-2">
+            <p className="h3-warm px-4 pt-1 pb-2">Project models</p>
             {loading ? (
-              <div className="flex items-center justify-center h-32 text-gray-400">
+              <div className="flex items-center justify-center h-32 text-[color:var(--gray-400)]">
                 <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
@@ -372,17 +423,17 @@ export default function BIMClient({
               </div>
             ) : models.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-center px-6">
-                <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center mb-3">
-                  <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <div className="w-10 h-10 bg-[color:var(--surface-sunken)] border border-[color:var(--border)] rounded-lg flex items-center justify-center mb-3">
+                  <svg className="w-5 h-5 text-[color:var(--gray-400)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-gray-700 mb-1">No models yet</p>
-                <p className="text-xs text-gray-400">Upload a .dwg or .rvt file to get started</p>
+                <p className="font-display text-[16px] text-[color:var(--ink)] mb-1">No models yet</p>
+                <p className="text-xs text-[color:var(--gray-400)]">Upload a .dwg or .rvt file to get started</p>
               </div>
             ) : (
               <div className="space-y-0.5 px-2">
-                {models.map((model) => (
+                {models.map((model, i) => (
                   <button
                     key={model.id}
                     onClick={() =>
@@ -392,28 +443,31 @@ export default function BIMClient({
                     }
                     className={`w-full text-left px-3 py-3 rounded-lg transition-colors ${
                       selectedModel?.id === model.id
-                        ? "bg-gray-100"
+                        ? "bg-[color:var(--surface-sunken)]"
                         : model.translation_status === "success"
-                        ? "hover:bg-gray-50 cursor-pointer"
+                        ? "hover:bg-[color:var(--surface-sunken)] cursor-pointer"
                         : "cursor-default opacity-70"
                     }`}
                   >
-                    <div className="flex items-start gap-2">
-                      {/* File icon */}
-                      <div className="mt-0.5 shrink-0 w-7 h-7 bg-gray-100 rounded flex items-center justify-center">
-                        <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
-                        </svg>
-                      </div>
+                    <div className="flex items-start gap-2.5">
+                      {/* Index */}
+                      <span
+                        className={`idx-italic shrink-0 mt-0.5${
+                          model.translation_status === "success" ? " status-open" : ""
+                        }`}
+                      >
+                        {models.length - i}
+                      </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-gray-900 truncate">{model.filename}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{formatDate(model.uploaded_at)}</p>
-                        <span
-                          className={`inline-block mt-1.5 px-1.5 py-0.5 text-[10px] font-medium rounded border ${STATUS_COLORS[model.translation_status]}`}
-                        >
+                        <p className="text-xs font-semibold text-[color:var(--ink)] truncate">{model.filename}</p>
+                        <p className="text-[11px] text-[color:var(--gray-400)] mt-0.5 font-mono tabular-nums">
+                          {formatDate(model.uploaded_at)}
+                          {model.uploaded_by_name ? ` · ${model.uploaded_by_name}` : ""}
+                        </p>
+                        <span className={`pill ${STATUS_PILLS[model.translation_status]} mt-1.5`}>
                           {STATUS_LABELS[model.translation_status]}
                           {model.translation_status === "inprogress" && (
-                            <span className="ml-1 inline-block w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+                            <span className="ml-1 inline-block w-1.5 h-1.5 bg-[color:var(--info-500)] rounded-full animate-pulse" />
                           )}
                         </span>
                       </div>
@@ -425,8 +479,8 @@ export default function BIMClient({
           </div>
 
           {/* Footer hint */}
-          <div className="px-4 py-3 border-t border-gray-100">
-            <p className="text-[10px] text-gray-300">
+          <div className="px-4 py-3 border-t border-[color:var(--border)]">
+            <p className="mono-label text-[color:var(--gray-400)]">
               Supports .dwg .rvt .ifc .nwd .nwc .dxf .dwf
             </p>
           </div>

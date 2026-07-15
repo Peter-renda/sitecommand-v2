@@ -130,6 +130,8 @@ export async function PATCH(
     // DocuSign / markup
     "sign_docusign",
     "financial_markup_enabled",
+    // 360 Report-backed fields
+    "report_fields",
   ];
   // ssov_status is intentionally excluded — transitions go through the
   // dedicated /ssov/notify, /ssov/submit and /ssov/revise endpoints.

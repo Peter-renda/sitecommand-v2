@@ -51,7 +51,7 @@ const navItems: NavItemType[] = [
       },
     ],
   },
-  { label: "About Us", items: ["Company", "Team", "Careers", "Press"] },
+  { label: "About Us", items: ["Company", "Team", "Press"] },
   { label: "Resources", items: ["Documentation", "Blog", "Case Studies", "Community"] },
   { label: "Pricing", items: [], href: "/pricing" },
 ];

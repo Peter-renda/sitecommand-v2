@@ -11,7 +11,7 @@ function ConstructionPlaceholder() {
     >
       <svg
         className="w-12 h-12"
-        style={{ color: "#D4500A", opacity: 0.4 }}
+        style={{ color: "#2563EB", opacity: 0.4 }}
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -36,7 +36,7 @@ export default function CaseStudiesPage() {
         {/* Hero */}
         <div className="mb-20">
           <div className="inline-flex items-center gap-2 mb-8 animate-fade-up">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
             <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Case Studies</span>
           </div>
 
@@ -69,7 +69,7 @@ export default function CaseStudiesPage() {
                 <div className="mb-3">
                   <span
                     className="inline-block text-xs font-medium rounded-full px-2.5 py-0.5"
-                    style={{ background: "rgba(212,80,10,0.08)", color: "#D4500A", border: "1px solid rgba(212,80,10,0.15)" }}
+                    style={{ background: "rgba(37,99,235,0.08)", color: "#2563EB", border: "1px solid rgba(37,99,235,0.15)" }}
                   >
                     {study.companyType}
                   </span>

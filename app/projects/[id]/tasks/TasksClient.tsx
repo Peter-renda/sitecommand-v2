@@ -4,7 +4,9 @@ import { useState, useEffect, useRef, ChangeEvent } from "react";
 import ProjectNav from "@/components/ProjectNav";
 import EmptyState from "@/app/components/EmptyState";
 import { SkeletonTable } from "@/app/components/Skeleton";
-import { Brand, Pill } from "@/components/design-system/Primitives";
+import { Brand } from "@/components/design-system/Primitives";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { TASK_REPORT_FIELDS } from "@/lib/report-fields";
 
 type DistributionContact = { id: string; name: string; email: string | null };
 
@@ -19,7 +21,9 @@ type Task = {
   distribution_list: DistributionContact[];
   assignees: DistributionContact[];
   due_date: string | null;
+  is_private: boolean;
   created_at: string;
+  report_fields?: ReportFieldValues | null;
 };
 
 type DirectoryContact = {
@@ -32,16 +36,41 @@ type DirectoryContact = {
   email: string | null;
 };
 
+type TodoRecommendation = {
+  id: string;
+  title: string;
+  rationale: string;
+  source: string;
+  category: string | null;
+  priority: "high" | "medium" | "low";
+  suggested_due_date: string | null;
+  generated_at: string;
+};
+
 const STATUSES = ["initiated", "in progress", "ready for review", "closed", "void"];
 const CATEGORIES = ["Administrative", "Closeout", "Contract", "Design", "Miscellaneous", "Construction"];
 
-const STATUS_COLORS: Record<string, string> = {
-  initiated: "bg-blue-50 text-blue-700",
-  "in progress": "bg-amber-50 text-amber-700",
-  "ready for review": "bg-purple-50 text-purple-700",
-  closed: "bg-green-50 text-green-700",
-  void: "bg-gray-100 text-gray-500",
+const STATUS_PILL: Record<string, string> = {
+  initiated: "pill-open",
+  "in progress": "pill-warn",
+  "ready for review": "pill-open",
+  closed: "pill-post",
+  void: "pill-post",
 };
+
+// Maps a task status to an idx-italic status modifier (open / answered / closed / draft).
+const STATUS_IDX: Record<string, string> = {
+  initiated: "open",
+  "in progress": "open",
+  "ready for review": "answered",
+  closed: "closed",
+  void: "draft",
+};
+
+function TaskStatusPill({ status }: { status: string }) {
+  const cls = STATUS_PILL[status] ?? "pill-post";
+  return <span className={`pill ${cls} capitalize`}>{status}</span>;
+}
 
 
 // ── Assignee Picker ───────────────────────────────────────────────────────────
@@ -324,6 +353,7 @@ function NewTaskModal({
     distribution_list: DistributionContact[];
     assignees: DistributionContact[];
     due_date: string;
+    is_private: boolean;
     photoFile: File | null;
   }) => void;
   onCancel: () => void;
@@ -335,6 +365,7 @@ function NewTaskModal({
   const [description, setDescription] = useState("");
   const [distribution, setDistribution] = useState<DistributionContact[]>([]);
   const [assignees, setAssignees] = useState<DistributionContact[]>([]);
+  const [isPrivate, setIsPrivate] = useState(false);
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
@@ -348,15 +379,19 @@ function NewTaskModal({
     const file = e.target.files?.[0];
     if (!file) return;
     setPhotoFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setPhotoPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setPhotoPreview(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setPhotoPreview(null);
+    }
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
-    onConfirm({ task_number: taskNumber, title, status, category, description, distribution_list: distribution, assignees, due_date: dueDate, photoFile });
+    onConfirm({ task_number: taskNumber, title, status, category, description, distribution_list: distribution, assignees, due_date: dueDate, is_private: isPrivate, photoFile });
   }
 
   return (
@@ -373,7 +408,7 @@ function NewTaskModal({
 
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
           {/* Task number + Title */}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Task #</label>
               <input
@@ -472,19 +507,27 @@ function NewTaskModal({
             />
           </div>
 
-          {/* Photo attachment */}
+          {/* File attachment */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Photo Attachment</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Attachment</label>
             <input
               ref={photoInputRef}
               type="file"
-              accept="image/*"
               className="hidden"
               onChange={handlePhotoChange}
             />
-            {photoPreview ? (
+            {photoFile ? (
               <div className="relative">
-                <img src={photoPreview} alt="Preview" className="w-full h-40 object-cover rounded-lg border border-gray-200" />
+                {photoPreview ? (
+                  <img src={photoPreview} alt="Preview" className="w-full h-40 object-cover rounded-lg border border-gray-200" />
+                ) : (
+                  <div className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                    <svg className="w-6 h-6 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                    </svg>
+                    <span className="text-sm text-gray-700 truncate">{photoFile.name}</span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => { setPhotoFile(null); setPhotoPreview(null); if (photoInputRef.current) photoInputRef.current.value = ""; }}
@@ -502,11 +545,29 @@ function NewTaskModal({
                 className="w-full flex flex-col items-center justify-center gap-2 py-6 border-2 border-dashed border-gray-200 rounded-lg text-gray-400 hover:border-gray-300 hover:text-gray-500 transition-colors"
               >
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M4.5 19.5h15a.75.75 0 00.75-.75V6.75A.75.75 0 0019.5 6h-15a.75.75 0 00-.75.75v12c0 .414.336.75.75.75z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                 </svg>
-                <span className="text-xs">Click to attach a photo</span>
+                <span className="text-xs">Click to attach a file</span>
               </button>
             )}
+          </div>
+
+          {/* Private toggle */}
+          <div>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isPrivate}
+                onChange={(e) => setIsPrivate(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+              />
+              <span className="text-sm">
+                <span className="font-medium text-gray-900">Private</span>
+                <span className="block text-xs text-gray-500 mt-0.5">
+                  Only make visible to Assignees, Distribution List members, and Task Creator.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="flex gap-3 justify-end pt-1">
@@ -546,6 +607,7 @@ function TaskDetailModal({
   onClose: () => void;
 }) {
   const [status, setStatus] = useState(task.status);
+  const [reportFields, setReportFields] = useState<ReportFieldValues>(task.report_fields ?? {});
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -553,11 +615,11 @@ function TaskDetailModal({
     const res = await fetch(`/api/projects/${projectId}/tasks/${task.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, report_fields: reportFields }),
     });
     if (res.ok) {
       const updated = await res.json();
-      onUpdate({ ...task, status: updated.status });
+      onUpdate({ ...task, status: updated.status, report_fields: reportFields });
     }
     setSaving(false);
     onClose();
@@ -628,6 +690,15 @@ function TaskDetailModal({
               ))}
             </select>
           </div>
+
+          <ReportFieldsSection
+            title="Report Fields"
+            description="Extra task attributes surfaced as columns in 360 Reports."
+            fields={TASK_REPORT_FIELDS}
+            values={reportFields}
+            onChange={(key, value) => setReportFields((prev) => ({ ...prev, [key]: value }))}
+            columns={2}
+          />
 
           <div className="flex gap-3 justify-end pt-1">
             <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">
@@ -715,6 +786,191 @@ function exportPDF(tasks: Task[]) {
   if (win) { win.document.write(html); win.document.close(); }
 }
 
+// ── To Do (AI recommendations) ────────────────────────────────────────────────
+
+const PRIORITY_BADGE: Record<string, string> = {
+  high: "bg-rose-50 text-rose-700 border-rose-200",
+  medium: "bg-amber-50 text-amber-700 border-amber-200",
+  low: "bg-slate-50 text-slate-600 border-slate-200",
+};
+
+const SNOOZE_OPTIONS: { label: string; value: string }[] = [
+  { label: "Remind me in 1 day", value: "1d" },
+  { label: "Remind me in 1 week", value: "1w" },
+  { label: "Remind me in 2 weeks", value: "2w" },
+];
+
+function fmtDate(d: string): string {
+  return new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function TodoCard({
+  rec,
+  busy,
+  onAccept,
+  onIgnore,
+  onSnooze,
+}: {
+  rec: TodoRecommendation;
+  busy: boolean;
+  onAccept: () => void;
+  onIgnore: () => void;
+  onSnooze: (value: string) => void;
+}) {
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const snoozeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (snoozeRef.current && !snoozeRef.current.contains(e.target as Node)) setSnoozeOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  return (
+    <div className={`rounded-lg border border-gray-100 bg-white px-4 py-3 transition-opacity ${busy ? "opacity-50 pointer-events-none" : ""}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`px-1.5 py-0.5 rounded-full border text-[10px] font-medium capitalize ${PRIORITY_BADGE[rec.priority] ?? PRIORITY_BADGE.low}`}>
+              {rec.priority}
+            </span>
+            <span className="text-sm font-medium text-[color:var(--ink)]">{rec.title}</span>
+            {rec.category && <span className="text-xs text-gray-400">· {rec.category}</span>}
+          </div>
+          {rec.rationale && (
+            <p className="text-xs text-gray-500 mt-1 leading-relaxed">{rec.rationale}</p>
+          )}
+          <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400">
+            {rec.source && (
+              <span className="inline-flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {rec.source}
+              </span>
+            )}
+            {rec.suggested_due_date && <span className="tabular-nums">Suggested due {fmtDate(rec.suggested_due_date)}</span>}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={onAccept}
+            className="px-3 py-1.5 text-xs font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
+          >
+            Accept
+          </button>
+          <div ref={snoozeRef} className="relative">
+            <button
+              onClick={() => setSnoozeOpen((o) => !o)}
+              className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              Later
+            </button>
+            {snoozeOpen && (
+              <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-100 rounded-lg shadow-lg py-1 z-20">
+                {SNOOZE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => { setSnoozeOpen(false); onSnooze(opt.value); }}
+                    className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={onIgnore}
+            className="px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
+          >
+            Ignore
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TodoSection({
+  recommendations,
+  loading,
+  refreshing,
+  busyId,
+  onRefresh,
+  onAccept,
+  onIgnore,
+  onSnooze,
+}: {
+  recommendations: TodoRecommendation[];
+  loading: boolean;
+  refreshing: boolean;
+  busyId: string | null;
+  onRefresh: () => void;
+  onAccept: (id: string) => void;
+  onIgnore: (id: string) => void;
+  onSnooze: (id: string, value: string) => void;
+}) {
+  // While the first load is in flight we render nothing to avoid layout jump;
+  // once loaded, only show the section when there's something to act on.
+  if (loading) return null;
+
+  return (
+    <section className="mb-6 rounded-xl border hairline bg-[color:var(--surface-sunken)] p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-[color:var(--ink)] flex items-center gap-2">
+            <svg className="w-4 h-4 text-[color:var(--brand-600)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            To Do
+            {recommendations.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-[color:var(--brand-100)] text-[color:var(--brand-700)] text-[10px] font-medium">
+                {recommendations.length}
+              </span>
+            )}
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            <span className="serif-italic text-[color:var(--brand-700)]">Recommended each morning</span> from your emails, schedule, and project activity.
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
+        >
+          <svg className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          {refreshing ? "Thinking..." : "Refresh"}
+        </button>
+      </div>
+
+      {recommendations.length === 0 ? (
+        <p className="text-xs text-gray-400 py-2">
+          {refreshing ? "Reviewing project activity…" : "No recommendations right now. Check back tomorrow morning, or Refresh to generate now."}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {recommendations.map((rec) => (
+            <TodoCard
+              key={rec.id}
+              rec={rec}
+              busy={busyId === rec.id}
+              onAccept={() => onAccept(rec.id)}
+              onIgnore={() => onIgnore(rec.id)}
+              onSnooze={(v) => onSnooze(rec.id, v)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function TasksClient({
@@ -735,6 +991,12 @@ export default function TasksClient({
   const [sendingTaskId, setSendingTaskId] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
+  // AI "To Do" recommendations
+  const [recommendations, setRecommendations] = useState<TodoRecommendation[]>([]);
+  const [recsLoading, setRecsLoading] = useState(true);
+  const [recsRefreshing, setRecsRefreshing] = useState(false);
+  const [recBusyId, setRecBusyId] = useState<string | null>(null);
+
   // Click-outside for export menu
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -753,10 +1015,62 @@ export default function TasksClient({
       setDirectory(Array.isArray(dirData) ? dirData : []);
       setLoading(false);
     });
+
+    fetch(`/api/projects/${projectId}/todo-recommendations`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setRecommendations(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setRecsLoading(false));
   }, [projectId]);
+
+  async function handleRefreshRecs() {
+    setRecsRefreshing(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/todo-recommendations`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.recommendations)) setRecommendations(data.recommendations);
+      }
+    } catch {
+      // leave the existing list in place on failure
+    }
+    setRecsRefreshing(false);
+  }
+
+  async function actOnRec(id: string, body: { action: string; snooze?: string }) {
+    setRecBusyId(id);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/todo-recommendations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Accepting spawns a real task — surface it in the table immediately.
+        if (body.action === "accept" && data.task) {
+          const t = data.task as Task;
+          setTasks((prev) => [...prev, { ...t, assignees: t.assignees ?? [], distribution_list: t.distribution_list ?? [] }]);
+        }
+        setRecommendations((prev) => prev.filter((r) => r.id !== id));
+      }
+    } catch {
+      // keep the card in place on failure
+    }
+    setRecBusyId(null);
+  }
 
   const validNums = tasks.map((t) => Number(t.task_number)).filter((n) => Number.isFinite(n));
   const nextNumber = validNums.length > 0 ? Math.max(...validNums) + 1 : 1;
+
+  // Live headline metrics
+  const openCount = tasks.filter((t) => t.status === "initiated" || t.status === "in progress").length;
+  const reviewCount = tasks.filter((t) => t.status === "ready for review").length;
+  const closedCount = tasks.filter((t) => t.status === "closed").length;
+  const todayStr = new Date().toISOString().split("T")[0];
+  const overdueCount = tasks.filter(
+    (t) => t.due_date != null && t.due_date < todayStr && t.status !== "closed" && t.status !== "void"
+  ).length;
 
   async function handleCreate(data: {
     task_number: number;
@@ -767,6 +1081,7 @@ export default function TasksClient({
     distribution_list: DistributionContact[];
     assignees: DistributionContact[];
     due_date: string;
+    is_private: boolean;
     photoFile: File | null;
   }) {
     setShowNew(false);
@@ -784,6 +1099,7 @@ export default function TasksClient({
         distribution_list: data.distribution_list,
         assignees: data.assignees,
         due_date: data.due_date || null,
+        is_private: data.is_private,
       }),
     });
 
@@ -824,9 +1140,9 @@ export default function TasksClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="hover:opacity-80 transition-opacity">
           <Brand />
         </a>
@@ -840,14 +1156,21 @@ export default function TasksClient({
 
       <main className="max-w-6xl mx-auto px-6 py-8">
         {/* Title + actions */}
-        <div className="mb-6 rounded-xl border border-[var(--border-base)] bg-white p-4">
-          <div className="mt-2 flex items-center justify-between">
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Tasks</h1>
-            <Pill className="pill-open">{tasks.length} open items</Pill>
+        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+          <div>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Tasks</h1>
+            {!loading && tasks.length > 0 && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">Field punch list</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{openCount}</span> open
+                <span className="sep">·</span>
+                <span className="num">{overdueCount}</span> overdue
+                <span className="sep">·</span>
+                <span className="num">{tasks.length}</span> total
+              </p>
+            )}
           </div>
-        </div>
-
-        <div className="flex items-center justify-end mb-6">
           <div className="flex items-center gap-2">
             {/* Export dropdown */}
             <div ref={exportRef} className="relative">
@@ -891,7 +1214,7 @@ export default function TasksClient({
             <button
               onClick={() => setShowNew(true)}
               disabled={creating}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors disabled:opacity-50"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -900,6 +1223,44 @@ export default function TasksClient({
             </button>
           </div>
         </div>
+
+        {/* To Do — AI recommendations */}
+        <TodoSection
+          recommendations={recommendations}
+          loading={recsLoading}
+          refreshing={recsRefreshing}
+          busyId={recBusyId}
+          onRefresh={handleRefreshRecs}
+          onAccept={(id) => actOnRec(id, { action: "accept" })}
+          onIgnore={(id) => actOnRec(id, { action: "ignore" })}
+          onSnooze={(id, value) => actOnRec(id, { action: "snooze", snooze: value })}
+        />
+
+        {/* Stat strip */}
+        {!loading && tasks.length > 0 && (
+          <div className="stats mb-6">
+            <div className="stat">
+              <div className="lbl">Open</div>
+              <div className="val">{openCount}</div>
+              <div className="delta">Initiated &amp; in progress</div>
+            </div>
+            <div className={`stat${overdueCount > 0 ? " alert" : ""}`}>
+              <div className="lbl">Overdue</div>
+              <div className="val">{overdueCount}</div>
+              <div className="delta">Past due date</div>
+            </div>
+            <div className="stat warn">
+              <div className="lbl">Ready for Review</div>
+              <div className="val">{reviewCount}</div>
+              <div className="delta">Awaiting sign-off</div>
+            </div>
+            <div className="stat calm">
+              <div className="lbl">Closed</div>
+              <div className="val">{closedCount}</div>
+              <div className="delta">Completed tasks</div>
+            </div>
+          </div>
+        )}
 
         {/* Tasks table */}
         {loading ? (
@@ -917,18 +1278,18 @@ export default function TasksClient({
             />
           </div>
         ) : (
-          <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-            <table className="w-full">
+          <div className="bg-white border hairline rounded-xl overflow-x-auto">
+            <table className="w-full min-w-[800px]">
               <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider w-16">#</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Title</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Category</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Assignees</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Distribution</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Due Date</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Created</th>
+                <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap w-16">#</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Title</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Status</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Category</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Assignees</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Distribution</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Due Date</th>
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">Created</th>
                   <th className="px-4 py-3 w-28" />
                 </tr>
               </thead>
@@ -937,11 +1298,21 @@ export default function TasksClient({
                   <tr
                     key={task.id}
                     onClick={() => window.location.href = `/projects/${projectId}/tasks/${task.id}`}
-                    className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0 cursor-pointer"
+                    className="border-b border-gray-50 hover:bg-[color:var(--surface-sunken)] transition-colors last:border-b-0 cursor-pointer"
                   >
-                    <td className="px-4 py-3 text-sm text-gray-400 font-mono">{task.task_number}</td>
                     <td className="px-4 py-3">
-                      <span className="text-sm font-medium text-gray-900">{task.title}</span>
+                      <span className={`idx-italic status-${STATUS_IDX[task.status] ?? "draft"}`}>{String(task.task_number).padStart(3, "0")}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-medium text-[color:var(--ink)]">{task.title}</span>
+                      {task.is_private && (
+                        <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[color:var(--brand-100)] text-[color:var(--brand-700)] text-[10px] font-medium align-middle">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c.828 0 1.5-.672 1.5-1.5S12.828 8 12 8s-1.5.672-1.5 1.5S11.172 11 12 11zm6-4V6a6 6 0 10-12 0v1a2 2 0 00-2 2v9a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2z" />
+                          </svg>
+                          Private
+                        </span>
+                      )}
                       {task.photo_url && (
                         <svg className="inline-block w-3.5 h-3.5 ml-1.5 text-gray-300 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -949,9 +1320,7 @@ export default function TasksClient({
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_COLORS[task.status] ?? "bg-gray-100 text-gray-500"}`}>
-                        {task.status}
-                      </span>
+                      <TaskStatusPill status={task.status} />
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500">{task.category || <span className="text-gray-300">—</span>}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">
@@ -964,12 +1333,16 @@ export default function TasksClient({
                         ? task.distribution_list.map((d) => d.name).join(", ")
                         : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                      {task.due_date
-                        ? new Date(task.due_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                        : <span className="text-gray-300">—</span>}
+                    <td className="px-4 py-3 text-xs whitespace-nowrap tabular-nums">
+                      {task.due_date ? (
+                        <span className={task.due_date < todayStr && task.status !== "closed" && task.status !== "void" ? "text-[color:var(--brand-600)] font-medium" : "text-gray-500"}>
+                          {new Date(task.due_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
+                    <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap tabular-nums">
                       {new Date(task.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>

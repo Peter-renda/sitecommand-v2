@@ -511,7 +511,7 @@ export default async function ChangeEventWorkflowsPage({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <AppHeader username={session.username} />
       <ProjectNav projectId={projectId} />
       <main className="mx-auto max-w-7xl px-6 py-8 space-y-6">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import ProjectNav from "@/components/ProjectNav";
 
 type StatCard = {
@@ -197,10 +197,27 @@ export default function InsightsClient({
     window.location.href = "/";
   }
 
+  // Headline metrics derived from real card data
+  const totalTracked = useMemo(() => cards.reduce((sum, c) => sum + c.total, 0), [cards]);
+  const totalOpen = useMemo(() => {
+    const openLabels = new Set(["Open", "In Progress"]);
+    return cards.reduce(
+      (sum, c) => sum + c.breakdown.filter((b) => openLabels.has(b.label)).reduce((s, b) => s + b.count, 0),
+      0,
+    );
+  }, [cards]);
+  const pendingReview = useMemo(() => {
+    const reviewLabels = new Set(["Pending Review", "Revise & Resubmit"]);
+    return cards.reduce(
+      (sum, c) => sum + c.breakdown.filter((b) => reviewLabels.has(b.label)).reduce((s, b) => s + b.count, 0),
+      0,
+    );
+  }, [cards]);
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between shrink-0">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -216,28 +233,65 @@ export default function InsightsClient({
 
       {/* Body */}
       <div className="flex-1 px-6 py-8 max-w-5xl w-full mx-auto">
-        <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)] mb-1">Insights</h1>
-        <p className="text-sm text-gray-400 mb-8">Overview of project activity across all tools.</p>
+        <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Insights</h1>
+        {!loading && (
+          <p className="sub mt-1.5">
+            <em>A read of the project</em>
+            <span className="sep">·</span>
+            <span className="num" style={{ color: "var(--brand-500)" }}>{totalOpen}</span> open items
+            <span className="sep">·</span>
+            <span className="num">{totalTracked}</span> records tracked
+            <span className="sep">·</span>
+            <span className="num">{lessonAlerts.length}</span> lessons on file
+          </p>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center h-48">
-            <svg className="w-6 h-6 animate-spin text-gray-400" fill="none" viewBox="0 0 24 24">
+            <svg className="w-6 h-6 animate-spin text-[color:var(--brand-500)]" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
           </div>
         ) : (
           <>
+          {/* Headline metrics */}
+          <div className="stats mt-7">
+            <div className={`stat${totalOpen > 0 ? " alert" : " calm"}`}>
+              <div className="lbl">Open Items</div>
+              <div className="val">{totalOpen}</div>
+              <div className="delta">Tasks · RFIs · Punch List</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Records Tracked</div>
+              <div className="val">{totalTracked}</div>
+              <div className="delta">Across all project tools</div>
+            </div>
+            <div className={`stat${pendingReview > 0 ? " warn" : " calm"}`}>
+              <div className="lbl">Awaiting Review</div>
+              <div className="val">{pendingReview}</div>
+              <div className="delta">Submittals pending review</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Lessons On File</div>
+              <div className="val">{lessonAlerts.length}</div>
+              <div className="delta">{drawingCount} drawing set{drawingCount !== 1 ? "s" : ""} uploaded</div>
+            </div>
+          </div>
+
+          <div className="sec-row mt-10 mb-4">
+            <h2 className="h3-warm">Activity by tool</h2>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {cards.map((card) => (
               <a
                 key={card.label}
                 href={card.href}
-                className="bg-white border border-gray-100 rounded-xl p-5 hover:shadow-sm transition-shadow block"
+                className="card card-pad hover:shadow-sm transition-shadow block"
               >
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-medium text-gray-700">{card.label}</span>
-                  <span className="text-2xl font-semibold text-gray-900">{card.total}</span>
+                  <span className="mono-label text-[color:var(--ink)]">{card.label}</span>
+                  <span className="font-display text-[28px] leading-none text-[color:var(--ink)]">{card.total}</span>
                 </div>
 
                 {/* Progress bar */}
@@ -264,15 +318,15 @@ export default function InsightsClient({
                       <div key={b.label} className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <span className={`w-2 h-2 rounded-full ${b.color} shrink-0`} />
-                          <span className="text-xs text-gray-500">{b.label}</span>
+                          <span className="text-xs text-[color:var(--ink-soft)]">{b.label}</span>
                         </div>
-                        <span className="text-xs font-medium text-gray-700">{b.count}</span>
+                        <span className="text-xs font-medium tabular-nums text-[color:var(--ink)]">{b.count}</span>
                       </div>
                     ))}
                 </div>
 
                 {card.total === 0 && (
-                  <p className="text-xs text-gray-300 mt-2">No items yet</p>
+                  <p className="text-xs text-[color:var(--ink-soft)] italic mt-2">No items yet</p>
                 )}
               </a>
             ))}
@@ -280,14 +334,26 @@ export default function InsightsClient({
 
           {/* Lessons Learned Alerts */}
           {lessonAlerts.length > 0 && (
-            <div className="mt-10">
-              <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">
-                Lessons Learned
-              </h2>
-              <p className="text-xs text-gray-400 mb-4">
-                {drawingCount > 0
-                  ? `Based on ${drawingCount} drawing set${drawingCount !== 1 ? "s" : ""} uploaded — ${lessonAlerts.length} relevant lesson${lessonAlerts.length !== 1 ? "s" : ""} found from past projects.`
-                  : `${lessonAlerts.length} lesson${lessonAlerts.length !== 1 ? "s" : ""} on file from past projects.`}
+            <div className="mt-12">
+              <div className="sec-row mb-1">
+                <h2 className="h3-warm">Lessons learned</h2>
+              </div>
+              <p className="sub mb-4">
+                {drawingCount > 0 ? (
+                  <>
+                    <em>Drawn from past projects</em>
+                    <span className="sep">·</span>
+                    <span className="num">{drawingCount}</span> drawing set{drawingCount !== 1 ? "s" : ""} uploaded
+                    <span className="sep">·</span>
+                    <span className="num">{lessonAlerts.length}</span> relevant lesson{lessonAlerts.length !== 1 ? "s" : ""}
+                  </>
+                ) : (
+                  <>
+                    <em>Drawn from past projects</em>
+                    <span className="sep">·</span>
+                    <span className="num">{lessonAlerts.length}</span> lesson{lessonAlerts.length !== 1 ? "s" : ""} on file
+                  </>
+                )}
               </p>
               <div className="space-y-3">
                 {lessonAlerts.map((alert, i) => {
@@ -296,19 +362,17 @@ export default function InsightsClient({
                   const [, firstVal] = entries[0] ?? ["Note", "—"];
                   const rest = entries.slice(1, 4);
                   return (
-                    <div key={i} className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+                    <div key={i} className="card card-pad border-l-2 border-l-[color:var(--brand-500)]">
                       <div className="flex items-start justify-between gap-4 mb-2">
-                        <p className="text-sm font-medium text-gray-900">{String(firstVal)}</p>
-                        <span className="text-xs font-medium px-2 py-0.5 bg-amber-100 text-amber-700 rounded shrink-0">
-                          {alert.discipline}
-                        </span>
+                        <p className="text-sm font-medium text-[color:var(--ink)]">{String(firstVal)}</p>
+                        <span className="pill pill-warn shrink-0">{alert.discipline}</span>
                       </div>
                       {rest.map(([k, v]) => (
-                        <p key={k} className="text-xs text-gray-500 mt-1">
-                          <span className="font-medium text-gray-600">{k}:</span> {String(v)}
+                        <p key={k} className="text-xs text-[color:var(--ink-soft)] mt-1">
+                          <span className="mono-label">{k}</span>{" "}{String(v)}
                         </p>
                       ))}
-                      <p className="text-xs text-gray-300 mt-2">Source: {String(_source)}</p>
+                      <p className="text-xs text-[color:var(--ink-soft)] italic mt-2">Source: {String(_source)}</p>
                     </div>
                   );
                 })}

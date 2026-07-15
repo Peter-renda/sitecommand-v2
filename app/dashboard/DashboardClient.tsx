@@ -3,16 +3,33 @@
 import { useState, useEffect, useRef } from "react";
 import EmptyState from "@/app/components/EmptyState";
 import { SkeletonCard } from "@/app/components/Skeleton";
+import DashboardWalkthrough from "./DashboardWalkthrough";
+import {
+  DEFAULT_DASHBOARD_PREFS,
+  DashboardPreferences,
+  loadDashboardPreferences,
+} from "@/lib/dashboard-preferences";
 
 type Member = { id: string; username: string; email: string };
 
+type ScheduleTask = {
+  uid: number;
+  name: string;
+  isSummary: boolean;
+  isMilestone: boolean;
+  start: string;
+  finish: string;
+  percentComplete: number;
+};
+
 type ActivityItem = {
   id: string;
-  type: "rfi" | "submittal" | "document" | "daily_log" | "task" | "drawing";
+  type: "rfi" | "submittal" | "document" | "daily_log" | "task" | "drawing" | "quick_note" | "photo" | "transmittal";
   title: string;
   project_id: string;
   project_name: string;
   created_at: string;
+  changed_at?: string;
   href: string;
 };
 
@@ -28,7 +45,7 @@ type MyTask = {
 type MyOpenItem = {
   id: string;
   title: string;
-  type: "task" | "rfi" | "submittal" | "change_event" | "change_order" | "budget" | "commitment" | "prime_contract";
+  type: "task" | "rfi" | "submittal" | "change_event" | "change_order" | "budget" | "commitment" | "prime_contract" | "transaction_order_assignment" | "training_guide_assignment";
   status: string;
   due_date: string | null;
   project_id: string;
@@ -36,7 +53,22 @@ type MyOpenItem = {
   href?: string;
 };
 
-const ALL_TYPES = ["rfi", "submittal", "document", "daily_log", "task", "drawing"];
+// Normalized shape shared by the "My open items" and "While you were away"
+// rows so a single detail modal can render and paginate either list.
+type DashDetailItem = {
+  key: string;
+  variant: "open_item" | "activity";
+  typeLabel: string;
+  pillClass: string;
+  title: string;
+  projectName: string;
+  status?: string;
+  dueDate?: string | null;
+  timestamp?: string;
+  href: string;
+};
+
+const ALL_TYPES = ["rfi", "submittal", "document", "daily_log", "task", "drawing", "quick_note", "photo", "transmittal"];
 
 const TYPE_LABELS: Record<string, string> = {
   rfi: "RFIs",
@@ -45,6 +77,9 @@ const TYPE_LABELS: Record<string, string> = {
   daily_log: "Daily Logs",
   task: "Tasks",
   drawing: "Drawings",
+  quick_note: "Quick Notes",
+  photo: "Photos",
+  transmittal: "Transmittals",
 };
 
 function timeAgo(ts: string): string {
@@ -60,10 +95,18 @@ function timeAgo(ts: string): string {
   return `${months}mo ago`;
 }
 
+function dueDateLabel(due: string): string {
+  const d = new Date(due);
+  const days = Math.floor((d.getTime() - Date.now()) / 86_400_000);
+  if (days < 0) return `${Math.abs(days)}d overdue`;
+  if (days === 0) return "Due today";
+  return `Due ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+}
+
 function ActivityIcon({ type }: { type: ActivityItem["type"] }) {
   const iconMap: Record<string, React.ReactNode> = {
     rfi: (
-      <svg className="w-4 h-4 text-[#D4500A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+      <svg className="w-4 h-4 text-[#2563EB]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
@@ -92,6 +135,21 @@ function ActivityIcon({ type }: { type: ActivityItem["type"] }) {
         <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
       </svg>
     ),
+    quick_note: (
+      <svg className="w-4 h-4 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h8M8 14h5m-7 7h12a2 2 0 002-2V5a2 2 0 00-2-2H6a2 2 0 00-2 2v14a2 2 0 002 2z" />
+      </svg>
+    ),
+    photo: (
+      <svg className="w-4 h-4 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16l4-4a3 3 0 014.243 0L15 15.757m-2-2.757l1-1a3 3 0 014.243 0L21 14m-2 7H5a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2z" />
+      </svg>
+    ),
+    transmittal: (
+      <svg className="w-4 h-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M22 2L11 13m11-11l-7 20-4-9-9-4 20-7z" />
+      </svg>
+    ),
   };
   return (
     <div className="w-7 h-7 rounded-md bg-gray-50 border border-gray-100 grid place-items-center shrink-0">
@@ -116,6 +174,20 @@ type Project = {
   project_number?: string | null;
   sector?: string | null;
   members?: Member[];
+};
+
+type AddressSuggestion = {
+  place_id: number;
+  display_name: string;
+  address?: {
+    house_number?: string;
+    road?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    state?: string;
+    postcode?: string;
+  };
 };
 
 const ADMIN_EMAIL = "ptrenda1@gmail.com";
@@ -206,6 +278,11 @@ function openItemHref(item: MyOpenItem): string {
       return `${projectBase}/commitments/${item.id}`;
     case "prime_contract":
       return `${projectBase}/prime-contracts/${item.id}`;
+    case "transaction_order_assignment":
+      return `${projectBase}/transaction-orders`;
+    case "training_guide_assignment":
+      // Company-scoped (no project) — link straight to the Guides page.
+      return `/training/guides`;
     default:
       return projectBase;
   }
@@ -339,6 +416,51 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const [myOpenItems, setMyOpenItems] = useState<MyOpenItem[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const myOpenItemsRef = useRef<HTMLElement>(null);
+  const whileAwayRef = useRef<HTMLElement>(null);
+
+  // Dashboard preferences + walkthrough state. Prefs are persisted in localStorage
+  // and re-read whenever the walkthrough writes a new value so the dashboard
+  // reflects edits live.
+  const [dashPrefs, setDashPrefs] = useState<DashboardPreferences>(DEFAULT_DASHBOARD_PREFS);
+  const [walkthroughOpen, setWalkthroughOpen] = useState(false);
+  // User menu (Support / Training / Settings / Logout). Toggled on click/tap so
+  // it works on touch devices, which have no hover.
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [userMenuOpen]);
+  useEffect(() => {
+    setDashPrefs(loadDashboardPreferences());
+    const onChange = (e: Event) => {
+      const detail = (e as CustomEvent<DashboardPreferences>).detail;
+      if (detail) setDashPrefs(detail);
+    };
+    window.addEventListener("dashboard-prefs-changed", onChange);
+    // Auto-start the walkthrough when the URL has ?walkthrough=1 (e.g. coming
+    // from the Settings "Start walkthrough" button). Strip the param after so
+    // a refresh doesn't relaunch it.
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("walkthrough") === "1") {
+        setWalkthroughOpen(true);
+        url.searchParams.delete("walkthrough");
+        window.history.replaceState({}, "", url.toString());
+      }
+    } catch { /* ignore */ }
+    return () => window.removeEventListener("dashboard-prefs-changed", onChange);
+  }, []);
+
+  // Detail modal state — paginates through a snapshot of one of the two lists.
+  const [detailItems, setDetailItems] = useState<DashDetailItem[]>([]);
+  const [detailIndex, setDetailIndex] = useState<number | null>(null);
 
   // Form state
   const [name, setName] = useState("");
@@ -348,6 +470,10 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const [city, setCity] = useState("");
   const [stateVal, setStateVal] = useState("");
   const [zipCode, setZipCode] = useState("");
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
+  const [addressLookupLoading, setAddressLookupLoading] = useState(false);
+  const addressLookupAbortRef = useRef<AbortController | null>(null);
   const [county, setCounty] = useState("");
   const [description, setDescription] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
@@ -366,8 +492,6 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [companyMenuOpen, setCompanyMenuOpen] = useState(false);
   const companyMenuRef = useRef<HTMLDivElement>(null);
-  const [companyToolsMenuOpen, setCompanyToolsMenuOpen] = useState(false);
-  const companyToolsMenuRef = useRef<HTMLDivElement>(null);
   const dashboardSearchRef = useRef<HTMLDivElement>(null);
   const [dashboardSearch, setDashboardSearch] = useState("");
   const [showDashboardSearch, setShowDashboardSearch] = useState(false);
@@ -384,8 +508,65 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      addressLookupAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const query = address.trim();
+
+    if (query.length < 4) {
+      setAddressSuggestions([]);
+      setAddressLookupLoading(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      addressLookupAbortRef.current?.abort();
+      const controller = new AbortController();
+      addressLookupAbortRef.current = controller;
+
+      try {
+        setAddressLookupLoading(true);
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=us&limit=5&q=${encodeURIComponent(query)}`,
+          {
+            headers: { Accept: "application/json" },
+            signal: controller.signal,
+          }
+        );
+        if (!response.ok) throw new Error("Failed address lookup");
+        const data = (await response.json()) as AddressSuggestion[];
+        setAddressSuggestions(data);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setAddressSuggestions([]);
+      } finally {
+        if (!controller.signal.aborted) setAddressLookupLoading(false);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [address]);
+
+  const applyAddressSuggestion = (suggestion: AddressSuggestion) => {
+    const addr = suggestion.address ?? {};
+    const street = [addr.house_number, addr.road].filter(Boolean).join(" ").trim();
+    setAddress(street || suggestion.display_name.split(",")[0]?.trim() || "");
+    setCity(addr.city || addr.town || addr.village || "");
+    setStateVal(addr.state || "");
+    setZipCode((addr.postcode || "").slice(0, 5));
+    setShowAddressSuggestions(false);
+  };
   const [settingsError, setSettingsError] = useState("");
   const [settingsSuccess, setSettingsSuccess] = useState("");
+  const updatesWhileAway =
+    lastLoginAt === null
+      ? []
+      : activities.filter((item) => new Date(item.changed_at || item.created_at).getTime() > lastLoginAt);
 
   async function loadProjects() {
     const res = await fetch("/api/projects");
@@ -393,6 +574,15 @@ export default function DashboardClient({ username, email, role, companyRole, us
     setProjects(Array.isArray(data) ? data : []);
     setLoading(false);
   }
+
+  // Legacy cleanup: older sandbox visits set an "sc_training_mode" cookie that used
+  // to scope the dashboard to training sandboxes. That behavior was removed (sandboxes
+  // are reached only from Training → Practice), so clear any lingering cookie.
+  useEffect(() => {
+    if (document.cookie.split("; ").some((c) => c.startsWith("sc_training_mode="))) {
+      document.cookie = "sc_training_mode=; path=/; max-age=0; samesite=lax";
+    }
+  }, []);
 
   async function loadUsers() {
     const res = await fetch("/api/users");
@@ -504,9 +694,6 @@ export default function DashboardClient({ username, email, role, companyRole, us
       if (companyMenuRef.current && !companyMenuRef.current.contains(e.target as Node)) {
         setCompanyMenuOpen(false);
       }
-      if (companyToolsMenuRef.current && !companyToolsMenuRef.current.contains(e.target as Node)) {
-        setCompanyToolsMenuOpen(false);
-      }
       if (dashboardSearchRef.current && !dashboardSearchRef.current.contains(e.target as Node)) {
         setShowDashboardSearch(false);
       }
@@ -514,6 +701,18 @@ export default function DashboardClient({ username, email, role, companyRole, us
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  // Keyboard navigation for the detail modal (Esc to close, arrows to page).
+  useEffect(() => {
+    if (detailIndex === null) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setDetailIndex(null);
+      else if (e.key === "ArrowLeft") setDetailIndex((i) => (i !== null && i > 0 ? i - 1 : i));
+      else if (e.key === "ArrowRight") setDetailIndex((i) => (i !== null && i < detailItems.length - 1 ? i + 1 : i));
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [detailIndex, detailItems.length]);
 
   const searchQuery = dashboardSearch.trim();
 
@@ -566,6 +765,15 @@ export default function DashboardClient({ username, email, role, companyRole, us
     setStartDate(""); setActualStartDate(""); setCompletionDate("");
     setProjectedFinishDate(""); setWarrantyStartDate(""); setWarrantyEndDate("");
     setFormError("");
+  }
+
+  function openDetail(items: DashDetailItem[], index: number) {
+    setDetailItems(items);
+    setDetailIndex(index);
+  }
+
+  function closeDetail() {
+    setDetailIndex(null);
   }
 
   async function handleLogout() {
@@ -640,6 +848,36 @@ export default function DashboardClient({ username, email, role, companyRole, us
   const activeCount = projects.filter((p) => p.status === "course of construction").length;
   const completedCount = projects.filter((p) => p.status === "post-construction" || p.status === "warranty").length;
 
+  const visibleOpenItems = myOpenItems.filter((item) => dashPrefs.attentionTypes[item.type] !== false);
+
+  const openItemDetailList: DashDetailItem[] = visibleOpenItems.map((item) => ({
+    key: `${item.type}-${item.id}`,
+    variant: "open_item",
+    typeLabel:
+      item.type === "transaction_order_assignment"
+        ? "assigned invoice"
+        : item.type === "training_guide_assignment"
+          ? "assigned guide"
+          : item.type.replace(/_/g, " "),
+    pillClass: item.due_date && new Date(item.due_date) < new Date() ? "pill-danger" : "pill-warn",
+    title: item.title,
+    projectName: item.project_name || "Project",
+    status: item.status || "Open",
+    dueDate: item.due_date,
+    href: openItemHref(item),
+  }));
+
+  const awayDetailList: DashDetailItem[] = updatesWhileAway.map((item) => ({
+    key: `${item.type}-${item.id}`,
+    variant: "activity",
+    typeLabel: TYPE_LABELS[item.type] ?? item.type,
+    pillClass: "pill-info",
+    title: item.title,
+    projectName: item.project_name,
+    timestamp: item.changed_at || item.created_at,
+    href: item.href,
+  }));
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -661,6 +899,9 @@ export default function DashboardClient({ username, email, role, companyRole, us
               </button>
               {companyMenuOpen && (
                 <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-gray-100 rounded-lg shadow-lg z-50 py-1">
+                  <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                    Company
+                  </div>
                   {companies.map((c) => (
                     <button
                       key={c.id}
@@ -679,36 +920,6 @@ export default function DashboardClient({ username, email, role, companyRole, us
               )}
             </div>
           )}
-          {/* Company Tools dropdown */}
-          <div ref={companyToolsMenuRef} className="relative">
-            <button
-              onClick={() => setCompanyToolsMenuOpen((o) => !o)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 text-xs font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 transition-colors"
-            >
-              Company Tools
-              <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {companyToolsMenuOpen && (
-              <div className="absolute top-full left-0 mt-1 w-40 bg-white border border-gray-100 rounded-lg shadow-lg z-50 py-1">
-                <a
-                  href="/portfolio"
-                  className="block px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
-                  onClick={() => setCompanyToolsMenuOpen(false)}
-                >
-                  Portfolio
-                </a>
-                <a
-                  href="/company"
-                  className="block px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
-                  onClick={() => setCompanyToolsMenuOpen(false)}
-                >
-                  Admin
-                </a>
-              </div>
-            )}
-          </div>
         </div>
         <div className="flex items-center gap-3 sm:gap-5 min-w-0">
           <div ref={dashboardSearchRef} className="relative hidden md:block w-[26rem] max-w-[36vw]">
@@ -760,55 +971,103 @@ export default function DashboardClient({ username, email, role, companyRole, us
               Admin
             </a>
           )}
-          <div className="relative group shrink-0">
-            <span
-              className="hidden sm:block text-sm text-gray-400 truncate max-w-[120px] cursor-default"
-              title="Account and Settings"
+          <div className="relative shrink-0" ref={userMenuRef}>
+            <button
+              type="button"
+              onClick={() => setUserMenuOpen((o) => !o)}
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 transition-colors max-w-[140px]"
+              title="Support, Training, Settings, Logout"
             >
-              {username}
-            </span>
-            <div className="absolute right-0 top-full mt-1 hidden group-hover:block z-40">
-              <div className="w-44 rounded-md border border-gray-200 bg-white py-1 shadow-lg">
-                <a
-                  href="/settings/account"
-                  className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
-                >
-                  Account
-                </a>
-                <a
-                  href="/settings"
-                  className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
-                >
-                  Settings
-                </a>
+              <span className="truncate">{username}</span>
+              <svg
+                className={`w-3.5 h-3.5 shrink-0 transition-transform ${userMenuOpen ? "rotate-180" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {userMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 z-40">
+                <div className="w-44 rounded-md border border-gray-200 bg-white py-1 shadow-lg">
+                  <a
+                    href="/support"
+                    className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                  >
+                    Support
+                  </a>
+                  <a
+                    href="/training"
+                    className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                  >
+                    Training
+                  </a>
+                  <a
+                    href="/settings/account"
+                    className="block px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                  >
+                    Settings
+                  </a>
+                  <button
+                    onClick={handleLogout}
+                    className="block w-full text-left px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                  >
+                    Logout
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
-          <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors shrink-0">
-            Logout
-          </button>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+        {/* W2 greeting bar */}
+        {(() => {
+          const h = new Date().getHours();
+          const firstName = (username || "there").split(/[\s.@]/)[0];
+          return (
+            <div className="flex items-center gap-2.5 mb-5 text-[12px] text-gray-500">
+              <span className="inline-block w-[5px] h-[5px] rounded-full shrink-0 bg-[#2563EB]" />
+              <span className="font-medium text-gray-700">
+                Good {h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"}, {firstName}
+              </span>
+              <span className="text-gray-300 mx-0.5">·</span>
+              <em className="not-italic font-display italic text-[11px] text-[#64748B]">here&rsquo;s what&rsquo;s on today</em>
+              <span className="ml-auto font-mono tabular-nums text-[11px] text-gray-400 hidden sm:block">
+                {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+              </span>
+            </div>
+          );
+        })()}
+
         {/* Focus Card — hero with ambient glow, attention items + portfolio snapshot */}
         {(() => {
           const scopedTasks = myTasks.filter((t) => !currentProjectId || t.project_id === currentProjectId);
-          const attentionCount = myOpenItems.length;
+          const attentionCount = visibleOpenItems.length;
           const greetingFirstName = (username || "there").split(/[\s.@]/)[0];
           const greeting = `Good ${(() => { const h = new Date().getHours(); return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"; })()}, ${greetingFirstName}.`;
+          const updatesWhileAwayCount = updatesWhileAway.length;
           return (
             <div className="bezel ambient-hero mb-10">
               <div className="bezel-inner">
                 <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr]">
                   {/* Left: attention */}
-                  <div className="px-6 sm:px-8 py-7 sm:py-9">
-                    <h1 className="font-display text-[32px] sm:text-[40px] leading-[1.05] text-[color:var(--ink)] mb-1">
+                  <div className="px-6 sm:px-8 py-7 sm:py-9" id="dash-attention-anchor">
+                    <button
+                      type="button"
+                      onClick={() => myOpenItemsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      className="group block text-left font-display text-[32px] sm:text-[40px] leading-[1.05] text-[color:var(--ink)] mb-1 hover:opacity-85 transition-opacity"
+                    >
                       {attentionCount > 0 ? (
                         <>
                           <span className="tabular-nums">{attentionCount}</span>{" "}
                           {attentionCount === 1 ? "item" : "items"}{" "}
-                          <span className="serif-italic text-gray-500">need your attention</span>
+                          <span className="serif-italic text-gray-500 group-hover:underline underline-offset-4 decoration-[1.5px]">need your attention</span>
                         </>
                       ) : (
                         <>
@@ -816,14 +1075,22 @@ export default function DashboardClient({ username, email, role, companyRole, us
                           <span className="serif-italic text-gray-500">nothing overdue</span>
                         </>
                       )}
-                    </h1>
-                    <p className="text-sm text-gray-500 mb-6 max-w-md">
+                    </button>
+                    <p className="text-sm text-gray-500 max-w-md">
                       {attentionCount > 0
                         ? "Open items assigned to you or created by you across all active projects."
                         : "Signals from your projects will surface here as work progresses."}
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => whileAwayRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      className="group block text-left font-display text-[32px] sm:text-[40px] leading-[1.05] text-[color:var(--ink)] mb-6 hover:opacity-85 transition-opacity"
+                    >
+                      <span className="tabular-nums font-semibold">{updatesWhileAwayCount} {updatesWhileAwayCount === 1 ? "item" : "items"}</span>{" "}
+                      <span className="serif-italic text-gray-500 group-hover:underline underline-offset-4 decoration-[1.5px]">were updated while you were away</span>
+                    </button>
 
-                    {scopedTasks.length > 0 ? (
+                    {scopedTasks.length > 0 && (
                       <ul className="divide-y divide-gray-50 border hairline rounded-lg bg-white">
                         {scopedTasks.slice(0, 4).map((task) => (
                           <li key={task.id}>
@@ -854,47 +1121,33 @@ export default function DashboardClient({ username, email, role, companyRole, us
                           </li>
                         ))}
                       </ul>
-                    ) : (
-                      <div className="text-xs text-gray-400 italic">You&rsquo;re all caught up.</div>
                     )}
 
                   </div>
 
                   {/* Right: portfolio snapshot */}
-                  <div className="border-t lg:border-t-0 lg:border-l hairline px-6 sm:px-8 py-7 sm:py-9 bg-gradient-to-br from-white to-[color:var(--surface-sunken)]">
-                    <p className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-1">Total value</p>
-                    <p className="font-display text-[36px] leading-none text-[color:var(--ink)] tabular-nums mb-6">
-                      {formatCurrencyDisplay(totalValue)}
-                    </p>
-
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <p className="mono-label mb-1">PROJECTS</p>
-                        <p className="font-display text-xl text-[color:var(--ink)] tabular-nums">{projects.length}</p>
-                      </div>
-                      <div>
-                        <p className="mono-label mb-1">ACTIVE</p>
-                        <p className="font-display text-xl text-[color:var(--ink)] tabular-nums">{activeCount}</p>
-                      </div>
-                      <div>
-                        <p className="mono-label mb-1">COMPLETE</p>
-                        <p className="font-display text-xl text-[color:var(--ink)] tabular-nums">{completedCount}</p>
-                      </div>
-                    </div>
-
-                    <div className="mt-6 pt-5 border-t hairline">
-                      <button
-                        type="button"
-                        className="mono-label mb-2 hover:text-gray-700 transition-colors underline-offset-2 hover:underline"
-                        onClick={() => myOpenItemsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                      >
-                        MY OPEN ITEMS
-                      </button>
-                      <div className="flex items-baseline gap-2">
-                        <p className="font-display text-2xl text-[color:var(--ink)] tabular-nums">{attentionCount}</p>
-                        <p className="text-xs text-gray-400">
-                          {attentionCount === 1 ? "item awaiting action" : "items awaiting action"}
+                  <div id="dash-portfolio-anchor" className="border-t lg:border-t-0 lg:border-l hairline px-6 sm:px-8 py-7 sm:py-9 bg-gradient-to-br from-white to-[color:var(--surface-sunken)]">
+                    {dashPrefs.showPortfolioTotal && (
+                      <>
+                        <p className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-1">Total value</p>
+                        <p className="font-display text-[36px] leading-none text-[color:var(--ink)] tabular-nums mb-6">
+                          {formatCurrencyDisplay(totalValue)}
                         </p>
+                      </>
+                    )}
+
+                    <div className="grid grid-cols-3 gap-6">
+                      <div>
+                        <p className="mono-label mb-2">PROJECTS</p>
+                        <p className="font-display text-3xl text-[color:var(--ink)] tabular-nums">{projects.length}</p>
+                      </div>
+                      <div>
+                        <p className="mono-label mb-2">ACTIVE</p>
+                        <p className="font-display text-3xl text-[color:var(--ink)] tabular-nums">{activeCount}</p>
+                      </div>
+                      <div>
+                        <p className="mono-label mb-2">COMPLETE</p>
+                        <p className="font-display text-3xl text-[color:var(--ink)] tabular-nums">{completedCount}</p>
                       </div>
                     </div>
                   </div>
@@ -1018,11 +1271,11 @@ export default function DashboardClient({ username, email, role, companyRole, us
                   {project.members && project.members.length > 0 && (
                     <div className="flex items-center gap-2 mb-4">
                       <div className="flex -space-x-1.5">
-                        {project.members.slice(0, 4).map((m) => (
+                        {project.members.slice(0, 4).map((m, mi) => (
                           <div
                             key={m.id}
                             title={m.username}
-                            className="w-6 h-6 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-[10px] font-semibold text-gray-600"
+                            className={`av-warm av-${(mi % 5) + 1} w-6 h-6 border-2 border-white text-[10px] flex items-center justify-center`}
                           >
                             {m.username[0].toUpperCase()}
                           </div>
@@ -1036,7 +1289,8 @@ export default function DashboardClient({ username, email, role, companyRole, us
 
                   {/* Site-pulse footer */}
                   <div className="-mx-5 px-5 py-2.5 border-t hairline bg-[color:var(--surface-sunken)] flex items-center justify-between">
-                    <span className="mono-label">
+                    <span className="mono-label flex items-center gap-1.5">
+                      {isActive && <span className="live-dot" />}
                       {isActive ? "ON SITE" : project.status === "warranty" ? "WARRANTY" : project.status === "bidding" ? "BIDDING" : project.status === "pre-construction" ? "PRE-CON" : "WRAPPED"}
                     </span>
                     <span className="text-[11px] text-gray-400">
@@ -1112,12 +1366,12 @@ export default function DashboardClient({ username, email, role, companyRole, us
             const visible = filtered.slice(0, visibleCount);
             const hasMore = filtered.length > visibleCount;
             return (
-              <div className="bg-white border hairline rounded-xl divide-y divide-gray-50">
-                {visible.map((item) => (
+              <div className="act-timeline bg-white border hairline rounded-xl divide-y divide-gray-50">
+                {visible.map((item, ai) => (
                   <a
                     key={`${item.type}-${item.id}`}
                     href={item.href}
-                    className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors"
+                    className={`act-row flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors${ai === 0 ? " act-live" : ""}`}
                   >
                     <ActivityIcon type={item.type} />
                     <div className="flex-1 min-w-0">
@@ -1149,52 +1403,57 @@ export default function DashboardClient({ username, email, role, companyRole, us
           })()}
         </div>
 
-        {/* My Open Items */}
-        <section ref={myOpenItemsRef} className="mt-12">
+        <section
+          ref={whileAwayRef}
+          id="dash-while-away-anchor"
+          className="mt-12"
+          style={
+            !dashPrefs.showWhileAway && !walkthroughOpen
+              ? { display: "none" }
+              : !dashPrefs.showWhileAway
+              ? { opacity: 0.35, pointerEvents: "none" }
+              : undefined
+          }
+        >
           <div className="flex items-end justify-between mb-5">
             <div>
-              <h2 className="font-display text-[28px] leading-[1.05] text-[color:var(--ink)]">My open items</h2>
+              <h2 className="font-display text-[28px] leading-[1.05] text-[color:var(--ink)]">While you were away</h2>
               <p className="sec-sub">
-                <span className="num">{myOpenItems.length}</span> item{myOpenItems.length !== 1 ? "s" : ""} awaiting action
+                <span className="num">{updatesWhileAway.length}</span> update{updatesWhileAway.length !== 1 ? "s" : ""} since your last login
+                {!dashPrefs.showWhileAway && walkthroughOpen ? (
+                  <span className="ml-2 text-xs italic text-gray-400">· hidden by your settings</span>
+                ) : null}
               </p>
             </div>
           </div>
 
-          {myOpenItems.length === 0 ? (
-            <div className="text-xs text-gray-400 italic">You&rsquo;re all caught up.</div>
-          ) : (
+          {awayDetailList.length > 0 ? (
             <ul className="divide-y divide-gray-50 border hairline rounded-xl bg-white">
-              {myOpenItems.map((item) => (
-                <li key={`${item.type}-${item.id}`}>
-                  <a
-                    href={openItemHref(item)}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+              {awayDetailList.map((d, idx) => (
+                <li key={d.key}>
+                  <button
+                    type="button"
+                    onClick={() => openDetail(awayDetailList, idx)}
+                    className="w-full text-left flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
                   >
-                    <span className={`pill ${item.due_date && new Date(item.due_date) < new Date() ? "pill-danger" : "pill-warn"} shrink-0`}>
-                      {item.type.replace("_", " ")}
-                    </span>
+                    <span className={`pill ${d.pillClass} shrink-0`}>{d.typeLabel}</span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm text-gray-900 truncate">{item.title}</p>
-                      <p className="text-xs text-gray-400 truncate">
-                        {item.project_name || "Project"} · {item.status || "Open"}
-                      </p>
+                      <p className="text-sm text-gray-900 truncate">{d.title}</p>
+                      <p className="text-xs text-gray-400 truncate">{d.projectName}</p>
                     </div>
-                    {item.due_date && (
+                    {d.timestamp && (
                       <span className="text-xs text-gray-500 shrink-0 mono-label">
-                        {(() => {
-                          const d = new Date(item.due_date);
-                          const now = new Date();
-                          const days = Math.floor((d.getTime() - now.getTime()) / 86_400_000);
-                          if (days < 0) return `${Math.abs(days)}d overdue`;
-                          if (days === 0) return "Due today";
-                          return `Due ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-                        })()}
+                        {timeAgo(d.timestamp)}
                       </span>
                     )}
-                  </a>
+                  </button>
                 </li>
               ))}
             </ul>
+          ) : (
+            <div className="bg-white border border-dashed border-gray-200 rounded-xl px-6 py-8 text-center">
+              <p className="text-sm text-gray-400">No updates since your last login.</p>
+            </div>
           )}
         </section>
       </main>
@@ -1254,11 +1513,31 @@ export default function DashboardClient({ username, email, role, companyRole, us
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Sector <span className="text-gray-400 font-normal">(optional)</span></label>
-                    <input
-                      type="text" value={sector} onChange={(e) => setSector(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                      placeholder="e.g. Commercial"
-                    />
+                    <select
+                      value={sector} onChange={(e) => setSector(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white"
+                    >
+                      <option value="">Select a sector…</option>
+                      <option value="Residential">Residential</option>
+                      <option value="Commercial">Commercial</option>
+                      <option value="Industrial">Industrial</option>
+                      <option value="Institutional">Institutional</option>
+                      <option value="Heavy Civil / Infrastructure">Heavy Civil / Infrastructure</option>
+                      <option value="Energy & Utilities">Energy &amp; Utilities</option>
+                      <option value="Telecom">Telecom</option>
+                      <option value="Renovation">Renovation</option>
+                      <option value="Mixed-Use">Mixed-Use</option>
+                      <option value="Hospitality">Hospitality</option>
+                      <option value="Healthcare">Healthcare</option>
+                      <option value="Education">Education</option>
+                      <option value="Transportation">Transportation</option>
+                      <option value="Federal / Government">Federal / Government</option>
+                      <option value="Sports & Entertainment">Sports &amp; Entertainment</option>
+                      <option value="Agricultural">Agricultural</option>
+                      <option value="Mining">Mining</option>
+                      <option value="Oil & Gas">Oil &amp; Gas</option>
+                      <option value="Life Sciences / Pharmaceutical">Life Sciences / Pharmaceutical</option>
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Value ($)</label>
@@ -1286,11 +1565,41 @@ export default function DashboardClient({ username, email, role, companyRole, us
 
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Address <span className="text-gray-400 font-normal">(optional)</span></label>
-                  <input
-                    type="text" value={address} onChange={(e) => setAddress(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                    placeholder="Street address"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text" value={address}
+                      onChange={(e) => {
+                        setAddress(e.target.value);
+                        setShowAddressSuggestions(true);
+                      }}
+                      onFocus={() => {
+                        if (addressSuggestions.length) setShowAddressSuggestions(true);
+                      }}
+                      onBlur={() => {
+                        window.setTimeout(() => setShowAddressSuggestions(false), 150);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                      placeholder="Street address"
+                      autoComplete="off"
+                    />
+                    {showAddressSuggestions && (addressLookupLoading || addressSuggestions.length > 0) && (
+                      <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                        {addressLookupLoading && (
+                          <p className="px-3 py-2 text-xs text-gray-500">Looking up address…</p>
+                        )}
+                        {!addressLookupLoading && addressSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion.place_id}
+                            type="button"
+                            onClick={() => applyAddressSuggestion(suggestion)}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          >
+                            {suggestion.display_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -1509,6 +1818,111 @@ export default function DashboardClient({ username, email, role, companyRole, us
           </div>
         </div>
       )}
+
+      {/* Item detail modal — paginates through "My open items" / "While you were away" */}
+      {detailIndex !== null && detailItems[detailIndex] && (() => {
+        const d = detailItems[detailIndex];
+        const hasPrev = detailIndex > 0;
+        const hasNext = detailIndex < detailItems.length - 1;
+        return (
+          <div
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4 py-8"
+            onClick={closeDetail}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="bg-white rounded-xl w-full max-w-md shadow-xl flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <h2 className="text-sm font-semibold text-gray-900">
+                  {d.variant === "open_item" ? "Open item" : "Recent update"}
+                  <span className="ml-2 font-normal text-gray-400 tabular-nums">
+                    {detailIndex + 1} of {detailItems.length}
+                  </span>
+                </h2>
+                <button
+                  onClick={closeDetail}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label="Close"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="px-6 py-5">
+                <span className={`pill ${d.pillClass}`}>{d.typeLabel}</span>
+                <h3 className="font-display text-[24px] leading-snug text-[color:var(--ink)] mt-3">
+                  {d.title}
+                </h3>
+                <div className="mt-4 divide-y divide-gray-50 border hairline rounded-lg">
+                  <div className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+                    <span className="text-xs text-gray-400 shrink-0">Project</span>
+                    <span className="text-sm text-gray-900 font-medium text-right truncate">{d.projectName}</span>
+                  </div>
+                  {d.status && (
+                    <div className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+                      <span className="text-xs text-gray-400 shrink-0">Status</span>
+                      <span className="text-sm text-gray-900 font-medium text-right capitalize">{d.status}</span>
+                    </div>
+                  )}
+                  {d.dueDate && (
+                    <div className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+                      <span className="text-xs text-gray-400 shrink-0">Due</span>
+                      <span className="text-sm text-gray-900 font-medium text-right">{dueDateLabel(d.dueDate)}</span>
+                    </div>
+                  )}
+                  {d.timestamp && (
+                    <div className="flex items-center justify-between gap-4 px-3.5 py-2.5">
+                      <span className="text-xs text-gray-400 shrink-0">Updated</span>
+                      <span className="text-sm text-gray-900 font-medium text-right">{timeAgo(d.timestamp)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer — previous (left) · open · next (right) */}
+              <div className="flex items-center gap-2 px-6 py-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => hasPrev && setDetailIndex(detailIndex - 1)}
+                  disabled={!hasPrev}
+                  aria-label="Previous item"
+                  className="w-9 h-9 shrink-0 grid place-items-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <a
+                  href={d.href}
+                  className="flex-1 text-center py-2 bg-[color:var(--ink)] text-white text-sm font-semibold rounded-md hover:bg-gray-800 transition-colors"
+                >
+                  Open item
+                </a>
+                <button
+                  type="button"
+                  onClick={() => hasNext && setDetailIndex(detailIndex + 1)}
+                  disabled={!hasNext}
+                  aria-label="Next item"
+                  className="w-9 h-9 shrink-0 grid place-items-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      <DashboardWalkthrough open={walkthroughOpen} onClose={() => setWalkthroughOpen(false)} />
     </div>
   );
 }

@@ -102,7 +102,7 @@ export default function CostManagementGeneralContractorsPage() {
               <ul className="mt-6 space-y-4">
                 {metrics.map((metric) => (
                   <li key={metric} className="flex items-start gap-3 text-sm text-gray-600">
-                    <span className="mt-1 inline-flex h-2.5 w-2.5 rounded-full" style={{ background: "#D4500A" }} />
+                    <span className="mt-1 inline-flex h-2.5 w-2.5 rounded-full" style={{ background: "#2563EB" }} />
                     <span>{metric}</span>
                   </li>
                 ))}

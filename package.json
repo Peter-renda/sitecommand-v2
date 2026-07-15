@@ -4,12 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "dev:vite": "tsx server.ts",
-    "seed:demo": "npx ts-node --project tsconfig.json scripts/seed-demo.ts"
+    "seed:demo": "npx ts-node --project tsconfig.json scripts/seed-demo.ts",
+    "seed:arbors-rfis": "npx ts-node --project tsconfig.json scripts/seed-arbors-rfis.ts",
+    "seed:arbors-submittals": "npx ts-node --project tsconfig.json scripts/seed-arbors-submittals.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -32,6 +34,7 @@
     "jspdf-autotable": "^5.0.7",
     "jszip": "^3.10.1",
     "lucide-react": "^0.546.0",
+    "mammoth": "^1.12.0",
     "motion": "^12.23.24",
     "multer": "^2.1.1",
     "next": "^15.3.0",

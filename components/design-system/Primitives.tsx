@@ -13,9 +13,8 @@ export function LogoMark({ size = 20 }: { size?: number }) {
 
 export function Brand({ className = "" }: { className?: string }) {
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      <LogoMark size={20} />
-      <span className="text-[15px] font-semibold tracking-tight text-gray-900">SiteCommand</span>
+    <div className={`flex items-center ${className}`}>
+      <span className="text-sm font-semibold text-gray-900">SiteCommand</span>
     </div>
   );
 }

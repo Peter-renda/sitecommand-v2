@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ApiKeysTab, WebhooksTab, DocumentationTab } from "@/app/settings/developer/DeveloperSettingsClient";
 import IntegrationsClient from "@/app/settings/integrations/IntegrationsClient";
@@ -36,18 +36,19 @@ type Project = {
   name: string;
   status: string | null;
   created_at: string;
+  archived_at: string | null;
 };
 
-function roleBadgeClass(role: string) {
+function templateBadgeClass(role: string) {
   if (role === "super_admin") return "bg-amber-50 text-amber-700";
   if (role === "admin") return "bg-gray-100 text-gray-700";
   return "bg-gray-50 text-gray-400";
 }
 
-function roleLabel(role: string) {
-  if (role === "super_admin") return "Owner";
+function templateLabel(role: string) {
+  if (role === "super_admin") return "Super Admin";
   if (role === "admin") return "Admin";
-  return "Member";
+  return "User";
 }
 
 export default function CompanyClient({
@@ -65,6 +66,67 @@ export default function CompanyClient({
   currentUserId: string;
   isSuperAdmin: boolean;
 }) {
+  const [projectList, setProjectList] = useState<Project[]>(projects);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [archiveConfirm, setArchiveConfirm] = useState<Project | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    function onDocClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpenMenuId(null);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [openMenuId]);
+
+  async function handleArchive(project: Project) {
+    setArchiving(true);
+    const res = await fetch(`/api/projects/${project.id}/archive`, { method: "POST" });
+    setArchiving(false);
+    if (res.ok) {
+      const updated = await res.json();
+      setProjectList((prev) =>
+        prev.map((p) => (p.id === project.id ? { ...p, archived_at: updated.archived_at } : p))
+      );
+      setArchiveConfirm(null);
+    }
+  }
+
+  async function handleRecover(project: Project) {
+    const res = await fetch(`/api/projects/${project.id}/unarchive`, { method: "POST" });
+    if (res.ok) {
+      const updated = await res.json();
+      setProjectList((prev) =>
+        prev.map((p) => (p.id === project.id ? { ...p, archived_at: updated.archived_at } : p))
+      );
+      setOpenMenuId(null);
+    }
+  }
+
+  async function handleManageBilling() {
+    setBillingLoading(true);
+    try {
+      const res = await fetch("/api/stripe/portal", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      alert(data.error || "Unable to open the billing portal.");
+    } catch {
+      alert("Unable to open the billing portal.");
+    }
+    setBillingLoading(false);
+  }
+
+  const activeProjects = projectList.filter((p) => !p.archived_at);
+  const archivedProjects = projectList.filter((p) => p.archived_at);
+
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<
     "team" | "projects" | "permission-templates" | "integrations" | "developer"
@@ -174,18 +236,28 @@ const seatCount = members.length;
             {isSuperAdmin && (
               <>
                 <span className="text-gray-300">·</span>
-                <a
-                  href="/pricing"
-                  className="text-sm text-amber-600 hover:text-amber-800 font-medium transition-colors"
-                >
-                  {company?.subscription_plan ? "Manage billing" : "Upgrade plan"}
-                </a>
+                {company?.subscription_plan ? (
+                  <button
+                    onClick={handleManageBilling}
+                    disabled={billingLoading}
+                    className="text-sm text-amber-600 hover:text-amber-800 font-medium transition-colors disabled:opacity-50"
+                  >
+                    {billingLoading ? "Opening…" : "Manage billing"}
+                  </button>
+                ) : (
+                  <a
+                    href="/pricing"
+                    className="text-sm text-amber-600 hover:text-amber-800 font-medium transition-colors"
+                  >
+                    Upgrade plan
+                  </a>
+                )}
               </>
             )}
           </div>
           {isSuperAdmin && (
             <p className="text-xs text-gray-400 mt-2">
-              You are the account owner and control billing for this organisation.
+              You are the Super Admin and control billing for this organisation.
             </p>
           )}
         </div>
@@ -259,17 +331,17 @@ const seatCount = members.length;
           </div>
 
           {members.length === 0 ? (
-            <p className="text-sm text-gray-400">No members yet.</p>
+            <p className="text-sm text-gray-400">No users yet.</p>
           ) : (
             <div className="space-y-1">
               {members.map((member) => {
-                const isOwner = member.company_role === "super_admin";
+                const isSuperAdminMember = member.company_role === "super_admin";
                 const isCurrentUser = member.id === currentUserId;
                 const canRemove =
                   !isCurrentUser &&
-                  !isOwner &&
+                  !isSuperAdminMember &&
                   (isSuperAdmin || member.company_role === "member");
-                const canToggleRole = isSuperAdmin && !isOwner && !isCurrentUser;
+                const canToggleRole = isSuperAdmin && !isSuperAdminMember && !isCurrentUser;
                 const newRole = member.company_role === "admin" ? "member" : "admin";
 
                 return (
@@ -281,8 +353,8 @@ const seatCount = members.length;
                     <div>
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-medium text-gray-900">{member.username}</p>
-                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${roleBadgeClass(member.company_role)}`}>
-                          {roleLabel(member.company_role)}
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${templateBadgeClass(member.company_role)}`}>
+                          {templateLabel(member.company_role)}
                         </span>
                       </div>
                       <p className="text-xs text-gray-400">{member.email}</p>
@@ -296,7 +368,7 @@ const seatCount = members.length;
                           }}
                           className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
                         >
-                          Make {newRole === "admin" ? "Admin" : "Member"}
+                          Assign {templateLabel(newRole)} template
                         </button>
                       )}
                       {canRemove && (
@@ -332,8 +404,8 @@ const seatCount = members.length;
                     <div>
                       <div className="flex items-center gap-2">
                         <p className="text-sm text-gray-500">{invite.email}</p>
-                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${roleBadgeClass(invite.invited_role)}`}>
-                          {roleLabel(invite.invited_role)}
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${templateBadgeClass(invite.invited_role)}`}>
+                          {templateLabel(invite.invited_role)}
                         </span>
                       </div>
                       <p className="text-xs text-gray-300">
@@ -417,30 +489,66 @@ const seatCount = members.length;
             <div className="mb-4">
               <h2 className="text-sm font-semibold text-gray-900">Projects</h2>
               <p className="text-xs text-gray-400 mt-1">
-                {projects.length} total project{projects.length === 1 ? "" : "s"}
+                {activeProjects.length} total project{activeProjects.length === 1 ? "" : "s"}
               </p>
             </div>
 
-            {projects.length === 0 ? (
+            {activeProjects.length === 0 ? (
               <p className="text-sm text-gray-400 mb-4">No projects yet.</p>
             ) : (
               <div className="space-y-1 mb-5">
-                {projects.map((project) => (
-                  <a
+                {activeProjects.map((project) => (
+                  <div
                     key={project.id}
-                    href={`/projects/${project.id}`}
                     className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <div className="min-w-0">
+                    <a href={`/projects/${project.id}`} className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{project.name}</p>
                       <p className="text-xs text-gray-400 capitalize truncate">
                         {project.status || "No status"}
                       </p>
+                    </a>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuId(openMenuId === project.id ? null : project.id);
+                          }}
+                          aria-label="Project actions"
+                          className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <circle cx="5" cy="12" r="2" />
+                            <circle cx="12" cy="12" r="2" />
+                            <circle cx="19" cy="12" r="2" />
+                          </svg>
+                        </button>
+                        {openMenuId === project.id && (
+                          <div
+                            ref={menuRef}
+                            className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1"
+                          >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMenuId(null);
+                                setArchiveConfirm(project);
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                            >
+                              Archive Project
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <a href={`/projects/${project.id}`} aria-label="Open project">
+                        <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </a>
                     </div>
-                    <svg className="w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </a>
+                  </div>
                 ))}
               </div>
             )}
@@ -451,6 +559,71 @@ const seatCount = members.length;
             >
               + New Project
             </a>
+
+            {archivedProjects.length > 0 && (
+              <div className="mt-8 pt-6 border-t border-gray-100">
+                <div className="mb-4">
+                  <h2 className="text-sm font-semibold text-gray-900">Complete Projects</h2>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {archivedProjects.length} archived project{archivedProjects.length === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  {archivedProjects.map((project) => (
+                    <div
+                      key={project.id}
+                      className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <a href={`/projects/${project.id}`} className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-500 truncate">{project.name}</p>
+                        <p className="text-xs text-gray-400 truncate">
+                          Archived{project.archived_at ? ` ${new Date(project.archived_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}
+                        </p>
+                      </a>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuId(openMenuId === project.id ? null : project.id);
+                            }}
+                            aria-label="Project actions"
+                            className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                              <circle cx="5" cy="12" r="2" />
+                              <circle cx="12" cy="12" r="2" />
+                              <circle cx="19" cy="12" r="2" />
+                            </svg>
+                          </button>
+                          {openMenuId === project.id && (
+                            <div
+                              ref={menuRef}
+                              className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1"
+                            >
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRecover(project);
+                                }}
+                                className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                              >
+                                Recover Project
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <a href={`/projects/${project.id}`} aria-label="Open project">
+                          <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -474,15 +647,15 @@ const seatCount = members.length;
                 placeholder="colleague@company.com"
                 className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
               />
-              {/* Role selector — admins can only invite members; super_admin can invite admins too */}
+              {/* Permission template — admins can only invite Users; super_admin can invite Admins too */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Role</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Permission Template</label>
                 <select
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value as "member" | "admin")}
                   className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
                 >
-                  <option value="member">Member — standard access, can invite subcontractors</option>
+                  <option value="member">User — standard access, can invite subcontractors</option>
                   {isSuperAdmin && (
                     <option value="admin">Admin — manage users and invite subcontractors (no billing)</option>
                   )}
@@ -510,11 +683,11 @@ const seatCount = members.length;
         </div>
       )}
 
-      {/* Remove Member Confirmation Modal */}
+      {/* Remove User Confirmation Modal */}
       {removeConfirmMember && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h2 className="text-base font-semibold text-gray-900 mb-1">Remove member?</h2>
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Remove user?</h2>
             <p className="text-sm text-gray-500 mb-5">
               <span className="font-medium text-gray-700">{removeConfirmMember.username}</span> will
               lose access to all projects and be removed from the company. This cannot be undone.
@@ -537,23 +710,53 @@ const seatCount = members.length;
         </div>
       )}
 
-      {/* Role Change Confirmation Modal */}
+      {/* Archive Project Confirmation Modal */}
+      {archiveConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Archive project?</h2>
+            <p className="text-sm text-gray-500 mb-5">
+              <span className="font-medium text-gray-700">{archiveConfirm.name}</span> will be moved
+              to Complete Projects and removed from everyone who had access. All project data is
+              retained.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setArchiveConfirm(null)}
+                disabled={archiving}
+                className="flex-1 py-2 border border-gray-200 text-sm text-gray-600 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleArchive(archiveConfirm)}
+                disabled={archiving}
+                className="flex-1 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
+              >
+                {archiving ? "Archiving..." : "Archive"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Permission Template Change Confirmation Modal */}
       {roleChangeConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h2 className="text-base font-semibold text-gray-900 mb-1">Change role?</h2>
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Change permission template?</h2>
             <p className="text-sm text-gray-500 mb-5">
               Change{" "}
               <span className="font-medium text-gray-700">{roleChangeConfirm.member.username}</span>{" "}
-              from{" "}
+              from the{" "}
               <span className="font-medium text-gray-700">
-                {roleLabel(roleChangeConfirm.member.company_role)}
+                {templateLabel(roleChangeConfirm.member.company_role)}
               </span>{" "}
-              to{" "}
+              template to the{" "}
               <span className="font-medium text-gray-700">
-                {roleLabel(roleChangeConfirm.newRole)}
-              </span>
-              ?
+                {templateLabel(roleChangeConfirm.newRole)}
+              </span>{" "}
+              template?
             </p>
             <div className="flex gap-2">
               <button

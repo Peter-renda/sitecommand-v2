@@ -16,8 +16,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .eq("project_id", projectId)
     .order("transmittal_number", { ascending: true });
 
+  const visible = (data || []).filter((t: { private?: boolean; created_by?: string | null }) => !t.private || t.created_by === session.id);
+
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data || []);
+  return NextResponse.json(visible);
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -51,6 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     items,
     comments,
     send_email,
+    attachments,
   } = body;
 
   const { data, error } = await supabase
@@ -69,6 +72,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       sent_date: sent_date || null,
       items: items ?? [],
       comments: comments || null,
+      attachments: attachments ?? [],
       created_by: session.id,
     })
     .select()

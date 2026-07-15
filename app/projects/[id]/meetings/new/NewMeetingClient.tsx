@@ -558,9 +558,9 @@ export default function NewMeetingClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       {/* Top nav bar */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between shrink-0">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -697,7 +697,7 @@ export default function NewMeetingClient({
                   </div>
 
                   {/* Row 3: Date + Timezone + Start Time + End Time */}
-                  <div className="grid grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">Date</label>
                       <DateInput value={date} onChange={setDate} />

@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { COMMITMENT_REPORT_FIELDS } from "@/lib/report-fields";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -622,6 +624,7 @@ export default function EditCommitmentClient({
 
   // SOV
   const [sovMethod, setSovMethod] = useState<"unit_quantity" | "amount">("unit_quantity");
+  const [reportFields, setReportFields] = useState<ReportFieldValues>({});
   const [sovLines, setSovLines] = useState<SovLine[]>([]);
   // Track original dbIds so we can delete removed existing items
   const removedDbIds = useRef<string[]>([]);
@@ -681,6 +684,7 @@ export default function EditCommitmentClient({
       setShowExecutedCoverLetter(c.show_executed_cover_letter ?? false);
       setSovMethod(c.sov_accounting_method ?? "unit_quantity");
       setSsovEnabled(c.ssov_enabled ?? false);
+      setReportFields(c.report_fields ?? {});
 
       // Map SOV items
       if (Array.isArray(sov)) {
@@ -1076,6 +1080,7 @@ export default function EditCommitmentClient({
           sov_accounting_method: sovMethod,
           ssov_enabled: sovMethod === "amount" ? ssovEnabled : false,
           original_contract_amount: sovTotal,
+          report_fields: reportFields,
         }),
       });
 
@@ -1154,17 +1159,17 @@ export default function EditCommitmentClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center">
         <p className="text-sm text-gray-400">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-        <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">SiteCommand</a>
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+        <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">SiteCommand</a>
         <div className="flex items-center gap-5">
           <span className="text-sm text-gray-400">{username}</span>
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Logout</button>
@@ -1221,7 +1226,7 @@ export default function EditCommitmentClient({
 
         {/* ── General Information ── */}
         <Section title="General Information">
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field label="Contract #">
               <input
                 type="text"
@@ -1243,7 +1248,7 @@ export default function EditCommitmentClient({
             </Field>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field label="Status" required>
               <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
                 <option value="draft">Draft</option>
@@ -1508,6 +1513,17 @@ export default function EditCommitmentClient({
               </Field>
             </div>
           </div>
+        </Section>
+
+        <Section title="Report Fields">
+          <ReportFieldsSection
+            title="Report Fields"
+            description="Extra commitment attributes surfaced as columns in 360 Reports. Saved with this commitment."
+            fields={COMMITMENT_REPORT_FIELDS}
+            values={reportFields}
+            onChange={(key, value) => setReportFields((prev) => ({ ...prev, [key]: value }))}
+            columns={3}
+          />
         </Section>
 
       </div>

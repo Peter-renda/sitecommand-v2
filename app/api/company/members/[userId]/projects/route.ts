@@ -20,6 +20,7 @@ export async function GET(
     .from("projects")
     .select("id, name, status")
     .eq("company_id", session.company_id)
+    .is("archived_at", null)
     .order("created_at", { ascending: false });
 
   const { data: memberProjects } = await supabase
@@ -66,24 +67,31 @@ export async function PUT(
 
   const { data: companyProjects } = await supabase
     .from("projects")
-    .select("id")
+    .select("id, archived_at")
     .eq("company_id", session.company_id);
 
-  const companyProjectIds = (companyProjects || []).map((p: { id: string }) => p.id);
+  const activeCompanyProjectIds = (companyProjects || [])
+    .filter((p: { archived_at: string | null }) => !p.archived_at)
+    .map((p: { id: string }) => p.id);
 
-  if (companyProjectIds.length > 0) {
+  if (activeCompanyProjectIds.length > 0) {
+    // Only clear memberships for active projects; leave any pre-existing
+    // memberships on archived projects untouched (archive itself removes them).
     await supabase
       .from("project_memberships")
       .delete()
       .eq("user_id", userId)
-      .in("project_id", companyProjectIds);
+      .in("project_id", activeCompanyProjectIds);
   }
 
-  if (projectIds && projectIds.length > 0) {
+  const activeIdSet = new Set(activeCompanyProjectIds);
+  const validProjectIds = (projectIds || []).filter((pid: string) => activeIdSet.has(pid));
+
+  if (validProjectIds.length > 0) {
     await supabase
       .from("project_memberships")
       .insert(
-        projectIds.map((pid: string) => ({
+        validProjectIds.map((pid: string) => ({
           project_id: pid,
           user_id: userId,
           company_id: session.company_id,
@@ -95,7 +103,7 @@ export async function PUT(
 
     // Sync the user into each project's directory so they appear immediately
     await Promise.all(
-      projectIds.map((pid: string) => addUserToDirectory(supabase, pid, userId))
+      validProjectIds.map((pid: string) => addUserToDirectory(supabase, pid, userId))
     );
   }
 

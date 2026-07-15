@@ -23,6 +23,7 @@ type LineItem = {
   cost_unit_cost: number | null;
   cost_rom: number | null;
   cost_commitment?: number | null;
+  cost_budget_mod?: number | null;
 };
 
 type ChangeEvent = {
@@ -241,7 +242,7 @@ export default function ChangeEventDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Loading…</div>
@@ -251,7 +252,7 @@ export default function ChangeEventDetailClient({
 
   if (error || !event) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-sm text-red-500">{error ?? "Change event not found."}</div>
@@ -547,7 +548,7 @@ export default function ChangeEventDetailClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
@@ -1047,7 +1048,7 @@ export default function ChangeEventDetailClient({
       )}
       {pcoPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={(e) => { if (e.target === e.currentTarget) setPcoPickerOpen(false); }}>
-          <div className="bg-white rounded-lg shadow-xl w-[480px] max-h-[80vh] flex flex-col">
+          <div className="bg-white rounded-lg shadow-xl w-[min(480px,92vw)] max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
               <h2 className="text-sm font-semibold text-gray-900">Select a Prime Contract</h2>
               <button onClick={() => setPcoPickerOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>

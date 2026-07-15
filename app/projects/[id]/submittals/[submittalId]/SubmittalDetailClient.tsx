@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, ChangeEvent } from "react";
 import ProjectNav from "@/components/ProjectNav";
 import { useRouter } from "next/navigation";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { SUBMITTAL_REPORT_FIELDS } from "@/lib/report-fields";
 
 type DirContact = { id: string; name: string; email: string | null };
 type DirectoryContact = {
@@ -254,9 +256,11 @@ export default function SubmittalDetailClient({
   const [isEditing, setIsEditing] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editValues, setEditValues] = useState<EditableSubmittalFields | null>(null);
+  const [editReportFields, setEditReportFields] = useState<ReportFieldValues>({});
 
   function startEdit() {
     if (!submittal) return;
+    setEditReportFields((submittal as { report_fields?: ReportFieldValues }).report_fields ?? {});
     setEditValues({
       title: submittal.title,
       revision: submittal.revision,
@@ -278,7 +282,7 @@ export default function SubmittalDetailClient({
     const res = await fetch(`/api/projects/${projectId}/submittals/${submittalId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editValues),
+      body: JSON.stringify({ ...editValues, report_fields: editReportFields }),
     });
     const data = await res.json().catch(() => ({}));
     setEditSaving(false);
@@ -542,6 +546,32 @@ export default function SubmittalDetailClient({
     setSelectedExportIds(["cover"]);
   }, [submittal]);
 
+  const autoEditAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!submittal || autoEditAppliedRef.current) return;
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("edit") !== "1") return;
+    if (submittal.created_by !== userId) return;
+    autoEditAppliedRef.current = true;
+    setEditValues({
+      title: submittal.title,
+      revision: submittal.revision,
+      submittal_type: submittal.submittal_type,
+      status: submittal.status,
+      submit_by: submittal.submit_by,
+      issue_date: submittal.issue_date,
+      cost_code: submittal.cost_code,
+      linked_drawings: submittal.linked_drawings,
+      description: submittal.description,
+    });
+    setIsEditing(true);
+    params.delete("edit");
+    const newSearch = params.toString();
+    const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
+    window.history.replaceState(null, "", newUrl);
+  }, [submittal, userId]);
+
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
       const target = e.target as Node;
@@ -616,9 +646,9 @@ export default function SubmittalDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-          <a href="/dashboard" className="text-sm font-semibold text-gray-900">SiteCommand</a>
+      <div className="min-h-screen bg-[#F9FAFB]">
+        <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+          <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)]">SiteCommand</a>
           <span className="text-sm text-gray-400">{username}</span>
         </header>
         <main className="max-w-7xl mx-auto px-6 py-8">
@@ -630,9 +660,9 @@ export default function SubmittalDetailClient({
 
   if (notFound || !submittal) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-          <a href="/dashboard" className="text-sm font-semibold text-gray-900">SiteCommand</a>
+      <div className="min-h-screen bg-[#F9FAFB]">
+        <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+          <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)]">SiteCommand</a>
         </header>
         <main className="max-w-7xl mx-auto px-6 py-8">
           <p className="text-sm text-gray-500">Submittal not found.</p>
@@ -667,8 +697,8 @@ export default function SubmittalDetailClient({
   );
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F9FAFB]">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -1025,6 +1055,19 @@ export default function SubmittalDetailClient({
                   <p className="text-sm text-gray-400">--</p>
                 </div>
               </div>
+
+              {isEditing && (
+                <div className="border-t border-gray-100 pt-4">
+                  <ReportFieldsSection
+                    title="Report Fields"
+                    description="Extra submittal attributes surfaced as columns in 360 Reports."
+                    fields={SUBMITTAL_REPORT_FIELDS}
+                    values={editReportFields}
+                    onChange={(key, value) => setEditReportFields((prev) => ({ ...prev, [key]: value }))}
+                    columns={3}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1292,7 +1335,7 @@ export default function SubmittalDetailClient({
               </div>
 
               {/* 4-column details grid */}
-              <dl className="grid grid-cols-4 gap-x-8 gap-y-5 text-sm pt-5">
+              <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-5 text-sm pt-5">
                 <div>
                   <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Specification</dt>
                   <dd className="text-gray-700">{getSpecName(specifications, submittal.specification_id)}</dd>

@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { MEETING_REPORT_FIELDS } from "@/lib/report-fields";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -309,6 +311,7 @@ export default function MeetingDetailClient({
 
   // Notes
   const [notes, setNotes] = useState("");
+  const [reportFields, setReportFields] = useState<ReportFieldValues>({});
   const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   // Load meeting + directory
@@ -320,6 +323,7 @@ export default function MeetingDetailClient({
       if (m && !m.error) {
         setMeeting(m);
         setNotes(m.notes ?? "");
+        setReportFields((m as { report_fields?: ReportFieldValues }).report_fields ?? {});
         // Ensure default "Uncategorized Items" category exists
         const ag: AgendaCategory[] = Array.isArray(m.agenda) && m.agenda.length > 0
           ? m.agenda
@@ -453,7 +457,7 @@ export default function MeetingDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center">
         <div className="text-sm text-gray-400">Loading meeting...</div>
       </div>
     );
@@ -461,7 +465,7 @@ export default function MeetingDetailClient({
 
   if (!meeting) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center">
         <div className="text-sm text-gray-500">Meeting not found.</div>
       </div>
     );
@@ -478,9 +482,9 @@ export default function MeetingDetailClient({
     : agenda;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Top nav bar */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -628,6 +632,18 @@ export default function MeetingDetailClient({
                 Add Related Item
               </button>
             </div>
+          </div>
+        )}
+
+        {activeTab === "emails" && (
+          <div className="py-16 text-center">
+            <p className="text-sm text-gray-400">Email activity feed is coming soon.</p>
+          </div>
+        )}
+
+        {activeTab === "history" && (
+          <div className="py-16 text-center">
+            <p className="text-sm text-gray-400">Change history is coming soon.</p>
           </div>
         )}
 
@@ -1016,6 +1032,21 @@ export default function MeetingDetailClient({
                 />
               </div>
             )}
+          </div>
+
+          <div className="mt-5">
+            <ReportFieldsSection
+              title="Report Fields"
+              description="Extra meeting attributes surfaced as columns in 360 Reports. Saved automatically."
+              fields={MEETING_REPORT_FIELDS}
+              values={reportFields}
+              onChange={(key, value) => {
+                const next = { ...reportFields, [key]: value };
+                setReportFields(next);
+                autosave({ report_fields: next });
+              }}
+              columns={2}
+            />
           </div>
         </div>}
       </main>

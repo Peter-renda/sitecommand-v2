@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, ChangeEvent } from "react";
+import { useState, useEffect, useMemo, useRef, ChangeEvent } from "react";
 import ProjectNav from "@/components/ProjectNav";
 import EmptyState from "@/app/components/EmptyState";
 import { SkeletonTable } from "@/app/components/Skeleton";
@@ -17,6 +17,66 @@ type DirectoryContact = {
   email: string | null;
 };
 type Specification = { id: string; name: string; code: string | null };
+type BudgetItem = { id: string; cost_code: string; description: string };
+type Drawing = { id: string; drawing_no: string | null; title: string | null };
+
+const RFI_STAGE_OPTIONS = ["Bidding", "Pre-Construction", "Course of Construction", "Warranty", "Post-Construction"] as const;
+const IMPACT_OPTIONS = ["Yes", "Yes (Unknown)", "No", "TBD", "N/A"] as const;
+const RFI_STATUS_FILTER_OPTIONS = ["Open", "Draft", "Closed", "Closed - Revised", "Closed - Draft"] as const;
+
+type MemberRow = {
+  user_id: string;
+  users: { id: string; username: string | null; first_name: string | null; last_name: string | null; company_id: string | null } | null;
+};
+
+type RFIFilters = {
+  status: string;
+  responsibleContractorId: string;
+  receivedFromId: string;
+  assigneeId: string;
+  rfiManagerId: string;
+  ballInCourtId: string;
+  overdue: boolean;
+  location: string;
+  costCode: string;
+  rfiStage: string;
+  createdById: string;
+  createdByCompany: string;
+};
+
+function emptyRFIFilters(): RFIFilters {
+  return {
+    status: "",
+    responsibleContractorId: "",
+    receivedFromId: "",
+    assigneeId: "",
+    rfiManagerId: "",
+    ballInCourtId: "",
+    overdue: false,
+    location: "",
+    costCode: "",
+    rfiStage: "",
+    createdById: "",
+    createdByCompany: "",
+  };
+}
+
+function activeFilterCount(f: RFIFilters): number {
+  let n = 0;
+  if (f.status) n++;
+  if (f.responsibleContractorId) n++;
+  if (f.receivedFromId) n++;
+  if (f.assigneeId) n++;
+  if (f.rfiManagerId) n++;
+  if (f.ballInCourtId) n++;
+  if (f.overdue) n++;
+  if (f.location) n++;
+  if (f.costCode) n++;
+  if (f.rfiStage) n++;
+  if (f.createdById) n++;
+  if (f.createdByCompany) n++;
+  return n;
+}
 
 type RFI = {
   id: string;
@@ -214,6 +274,8 @@ function CreateRFIModal({
   initiatedAt,
   directory,
   specifications,
+  budgetItems,
+  drawings,
   onConfirm,
   onCancel,
 }: {
@@ -221,6 +283,8 @@ function CreateRFIModal({
   initiatedAt: string;
   directory: DirectoryContact[];
   specifications: Specification[];
+  budgetItems: BudgetItem[];
+  drawings: Drawing[];
   onConfirm: (data: {
     rfi_number: number;
     subject: string;
@@ -265,7 +329,6 @@ function CreateRFIModal({
   const [scheduleImpact, setScheduleImpact] = useState("");
   const [costImpact, setCostImpact] = useState("");
   const [costCode, setCostCode] = useState("");
-  const [subJob, setSubJob] = useState("");
   const [rfiStage, setRfiStage] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
@@ -333,13 +396,13 @@ function CreateRFIModal({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Subject (max 200 characters)</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Subject <span className="text-red-500">*</span> (max 200 characters)</label>
             <input type="text" maxLength={200} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
             <p className="text-xs text-gray-400 mt-0.5">{subject.length}/200</p>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Question</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Question <span className="text-red-500">*</span></label>
             <textarea value={question} onChange={(e) => setQuestion(e.target.value)} rows={4} placeholder="Question..." className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 resize-none" />
           </div>
 
@@ -378,7 +441,7 @@ function CreateRFIModal({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">RFI Manager</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">RFI Manager <span className="text-red-500">*</span></label>
               <SingleContactPicker directory={directory} selectedId={rfiManagerId} onChange={setRfiManagerId} filterType="user" placeholder="Select user..." />
             </div>
           </div>
@@ -389,7 +452,7 @@ function CreateRFIModal({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Assignees</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Assignees <span className="text-red-500">*</span></label>
             <MultiContactPicker directory={directory} selected={assignees} onChange={setAssignees} filterType="user" placeholder="Select users..." />
           </div>
 
@@ -415,36 +478,55 @@ function CreateRFIModal({
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Drawing Number</label>
-              <input type="text" value={drawingNumber} onChange={(e) => setDrawingNumber(e.target.value)} placeholder="Drawing number" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
+              <select value={drawingNumber} onChange={(e) => setDrawingNumber(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+                <option value="">Select drawing...</option>
+                {drawings.filter((d) => d.drawing_no && d.drawing_no.trim()).map((d) => (
+                  <option key={d.id} value={d.drawing_no!}>{d.drawing_no}{d.title ? ` — ${d.title}` : ""}</option>
+                ))}
+              </select>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Schedule Impact</label>
-              <input type="text" value={scheduleImpact} onChange={(e) => setScheduleImpact(e.target.value)} placeholder="Schedule impact" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
+              <select value={scheduleImpact} onChange={(e) => setScheduleImpact(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+                <option value="">Select...</option>
+                {IMPACT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Cost Impact</label>
-              <input type="text" value={costImpact} onChange={(e) => setCostImpact(e.target.value)} placeholder="Cost impact" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
+              <select value={costImpact} onChange={(e) => setCostImpact(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+                <option value="">Select...</option>
+                {IMPACT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Cost Code</label>
-              <input type="text" value={costCode} onChange={(e) => setCostCode(e.target.value)} placeholder="Cost code" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Sub Job</label>
-              <input type="text" value={subJob} onChange={(e) => setSubJob(e.target.value)} placeholder="Sub job" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Cost Code</label>
+            <select value={costCode} onChange={(e) => setCostCode(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+              <option value="">Select cost code...</option>
+              {budgetItems.map((b) => (
+                <option key={b.id} value={b.cost_code}>{b.cost_code}{b.description ? ` — ${b.description}` : ""}</option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 gap-4 items-end">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">RFI Stage</label>
-              <input type="text" value={rfiStage} onChange={(e) => setRfiStage(e.target.value)} placeholder="RFI stage" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
+              <select value={rfiStage} onChange={(e) => setRfiStage(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
+                <option value="">Select stage...</option>
+                {RFI_STAGE_OPTIONS.map((stage) => (
+                  <option key={stage} value={stage}>{stage}</option>
+                ))}
+              </select>
             </div>
             <label className="inline-flex items-center gap-2 pb-2">
               <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="rounded border-gray-300 text-gray-900" />
@@ -455,15 +537,26 @@ function CreateRFIModal({
           <div className="flex gap-3 justify-end pt-4 border-t border-gray-100">
             {validationError && <p className="text-sm text-red-600 flex-1 self-center">{validationError}</p>}
             <button type="button" onClick={onCancel} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">Cancel</button>
-            <button type="button" onClick={() => onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "draft", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: subJob, rfi_stage: rfiStage, private: isPrivate, attachmentFiles })} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">Create as Draft</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!rfiManagerId) { setValidationError("An RFI Manager is required."); return; }
+                setValidationError(null);
+                onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "draft", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: "", rfi_stage: rfiStage, private: isPrivate, attachmentFiles });
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              Create as Draft
+            </button>
             <button
               type="button"
               onClick={() => {
                 if (!subject.trim()) { setValidationError("Subject is required."); return; }
                 if (!question.trim()) { setValidationError("Question is required."); return; }
+                if (!rfiManagerId) { setValidationError("An RFI Manager is required."); return; }
                 if (assignees.length === 0) { setValidationError("At least one assignee is required."); return; }
                 setValidationError(null);
-                onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "open", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: subJob, rfi_stage: rfiStage, private: isPrivate, attachmentFiles });
+                onConfirm({ rfi_number: rfiNumber, subject, question, due_date: dueDate, status: "open", rfi_manager_id: rfiManagerId, received_from_id: receivedFromId, assignees, distribution_list: distributionList, responsible_contractor_id: responsibleContractorId, specification_id: specificationId, drawing_number: drawingNumber, schedule_impact: scheduleImpact, cost_impact: costImpact, cost_code: costCode, sub_job: "", rfi_stage: rfiStage, private: isPrivate, attachmentFiles });
               }}
               className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors"
             >
@@ -633,6 +726,11 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
   const [rfis, setRfis] = useState<RFI[]>([]);
   const [directory, setDirectory] = useState<DirectoryContact[]>([]);
   const [specifications, setSpecifications] = useState<Specification[]>([]);
+  const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [members, setMembers] = useState<MemberRow[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState<RFIFilters>(emptyRFIFilters());
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [createInitiatedAt, setCreateInitiatedAt] = useState<string | null>(null);
@@ -649,6 +747,8 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
   const [bulkStatus, setBulkStatus] = useState<"" | "draft" | "open" | "closed">("");
   const [bulkDueDate, setBulkDueDate] = useState("");
   const [applyingBulk, setApplyingBulk] = useState(false);
+  const [sortColumn, setSortColumn] = useState<ColumnKey>("rfi_number");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [rowMenuOpen, setRowMenuOpen] = useState<string | null>(null);
   const rowMenuRef = useRef<HTMLDivElement | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -670,10 +770,16 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
       fetch(`/api/projects/${projectId}/rfis${activeTab === "recycle_bin" ? "?recycle_bin=true" : ""}`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/directory`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/specifications`).then((r) => r.json()),
-    ]).then(([rfisData, dirData, specData]) => {
+      fetch(`/api/projects/${projectId}/budget`).then((r) => r.json()),
+      fetch(`/api/projects/${projectId}/members`).then((r) => (r.ok ? r.json() : [])),
+      fetch(`/api/projects/${projectId}/drawings`).then((r) => (r.ok ? r.json() : { drawings: [] })),
+    ]).then(([rfisData, dirData, specData, budgetData, membersData, drawingsData]) => {
       setRfis(Array.isArray(rfisData) ? rfisData : []);
       setDirectory(Array.isArray(dirData) ? dirData : []);
       setSpecifications(Array.isArray(specData) ? specData : []);
+      setBudgetItems(Array.isArray(budgetData) ? budgetData : []);
+      setMembers(Array.isArray(membersData) ? membersData : []);
+      setDrawings(Array.isArray(drawingsData?.drawings) ? drawingsData.drawings : []);
       setLoading(false);
     });
   }, [projectId, activeTab]);
@@ -794,7 +900,143 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
     setDraggedColumn(null);
   }
 
-  const allSelected = rfis.length > 0 && selectedRfiIds.length === rfis.length;
+  function contactOptionsFor(getId: (r: RFI) => string | null) {
+    const seen = new Set<string>();
+    const options: { id: string; name: string }[] = [];
+    rfis.forEach((r) => {
+      const id = getId(r);
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      const c = directory.find((d) => d.id === id);
+      options.push({ id, name: c ? contactDisplayName(c) : "Unknown" });
+    });
+    return options.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const responsibleContractorOptions = useMemo(() => contactOptionsFor((r) => r.responsible_contractor_id), [rfis, directory]);
+  const receivedFromOptions = useMemo(() => contactOptionsFor((r) => r.received_from_id), [rfis, directory]);
+  const rfiManagerOptions = useMemo(() => contactOptionsFor((r) => r.rfi_manager_id), [rfis, directory]);
+  const ballInCourtOptions = useMemo(() => contactOptionsFor((r) => r.ball_in_court_id), [rfis, directory]);
+
+  const assigneeOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    rfis.forEach((r) => (r.assignees ?? []).forEach((a) => { if (a.id && !map.has(a.id)) map.set(a.id, a.name || "Unknown"); }));
+    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [rfis]);
+
+  const locationOptions = useMemo(() => {
+    const set = new Set<string>();
+    rfis.forEach((r) => {
+      const loc = (r as RFI & { location?: string | null }).location;
+      if (loc) set.add(loc);
+    });
+    return Array.from(set).sort();
+  }, [rfis]);
+
+  const costCodeOptions = useMemo(() => {
+    const set = new Set<string>();
+    rfis.forEach((r) => { if (r.cost_code) set.add(r.cost_code); });
+    return Array.from(set).sort();
+  }, [rfis]);
+
+  const rfiStageOptions = useMemo(() => {
+    const set = new Set<string>();
+    rfis.forEach((r) => { if (r.rfi_stage) set.add(r.rfi_stage); });
+    return Array.from(set).sort();
+  }, [rfis]);
+
+  const createdByOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { id: string; name: string }[] = [];
+    rfis.forEach((r) => {
+      if (!r.created_by || seen.has(r.created_by)) return;
+      seen.add(r.created_by);
+      const member = members.find((m) => m.user_id === r.created_by);
+      const u = member?.users;
+      const name = u ? ([u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username || "Unknown") : "Unknown";
+      out.push({ id: r.created_by, name });
+    });
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }, [rfis, members]);
+
+  const createdByCompanyOptions = useMemo(() => {
+    const set = new Set<string>();
+    rfis.forEach((r) => {
+      const company = (r as RFI & { created_by_company?: string | null }).created_by_company;
+      if (company) set.add(company);
+    });
+    return Array.from(set).sort();
+  }, [rfis]);
+
+  const todayStr = new Date().toISOString().split("T")[0];
+  const filteredRfis = useMemo(() => {
+    return rfis.filter((r) => {
+      if (filters.status && r.status.toLowerCase() !== filters.status.toLowerCase()) return false;
+      if (filters.responsibleContractorId && r.responsible_contractor_id !== filters.responsibleContractorId) return false;
+      if (filters.receivedFromId && r.received_from_id !== filters.receivedFromId) return false;
+      if (filters.assigneeId && !(r.assignees ?? []).some((a) => a.id === filters.assigneeId)) return false;
+      if (filters.rfiManagerId && r.rfi_manager_id !== filters.rfiManagerId) return false;
+      if (filters.ballInCourtId && r.ball_in_court_id !== filters.ballInCourtId) return false;
+      if (filters.overdue) {
+        if (!r.due_date || r.due_date >= todayStr) return false;
+        if (r.status === "closed") return false;
+      }
+      if (filters.location && (r as RFI & { location?: string | null }).location !== filters.location) return false;
+      if (filters.costCode && r.cost_code !== filters.costCode) return false;
+      if (filters.rfiStage && r.rfi_stage !== filters.rfiStage) return false;
+      if (filters.createdById && r.created_by !== filters.createdById) return false;
+      if (filters.createdByCompany && (r as RFI & { created_by_company?: string | null }).created_by_company !== filters.createdByCompany) return false;
+      return true;
+    });
+  }, [rfis, filters, todayStr]);
+
+
+  const sortedRfis = useMemo(() => {
+    const getSortableValue = (rfi: RFI, key: ColumnKey): string | number => {
+      switch (key) {
+        case "rfi_number": return rfi.rfi_number ?? 0;
+        case "subject": return (rfi.subject ?? "").toLowerCase();
+        case "status": return (rfi.status ?? "").toLowerCase();
+        case "responsible_contractor": return getContactNameById(directory, rfi.responsible_contractor_id).toLowerCase();
+        case "received_from": return getContactNameById(directory, rfi.received_from_id).toLowerCase();
+        case "date_initiated": return rfi.created_at ?? "";
+        case "rfi_manager": return getContactNameById(directory, rfi.rfi_manager_id).toLowerCase();
+        case "assignees": return (rfi.assignees ?? []).map((a) => a.name).join(", ").toLowerCase();
+        case "ball_in_court": return getContactNameById(directory, rfi.ball_in_court_id).toLowerCase();
+        case "due_date": return rfi.due_date ?? "";
+        case "closed_date": return "";
+        case "location": return (((rfi as RFI & { location?: string | null }).location) ?? "").toLowerCase();
+        case "schedule_impact": return (rfi.schedule_impact ?? "").toLowerCase();
+        case "cost_impact": return (rfi.cost_impact ?? "").toLowerCase();
+        case "cost_code": return (rfi.cost_code ?? "").toLowerCase();
+        case "sub_job": return (rfi.sub_job ?? "").toLowerCase();
+        case "rfi_stage": return (rfi.rfi_stage ?? "").toLowerCase();
+        case "distribution": return (rfi.distribution_list ?? []).map((d) => d.name).join(", ").toLowerCase();
+        case "private": return rfi.private ? 1 : 0;
+        default: return "";
+      }
+    };
+
+    const sorted = [...filteredRfis].sort((a, b) => {
+      const va = getSortableValue(a, sortColumn);
+      const vb = getSortableValue(b, sortColumn);
+      if (typeof va === "number" && typeof vb === "number") return va - vb;
+      return String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: "base" });
+    });
+    return sortDirection === "desc" ? sorted.reverse() : sorted;
+  }, [filteredRfis, sortColumn, sortDirection, directory]);
+
+  function handleSortColumn(column: ColumnKey) {
+    if (sortColumn === column) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortColumn(column);
+    setSortDirection("asc");
+  }
+
+  const filterCount = activeFilterCount(filters);
+  const allSelected = sortedRfis.length > 0 && selectedRfiIds.length === sortedRfis.length;
 
   async function applyBulkUpdate() {
     if (selectedRfiIds.length === 0) return;
@@ -861,9 +1103,9 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-        <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">SiteCommand</a>
+    <div className="min-h-screen bg-[#F9FAFB]">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+        <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">SiteCommand</a>
         <div className="flex items-center gap-5">
           <span className="text-sm text-gray-400">{username}</span>
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Logout</button>
@@ -950,61 +1192,85 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
                 {creating ? "Creating..." : "New RFI"}
               </button>
             )}
-            <div ref={columnRef} className="relative">
-              <button onClick={() => setShowColumnConfig((o) => !o)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors">
-                Configure
-                <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${showColumnConfig ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
-              </button>
-              {showColumnConfig && (
-                <div className="absolute right-0 mt-2 w-96 bg-white border border-gray-200 rounded-xl shadow-xl z-20 max-h-[80vh] overflow-y-auto">
-                  <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white">
-                    <h3 className="text-base font-semibold text-gray-900">Table Settings</h3>
-                    <button type="button" onClick={() => setShowColumnConfig(false)} className="text-gray-400 hover:text-gray-600">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                  </div>
-                  <div className="px-6 pt-4 pb-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-sm font-semibold text-gray-900">Configure Columns</h4>
-                      <button type="button" onClick={() => setVisibleColumns([...columnOrder])} className="text-sm font-medium text-blue-600 hover:text-blue-700">Show All</button>
-                    </div>
-                    <div className="space-y-1.5">
-                      {columnOrder.map((key) => {
-                        const on = visibleColumns.includes(key);
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            draggable
-                            onDragStart={() => setDraggedColumn(key)}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={() => handleColumnDrop(key)}
-                            onDragEnd={() => setDraggedColumn(null)}
-                            onClick={() => toggleColumn(key)}
-                            role="switch"
-                            aria-checked={on}
-                            className="w-full flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors text-left"
-                          >
-                            <span className="text-gray-400 cursor-grab" aria-hidden>
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01" /></svg>
-                            </span>
-                            <span className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${on ? "bg-blue-500" : "bg-gray-300"}`}>
-                              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-                            </span>
-                            <span className="text-sm text-gray-800">{COLUMN_LABELS[key]}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </div>
-        <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden mb-4 bg-white">
-          <button onClick={() => { setActiveTab("items"); setSelectedRfiIds([]); }} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "items" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Items</button>
-          <button onClick={() => { setActiveTab("recycle_bin"); setSelectedRfiIds([]); }} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "recycle_bin" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Recycling Bin</button>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="seg">
+            <button onClick={() => { setActiveTab("items"); setSelectedRfiIds([]); }} className={activeTab === "items" ? "active" : ""}>Items</button>
+            <button onClick={() => { setActiveTab("recycle_bin"); setSelectedRfiIds([]); }} className={activeTab === "recycle_bin" ? "active" : ""}>Recycling Bin</button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowFilters(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-600 border border-blue-200 rounded-lg bg-white hover:bg-blue-50 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M7 12h10M10 18h4" />
+            </svg>
+            All Filters
+            {filterCount > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold text-white bg-blue-600 rounded-full">{filterCount}</span>
+            )}
+          </button>
+          {filterCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilters(emptyRFIFilters())}
+              className="text-xs font-medium text-gray-500 hover:text-gray-700"
+            >
+              Clear all filters
+            </button>
+          )}
+          <div ref={columnRef} className="relative ml-auto">
+            <button onClick={() => setShowColumnConfig((o) => !o)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors">
+              Configure
+              <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${showColumnConfig ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {showColumnConfig && (
+              <div className="absolute right-0 mt-2 w-96 bg-white border border-gray-200 rounded-xl shadow-xl z-20 max-h-[80vh] overflow-y-auto">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white">
+                  <h3 className="text-base font-semibold text-gray-900">Table Settings</h3>
+                  <button type="button" onClick={() => setShowColumnConfig(false)} className="text-gray-400 hover:text-gray-600">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+                <div className="px-6 pt-4 pb-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-semibold text-gray-900">Configure Columns</h4>
+                    <button type="button" onClick={() => setVisibleColumns([...columnOrder])} className="text-sm font-medium text-blue-600 hover:text-blue-700">Show All</button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {columnOrder.map((key) => {
+                      const on = visibleColumns.includes(key);
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          draggable
+                          onDragStart={() => setDraggedColumn(key)}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => handleColumnDrop(key)}
+                          onDragEnd={() => setDraggedColumn(null)}
+                          onClick={() => toggleColumn(key)}
+                          role="switch"
+                          aria-checked={on}
+                          className="w-full flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors text-left"
+                        >
+                          <span className="text-gray-400 cursor-grab" aria-hidden>
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01" /></svg>
+                          </span>
+                          <span className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${on ? "bg-blue-500" : "bg-gray-300"}`}>
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+                          </span>
+                          <span className="text-sm text-gray-800">{COLUMN_LABELS[key]}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {isAdmin && selectedRfiIds.length > 0 && (
@@ -1053,6 +1319,11 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
               description={activeTab === "recycle_bin" ? "Deleted RFIs will appear here." : "Click Create new RFI to add the first one."}
             />
           </div>
+        ) : sortedRfis.length === 0 ? (
+          <div className="bg-white border border-dashed border-gray-200 rounded-xl p-10 text-center">
+            <p className="text-sm text-gray-600">No RFIs match the current filters.</p>
+            <button onClick={() => setFilters(emptyRFIFilters())} className="mt-3 text-sm font-medium text-blue-600 hover:text-blue-700">Clear all filters</button>
+          </div>
         ) : (
           <div className="bg-white border hairline rounded-xl overflow-x-auto">
             <table className="w-full min-w-[800px]">
@@ -1063,21 +1334,24 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
                       <input
                         type="checkbox"
                         checked={allSelected}
-                        onChange={(e) => setSelectedRfiIds(e.target.checked ? rfis.map((r) => r.id) : [])}
+                        onChange={(e) => setSelectedRfiIds(e.target.checked ? sortedRfis.map((r) => r.id) : [])}
                         className="rounded border-gray-300"
                       />
                     </th>
                   )}
                   {orderedVisibleColumns.map((key) => (
                     <th key={key} className="text-left px-4 py-3 mono-label whitespace-nowrap">
-                      {COLUMN_LABELS[key].toUpperCase()}
+                      <button type="button" onClick={() => handleSortColumn(key)} className="inline-flex items-center gap-1 hover:text-gray-900">
+                        {COLUMN_LABELS[key].toUpperCase()}
+                        {sortColumn === key ? <span aria-hidden>{sortDirection === "asc" ? "▲" : "▼"}</span> : null}
+                      </button>
                     </th>
                   ))}
                   <th className="w-10" />
                 </tr>
               </thead>
               <tbody>
-                {rfis.map((rfi) => (
+                {sortedRfis.map((rfi) => (
                   <tr
                     key={rfi.id}
                     onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; window.location.href = `/projects/${projectId}/rfis/${rfi.id}`; }}
@@ -1182,10 +1456,98 @@ export default function RFIsClient({ projectId, role, username, userId, toolLeve
           initiatedAt={createInitiatedAt ?? ""}
           directory={directory}
           specifications={specifications}
+          budgetItems={budgetItems}
+          drawings={drawings}
           onConfirm={handleCreate}
           onCancel={() => setShowCreate(false)}
         />
       )}
+
+      {showFilters && (
+        <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setShowFilters(false)} />
+          <aside className="relative h-full w-[340px] max-w-full bg-white shadow-xl flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">Filters</h2>
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => setFilters(emptyRFIFilters())}
+                  className="text-sm font-medium text-gray-500 hover:text-gray-800"
+                >
+                  Clear All Filters
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFilters(false)}
+                  className="text-gray-400 hover:text-gray-700"
+                  aria-label="Close filters"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              <FilterSelect label="Status" placeholder="Status" value={filters.status} onChange={(v) => setFilters({ ...filters, status: v })} options={RFI_STATUS_FILTER_OPTIONS.map((o) => ({ value: o, label: o }))} />
+
+              <FilterSelect label="Responsible Contractor" placeholder="Responsible Contractor" value={filters.responsibleContractorId} onChange={(v) => setFilters({ ...filters, responsibleContractorId: v })} options={responsibleContractorOptions.map((o) => ({ value: o.id, label: o.name }))} />
+
+              <FilterSelect label="Received From" placeholder="Received From" value={filters.receivedFromId} onChange={(v) => setFilters({ ...filters, receivedFromId: v })} options={receivedFromOptions.map((o) => ({ value: o.id, label: o.name }))} />
+
+              <FilterSelect label="Assignees" placeholder="Assignees" value={filters.assigneeId} onChange={(v) => setFilters({ ...filters, assigneeId: v })} options={assigneeOptions.map((o) => ({ value: o.id, label: o.name }))} />
+
+              <FilterSelect label="RFI Manager" placeholder="RFI Manager" value={filters.rfiManagerId} onChange={(v) => setFilters({ ...filters, rfiManagerId: v })} options={rfiManagerOptions.map((o) => ({ value: o.id, label: o.name }))} />
+
+              <FilterSelect label="Ball In Court" placeholder="Ball In Court" value={filters.ballInCourtId} onChange={(v) => setFilters({ ...filters, ballInCourtId: v })} options={ballInCourtOptions.map((o) => ({ value: o.id, label: o.name }))} />
+
+              <label className="inline-flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters({ ...filters, overdue: e.target.checked })} className="rounded border-gray-300" />
+                <span className="text-sm text-gray-700">Overdue</span>
+              </label>
+
+              <FilterSelect label="Location" placeholder="Locations" value={filters.location} onChange={(v) => setFilters({ ...filters, location: v })} options={locationOptions.map((o) => ({ value: o, label: o }))} />
+
+              <FilterSelect label="Cost Code" placeholder="Cost Code" value={filters.costCode} onChange={(v) => setFilters({ ...filters, costCode: v })} options={costCodeOptions.map((o) => ({ value: o, label: o }))} />
+
+              <FilterSelect label="RFI Stage" placeholder="RFI Stage" value={filters.rfiStage} onChange={(v) => setFilters({ ...filters, rfiStage: v })} options={rfiStageOptions.map((o) => ({ value: o, label: o }))} />
+
+              <FilterSelect label="Created By" placeholder="Created By" value={filters.createdById} onChange={(v) => setFilters({ ...filters, createdById: v })} options={createdByOptions.map((o) => ({ value: o.id, label: o.name }))} />
+
+              <FilterSelect label="Created By (Company)" placeholder="Created By (Company)" value={filters.createdByCompany} onChange={(v) => setFilters({ ...filters, createdByCompany: v })} options={createdByCompanyOptions.map((o) => ({ value: o, label: o }))} />
+            </div>
+          </aside>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  placeholder,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-semibold text-gray-900 mb-1">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white text-gray-700"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
     </div>
   );
 }

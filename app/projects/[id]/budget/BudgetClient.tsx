@@ -1,10 +1,18 @@
 "use client";
 
-import { Fragment, useState, useEffect, useRef, useMemo } from "react";
+import { Fragment, useState, useEffect, useRef, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { ChevronDown, ChevronRight, Home, Search } from "lucide-react";
 import ProjectNav from "@/components/ProjectNav";
 import { SkeletonTable } from "@/app/components/Skeleton";
+import {
+  COST_CODE_CATEGORIES,
+  COST_TYPES,
+  costTypeLabel,
+  subcategoryLabel,
+  type CostCodeCategory,
+} from "@/lib/cost-codes";
 import * as XLSX from "xlsx";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -44,39 +52,40 @@ type BudgetSnapshot = {
   snapshot_data?: BudgetLineItem[];
 };
 
-type CommitmentSovRow = {
-  id: string;
+// Source-column drill-down: clicking a source/calculated-source budget cell
+// opens a popup listing the records that make up the value (each hyperlinked).
+type BreakdownColumn =
+  | "approved_cos"
+  | "pending_budget_changes"
+  | "committed_costs"
+  | "pending_cost_changes"
+  | "job_to_date_costs";
+
+type BreakdownRow = {
   description: string;
-  qty: number;
-  uom: string;
-  unit_cost: number;
+  source_label: string | null;
+  source_href: string | null;
   amount: number;
 };
 
-type CommitmentSummary = {
-  id: string;
-  type: "subcontract" | "purchase_order";
-  number: number;
-  title: string;
-  contract_company: string;
-  total_amount: number;
-  lines: CommitmentSovRow[];
+type BreakdownGroup = {
+  label: string;
+  rows: BreakdownRow[];
 };
 
-type CommitmentChangeOrderSummary = {
-  id: string;
-  number: string;
-  title: string;
-  contract_company: string;
-  amount: number;
-  commitment_id: string | null;
-};
-
-type CommittedCostsDetail = {
+type BreakdownData = {
   cost_code: string;
-  subcontracts: CommitmentSummary[];
-  purchase_orders: CommitmentSummary[];
-  commitment_change_orders: CommitmentChangeOrderSummary[];
+  column: BreakdownColumn;
+  groups: BreakdownGroup[];
+};
+
+// Human-readable column labels used in the popup title + balancing row.
+const BREAKDOWN_LABELS: Record<BreakdownColumn, string> = {
+  approved_cos: "Approved COs",
+  pending_budget_changes: "Pending Budget Changes",
+  committed_costs: "Committed Costs",
+  pending_cost_changes: "Pending Cost Changes",
+  job_to_date_costs: "Job to Date Costs",
 };
 
 type ForecastMethod = "automatic" | "manual" | "lump_sum" | "monitored_resources";
@@ -479,6 +488,59 @@ function MoneyInput({
   );
 }
 
+// ── Hierarchical select (same control as Change Events → budget code create) ──
+
+function HierSelect({
+  placeholder,
+  valueLabel,
+  children,
+}: {
+  placeholder: string;
+  valueLabel: string | null;
+  children: (close: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white text-left"
+      >
+        <span className={valueLabel ? "text-gray-800 truncate" : "text-gray-400"}>
+          {valueLabel || placeholder}
+        </span>
+        <ChevronDown className="w-4 h-4 text-gray-400 shrink-0 ml-1" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-[60] bg-white border border-gray-200 rounded shadow-lg w-full">
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Resolves a stored cost code (e.g. "01-030") back to its catalog name. */
+function costCodeName(code: string): string | null {
+  for (const cat of COST_CODE_CATEGORIES) {
+    const sub = cat.subcategories.find((s) => s.code === code);
+    if (sub) return sub.name;
+  }
+  return null;
+}
+
 function LineItemModal({
   initial,
   defaults,
@@ -521,6 +583,14 @@ function LineItemModal({
 
   const ref = useRef<HTMLDivElement>(null);
 
+  // Drill-down state for the cost code picker (same UX as Change Events →
+  // line items → budget code → Create). Description auto-populates from the
+  // selected code/type names unless the user has typed their own.
+  const [activeCategory, setActiveCategory] = useState<CostCodeCategory | null>(null);
+  const [codeSearch, setCodeSearch] = useState("");
+  const [typeSearch, setTypeSearch] = useState("");
+  const descEdited = useRef(Boolean(initial?.description || defaults?.description));
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onCancel();
@@ -532,6 +602,51 @@ function LineItemModal({
   function set(key: keyof LineItemFormData, val: string | boolean) {
     setForm((f) => ({ ...f, [key]: val }));
   }
+
+  /** Concatenated "<code name> - <type name>" description, mirroring Change Events. */
+  function autoDescription(codeName: string | null, typeName: string): string {
+    if (!codeName) return typeName;
+    return typeName ? `${codeName} - ${typeName}` : codeName;
+  }
+
+  function selectCostCode(code: string, name: string) {
+    setForm((f) => ({
+      ...f,
+      cost_code: code,
+      description: descEdited.current ? f.description : autoDescription(name, f.cost_type),
+    }));
+  }
+
+  function selectCostType(typeName: string) {
+    setForm((f) => ({
+      ...f,
+      cost_type: typeName,
+      description: descEdited.current
+        ? f.description
+        : autoDescription(costCodeName(f.cost_code), typeName),
+    }));
+  }
+
+  const filteredCategories = COST_CODE_CATEGORIES.filter(
+    (c) =>
+      !codeSearch ||
+      c.code.includes(codeSearch) ||
+      c.name.toLowerCase().includes(codeSearch.toLowerCase())
+  );
+  const filteredSubcategories = (activeCategory?.subcategories ?? []).filter(
+    (s) =>
+      !codeSearch ||
+      s.code.includes(codeSearch) ||
+      s.name.toLowerCase().includes(codeSearch.toLowerCase())
+  );
+  const filteredTypes = COST_TYPES.filter(
+    (t) =>
+      !typeSearch ||
+      t.code.toLowerCase().includes(typeSearch.toLowerCase()) ||
+      t.name.toLowerCase().includes(typeSearch.toLowerCase())
+  );
+
+  const selectedCodeName = form.cost_code ? costCodeName(form.cost_code) : null;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -555,22 +670,116 @@ function LineItemModal({
         <form onSubmit={handleSubmit} className="overflow-y-auto p-6 space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <Field label="Cost Code">
-              <input
-                type="text"
-                value={form.cost_code}
-                onChange={(e) => set("cost_code", e.target.value)}
-                placeholder="e.g. 01-030.C"
-                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
+              <HierSelect
+                placeholder="Select an item"
+                valueLabel={form.cost_code ? (selectedCodeName ? `${form.cost_code} - ${selectedCodeName}` : form.cost_code) : null}
+              >
+                {(close) => (
+                  <div>
+                    <div className="flex items-center border-b border-gray-100 px-3 py-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="Search"
+                        value={codeSearch}
+                        onChange={(e) => setCodeSearch(e.target.value)}
+                        className="flex-1 text-sm focus:outline-none"
+                      />
+                      <Search className="w-4 h-4 text-gray-400 ml-2 shrink-0" />
+                    </div>
+                    {activeCategory ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => { setActiveCategory(null); setCodeSearch(""); }}
+                          className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 border-b border-gray-100"
+                        >
+                          <Home className="w-3.5 h-3.5" />
+                          <ChevronRight className="w-3 h-3 text-gray-400" />
+                          <span className="font-medium">{activeCategory.code} - {activeCategory.name}</span>
+                        </button>
+                        <div className="max-h-60 overflow-y-auto">
+                          {filteredSubcategories.length === 0 ? (
+                            <p className="text-sm text-gray-400 px-3 py-3 text-center">No items found</p>
+                          ) : (
+                            filteredSubcategories.map((s) => (
+                              <button
+                                key={s.code}
+                                type="button"
+                                onClick={() => {
+                                  selectCostCode(s.code, s.name);
+                                  setActiveCategory(null);
+                                  setCodeSearch("");
+                                  close();
+                                }}
+                                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                              >
+                                {subcategoryLabel(s)}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="max-h-60 overflow-y-auto">
+                        {filteredCategories.length === 0 ? (
+                          <p className="text-sm text-gray-400 px-3 py-3 text-center">No items found</p>
+                        ) : (
+                          filteredCategories.map((c) => (
+                            <button
+                              key={c.code}
+                              type="button"
+                              onClick={() => { setActiveCategory(c); setCodeSearch(""); }}
+                              className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                            >
+                              <span>{c.code} - {c.name}</span>
+                              <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </HierSelect>
             </Field>
             <Field label="Cost Type">
-              <input
-                type="text"
-                value={form.cost_type}
-                onChange={(e) => set("cost_type", e.target.value)}
-                placeholder="e.g. Labor or Other"
-                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
+              <HierSelect
+                placeholder="Select an item"
+                valueLabel={form.cost_type || null}
+              >
+                {(close) => (
+                  <div>
+                    <div className="flex items-center border-b border-gray-100 px-3 py-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="Search"
+                        value={typeSearch}
+                        onChange={(e) => setTypeSearch(e.target.value)}
+                        className="flex-1 text-sm focus:outline-none"
+                      />
+                      <Search className="w-4 h-4 text-gray-400 ml-2 shrink-0" />
+                    </div>
+                    <div className="max-h-60 overflow-y-auto">
+                      {filteredTypes.length === 0 ? (
+                        <p className="text-sm text-gray-400 px-3 py-3 text-center">No items found</p>
+                      ) : (
+                        filteredTypes.map((t) => (
+                          <button
+                            key={t.code}
+                            type="button"
+                            onClick={() => { selectCostType(t.name); setTypeSearch(""); close(); }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                          >
+                            {costTypeLabel(t)}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </HierSelect>
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -578,8 +787,8 @@ function LineItemModal({
               <input
                 type="text"
                 value={form.description}
-                onChange={(e) => set("description", e.target.value)}
-                placeholder="e.g. Workmen's Facility.Contract"
+                onChange={(e) => { descEdited.current = e.target.value.trim().length > 0; set("description", e.target.value); }}
+                placeholder="Auto-fills from cost code + cost type"
                 className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
               />
             </Field>
@@ -688,7 +897,7 @@ function LineItemModal({
             </Field>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Field label="Start Date">
               <input
                 type="date"
@@ -998,43 +1207,90 @@ function BudgetModificationModal({
   );
 }
 
-// ── ERP Resend Confirm Modal ──────────────────────────────────────────────────
+// ── ERP Resync Confirm Modal ──────────────────────────────────────────────────
 
 function ErpConfirmModal({
+  connected,
+  busy,
+  result,
   onConfirm,
   onCancel,
 }: {
+  connected: "quickbooks" | "sage300cre" | "multiple" | null;
+  busy: boolean;
+  result: { kind: "success" | "error"; message: string } | null;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape" && !busy) onCancel();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  }, [onCancel, busy]);
+
+  const erpLabel =
+    connected === "quickbooks" ? "QuickBooks Online"
+    : connected === "sage300cre" ? "Sage 300 CRE"
+    : null;
+
+  const noErp = connected === null;
+  const bothErp = connected === "multiple";
+  const blocked = noErp || bothErp;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
-        <h2 className="text-base font-semibold text-gray-900">Resend Budget to ERP</h2>
-        <p className="text-sm text-gray-500">
-          This will push the current budget data to your connected ERP system. Continue?
-        </p>
+        <h2 className="text-base font-semibold text-gray-900">Resync Budget with ERP</h2>
+
+        {noErp ? (
+          <p className="text-sm text-gray-500">
+            No ERP integration is connected. Connect QuickBooks Online or Sage 300 CRE in
+            Settings → Integrations first.
+          </p>
+        ) : bothErp ? (
+          <p className="text-sm text-gray-500">
+            Both QuickBooks and Sage 300 CRE are connected. Only one ERP may be connected at a
+            time — disconnect one in Settings → Integrations.
+          </p>
+        ) : (
+          <p className="text-sm text-gray-500">
+            This pulls job-to-date (actual) costs from <strong>{erpLabel}</strong> and writes them
+            into the <strong>Job to Date Costs</strong> column, matched by budget code. Existing
+            Job to Date Costs for matched codes will be overwritten. Continue?
+          </p>
+        )}
+
+        {result && (
+          <div
+            className={`text-sm rounded-md border p-3 ${
+              result.kind === "success"
+                ? "bg-green-50 border-green-200 text-green-800"
+                : "bg-red-50 border-red-200 text-red-700"
+            }`}
+          >
+            {result.message}
+          </div>
+        )}
+
         <div className="flex justify-end gap-3 pt-1">
           <button
             onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors"
+            disabled={busy}
+            className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
-            Cancel
+            {result?.kind === "success" ? "Close" : "Cancel"}
           </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors"
-          >
-            Resend to ERP
-          </button>
+          {result?.kind !== "success" && (
+            <button
+              onClick={onConfirm}
+              disabled={busy || blocked}
+              className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
+            >
+              {busy ? "Resyncing…" : result?.kind === "error" ? "Try again" : "Resync"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1122,10 +1378,15 @@ export default function BudgetClient({
   const [showBudgetChangeModal, setShowBudgetChangeModal] = useState(false);
   const [showBudgetModificationModal, setShowBudgetModificationModal] = useState(false);
   const [showErpModal, setShowErpModal] = useState(false);
-  const [showCommittedCostsModal, setShowCommittedCostsModal] = useState(false);
-  const [committedCostsLoading, setCommittedCostsLoading] = useState(false);
-  const [committedCostsError, setCommittedCostsError] = useState<string | null>(null);
-  const [committedCostsData, setCommittedCostsData] = useState<CommittedCostsDetail | null>(null);
+  const [erpStatus, setErpStatus] = useState<{ connected: "quickbooks" | "sage300cre" | "multiple" | null }>({ connected: null });
+  const [erpBusy, setErpBusy] = useState(false);
+  const [erpResult, setErpResult] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [breakdownModal, setBreakdownModal] = useState<
+    { column: BreakdownColumn; costCode: string; cellValue: number } | null
+  >(null);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const [breakdownError, setBreakdownError] = useState<string | null>(null);
+  const [breakdownData, setBreakdownData] = useState<BreakdownData | null>(null);
   const [forecastEdits, setForecastEdits] = useState<Record<string, ForecastEdit>>({});
   const [selectedForecastItemId, setSelectedForecastItemId] = useState<string | null>(null);
   const [isBudgetLocked, setIsBudgetLocked] = useState(false);
@@ -1212,6 +1473,15 @@ export default function BudgetClient({
       setLoading(false);
     });
   }, [projectId]);
+
+  useEffect(() => {
+    fetch(`/api/integrations/erp/status`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && typeof data.connected !== "undefined") setErpStatus({ connected: data.connected });
+      })
+      .catch(() => {});
+  }, []);
 
   async function handleAddLineItem(data: LineItemFormData) {
     const res = await fetch(`/api/projects/${projectId}/budget`, {
@@ -1500,9 +1770,34 @@ export default function BudgetClient({
     setShowBudgetModificationModal(false);
   }
 
-  function handleErpResend() {
-    // Placeholder: integrate with ERP API
-    setShowErpModal(false);
+  async function handleErpResync() {
+    setErpBusy(true);
+    setErpResult(null);
+    try {
+      const res = await fetch(`/api/integrations/erp/resync-budget`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErpResult({ kind: "error", message: data?.error || "Resync failed." });
+        return;
+      }
+      // Pull fresh budget data so the updated Job to Date Costs show immediately.
+      const refreshed = await fetch(`/api/projects/${projectId}/budget`).then((r) => r.json());
+      setItems(Array.isArray(refreshed) ? refreshed : []);
+      const erpLabel = data.erp === "sage300cre" ? "Sage 300 CRE" : "QuickBooks";
+      const base =
+        data.updated > 0
+          ? `Updated Job to Date Costs on ${data.updated} budget line${data.updated === 1 ? "" : "s"} from ${erpLabel}.`
+          : `No matching job-to-date costs were found in ${erpLabel}.`;
+      setErpResult({ kind: "success", message: data.warning ? `${base} ${data.warning}` : base });
+    } catch {
+      setErpResult({ kind: "error", message: "Network error while resyncing with the ERP." });
+    } finally {
+      setErpBusy(false);
+    }
   }
 
   function handleDownloadTemplate() {
@@ -1628,22 +1923,22 @@ export default function BudgetClient({
     }
   }
 
-  async function openCommittedCostsModal(item: BudgetLineItem) {
-    setShowCommittedCostsModal(true);
-    setCommittedCostsLoading(true);
-    setCommittedCostsError(null);
-    setCommittedCostsData(null);
+  async function openBreakdownModal(item: BudgetLineItem, column: BreakdownColumn, cellValue: number) {
+    setBreakdownModal({ column, costCode: item.cost_code, cellValue });
+    setBreakdownLoading(true);
+    setBreakdownError(null);
+    setBreakdownData(null);
     try {
       const res = await fetch(
-        `/api/projects/${projectId}/budget/committed-costs?costCode=${encodeURIComponent(item.cost_code)}`
+        `/api/projects/${projectId}/budget/breakdown?column=${encodeURIComponent(column)}&costCode=${encodeURIComponent(item.cost_code)}`
       );
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Failed to load committed costs");
-      setCommittedCostsData(data);
+      if (!res.ok) throw new Error(data?.error || "Failed to load breakdown");
+      setBreakdownData(data);
     } catch (err) {
-      setCommittedCostsError(err instanceof Error ? err.message : "Failed to load committed costs");
+      setBreakdownError(err instanceof Error ? err.message : "Failed to load breakdown");
     } finally {
-      setCommittedCostsLoading(false);
+      setBreakdownLoading(false);
     }
   }
 
@@ -1709,9 +2004,6 @@ export default function BudgetClient({
     tooltip?: ColTooltip;
   }> = [
     { key: "description", label: "Description", width: "min-w-[180px]" },
-    { key: "unit_qty", label: "Budget Unit Qty", width: "min-w-[110px]" },
-    { key: "unit_of_measure", label: "UOM", width: "min-w-[90px]" },
-    { key: "unit_cost", label: "Unit Cost", width: "min-w-[100px]" },
     { key: "original_budget_amount", label: "Original Budget Amount", width: "min-w-[130px]" },
     { key: "budget_modifications", label: "Budget Modifications", width: "min-w-[120px]" },
     {
@@ -1760,7 +2052,7 @@ export default function BudgetClient({
       key: "job_to_date_costs", label: "Job to Date Costs", width: "min-w-[110px]",
       tooltip: {
         subtitle: "(ERP Job Costs)", kind: "Source Column",
-        body: (<><p className="text-gray-300">ERP Job to Date Costs</p></>),
+        body: (<><p className="text-gray-300">ERP Job to Date Costs</p><p className="text-gray-400 mt-1">Pulled from your connected ERP (QuickBooks or Sage 300 CRE) by budget code via <span className="font-medium">Resync with ERP</span>.</p></>),
       },
     },
     {
@@ -1816,11 +2108,23 @@ export default function BudgetClient({
     { key: "forecast_to_complete", label: "Forecast To Complete", width: "min-w-[130px]" },
   ];
 
+  function breakdownButton(item: BudgetLineItem, column: BreakdownColumn, value: number) {
+    return (
+      <button
+        type="button"
+        onClick={() => openBreakdownModal(item, column, value)}
+        className="text-blue-600 hover:text-blue-800 underline underline-offset-2 decoration-blue-200"
+      >
+        {fmt(value)}
+      </button>
+    );
+  }
+
   function renderCell(item: BudgetLineItem | null, key: string) {
     if (item === null) {
       // Totals row
       switch (key) {
-        case "description": return <span className="font-semibold text-gray-900">Total</span>;
+        case "description": return <span className="font-display italic text-sm text-gray-900">Total</span>;
         case "unit_qty": return <span className="font-semibold">{totals.unit_qty.toLocaleString("en-US")}</span>;
         case "unit_of_measure": return <span className="font-semibold">—</span>;
         case "unit_cost": return <span className="font-semibold">—</span>;
@@ -1851,11 +2155,11 @@ export default function BudgetClient({
       case "description":
         return (
           <div>
-            <p className="text-xs font-medium text-gray-500">
+            <p className="font-display italic text-[13px] text-[color:var(--brand-700)]">
               {item!.cost_code}
               {item!.cost_type ? ` · ${item!.cost_type}` : ""}
             </p>
-            <p className="text-xs text-blue-600 flex items-center gap-1.5">
+            <p className="text-xs text-gray-600 flex items-center gap-1.5">
               <span>{item!.description || "No description"}</span>
               {item!.is_partial_line_item && (
                 <span
@@ -1879,23 +2183,14 @@ export default function BudgetClient({
       case "unit_cost": return fmt(item!.unit_cost || 0);
       case "original_budget_amount": return <span className="text-blue-600">{fmt(item!.original_budget_amount)}</span>;
       case "budget_modifications": return fmt(item!.budget_modifications);
-      case "approved_cos": return fmt(item!.approved_cos);
+      case "approved_cos": return breakdownButton(item, "approved_cos", item!.approved_cos);
       case "revised_budget": return fmt(c.revisedBudget);
-      case "pending_budget_changes": return fmt(item!.pending_budget_changes);
+      case "pending_budget_changes": return breakdownButton(item, "pending_budget_changes", item!.pending_budget_changes);
       case "projected_budget": return fmt(c.projectedBudget);
-      case "committed_costs":
-        return (
-          <button
-            type="button"
-            onClick={() => openCommittedCostsModal(item)}
-            className="text-blue-600 hover:text-blue-800 underline underline-offset-2 decoration-blue-200"
-          >
-            {fmt(item!.committed_costs)}
-          </button>
-        );
+      case "committed_costs": return breakdownButton(item, "committed_costs", item!.committed_costs);
       case "direct_costs": return fmt(c.directCosts);
-      case "job_to_date_costs": return <span className="text-blue-600">{fmt(item!.job_to_date_costs)}</span>;
-      case "pending_cost_changes": return fmt(item!.pending_cost_changes);
+      case "job_to_date_costs": return breakdownButton(item, "job_to_date_costs", item!.job_to_date_costs);
+      case "pending_cost_changes": return breakdownButton(item, "pending_cost_changes", item!.pending_cost_changes);
       case "projected_costs": return fmt(c.projectedCosts);
       case "forecast_to_complete":
         return (
@@ -2156,9 +2451,9 @@ export default function BudgetClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -2173,19 +2468,29 @@ export default function BudgetClient({
       <ProjectNav projectId={projectId} />
 
       <main className="px-6 py-8">
+        {/* Breadcrumbs */}
+        <div className="crumbs mb-5">
+          <Link href={`/projects/${projectId}`}>Project</Link>
+          <span className="sep">/</span>
+          <span>Budget</span>
+          <span className="sep">/</span>
+          <span>Cost report</span>
+          <span className="stamp">{isBudgetLocked ? "Budget locked" : "Working draft"}</span>
+        </div>
+
         {/* Title + actions */}
-        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+        <div className="sec-row mb-6 gap-4 flex-wrap">
           <div className="min-w-0">
-            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Budget</h1>
-            {(items.length > 0 || snapshots.length > 0) && (
-              <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">{isBudgetLocked ? "Locked" : "Across this project"}</span>
-                <span className="sep">·</span>
-                <span className="num" style={{ color: "var(--brand-500)" }}>{items.length}</span> line items
-                <span className="sep">·</span>
-                <span className="num">{snapshots.length}</span> snapshots
-              </p>
-            )}
+            <h1 className="h2-warm">Budget</h1>
+            <p className="sec-sub mt-1.5">
+              <span className="serif-italic text-[color:var(--brand-700)]">{isBudgetLocked ? "Locked budget" : "Across this project"}</span>
+              <span className="sep">·</span>
+              <span className="num">{fmt(totals.projectedBudget)}</span> projected
+              <span className="sep">·</span>
+              <span className="num" style={{ color: "var(--brand-500)" }}>{items.length}</span> line items
+              <span className="sep">·</span>
+              <span className="num">{snapshots.length}</span> snapshots
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -2247,15 +2552,20 @@ export default function BudgetClient({
               </div>
             )}
 
-            {/* Resend to ERP */}
+            {/* Resync with ERP */}
             <button
-              onClick={() => setShowErpModal(true)}
+              onClick={() => { setErpResult(null); setShowErpModal(true); }}
+              title={
+                erpStatus.connected === "quickbooks" ? "Pull Job to Date Costs from QuickBooks Online"
+                : erpStatus.connected === "sage300cre" ? "Pull Job to Date Costs from Sage 300 CRE"
+                : "Pull Job to Date Costs from your connected ERP"
+              }
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Resend to ERP
+              Resync with ERP
             </button>
 
             {/* Export */}
@@ -2353,52 +2663,38 @@ export default function BudgetClient({
           </div>
         </div>
 
-        <div className="mb-4 border-b border-gray-200">
-          <div className="flex items-center gap-6">
-            <button
-              type="button"
-              onClick={() => setActiveTab("budget")}
-              className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === "budget"
-                  ? "border-orange-500 text-gray-900"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Budget
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("budget_details")}
-              className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === "budget_details"
-                  ? "border-orange-500 text-gray-900"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Budget Details
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("forecasting")}
-              className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === "forecasting"
-                  ? "border-orange-500 text-gray-900"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Forecasting
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("project_status_snapshot")}
-              className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === "project_status_snapshot"
-                  ? "border-orange-500 text-gray-900"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Project Status Snapshots
-            </button>
+        {/* Stat strip */}
+        {!loading && (
+          <div className="stats mb-6">
+            <div className="stat">
+              <div className="lbl">Revised Budget</div>
+              <div className="val">{fmt(totals.revisedBudget)}</div>
+              <div className="delta">{fmt(totals.original_budget_amount)} original</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Projected Costs</div>
+              <div className="val">{fmt(totals.projectedCosts)}</div>
+              <div className="delta">{fmt(totals.committed_costs)} committed</div>
+            </div>
+            <div className="stat warn">
+              <div className="lbl">Forecast to Complete</div>
+              <div className="val">{fmt(totals.forecastToComplete)}</div>
+              <div className="delta">{fmt(totals.estimatedCostAtCompletion)} est. at completion</div>
+            </div>
+            <div className={`stat ${totals.projectedOverUnder < 0 ? "alert" : "calm"}`}>
+              <div className="lbl">Projected Over / Under</div>
+              <div className="val">{fmt(totals.projectedOverUnder)}</div>
+              <div className="delta">{totals.projectedOverUnder < 0 ? "Projected over budget" : "Within budget"}</div>
+            </div>
+          </div>
+        )}
+
+        <div className="mb-4">
+          <div className="seg">
+            <button type="button" onClick={() => setActiveTab("budget")} className={activeTab === "budget" ? "active" : ""}>Budget</button>
+            <button type="button" onClick={() => setActiveTab("budget_details")} className={activeTab === "budget_details" ? "active" : ""}>Budget Details</button>
+            <button type="button" onClick={() => setActiveTab("forecasting")} className={activeTab === "forecasting" ? "active" : ""}>Forecasting</button>
+            <button type="button" onClick={() => setActiveTab("project_status_snapshot")} className={activeTab === "project_status_snapshot" ? "active" : ""}>Project Status Snapshots</button>
           </div>
         </div>
 
@@ -2879,15 +3175,15 @@ export default function BudgetClient({
             {loading ? (
               <SkeletonTable rows={6} cols={8} />
             ) : activeTab === "budget" ? (
-              <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+              <div className="budget">
                 <div className="overflow-auto max-h-[70vh]">
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 z-20">
-                      <tr className="border-b border-gray-100 bg-gray-50">
+                      <tr className="bg-[#F9FAFB] border-b border-black/[0.06]">
                         {COLS.map((col) => (
                           <th
                             key={col.key}
-                            className={`text-left px-3 py-3 font-semibold text-gray-700 whitespace-nowrap bg-gray-50 ${col.width} ${
+                            className={`text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 whitespace-nowrap bg-[#F9FAFB] ${col.width} ${
                               col.key === "description" ? "sticky left-0 z-30" : ""
                             }`}
                           >
@@ -2898,7 +3194,7 @@ export default function BudgetClient({
                             )}
                           </th>
                         ))}
-                        <th className="px-3 py-3 w-10 bg-gray-50" />
+                        <th className="px-3 py-2.5 w-10 bg-[#F9FAFB]" />
                       </tr>
                     </thead>
                     <tbody>
@@ -2906,8 +3202,8 @@ export default function BudgetClient({
                       {items.length === 0 ? (
                         <tr>
                           <td colSpan={COLS.length + 1} className="px-3 py-12 text-center">
-                            <p className="text-sm text-gray-400">No budget line items yet</p>
-                            <p className="text-xs text-gray-300 mt-1">
+                            <p className="font-display italic text-base text-[color:var(--brand-700)]">No budget line items yet</p>
+                            <p className="text-xs text-gray-400 mt-1">
                               Use the right panel to create your first budget code.
                             </p>
                           </td>
@@ -2916,13 +3212,15 @@ export default function BudgetClient({
                         items.map((item) => (
                           <tr
                             key={item.id}
-                            className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0 group"
+                            className="border-b border-black/[0.04] hover:bg-[#F9FAFB] transition-colors last:border-b-0 group"
                           >
                             {COLS.map((col) => (
                               <td
                                 key={col.key}
                                 className={`px-3 py-3 text-xs whitespace-nowrap ${
-                                  col.key === "description" ? "sticky left-0 z-10 bg-white" : ""
+                                  col.key === "description"
+                                    ? "sticky left-0 z-10 bg-white group-hover:bg-[#F9FAFB]"
+                                    : "font-mono tabular-nums text-right"
                                 }`}
                               >
                                 {renderCell(item, col.key)}
@@ -2965,18 +3263,20 @@ export default function BudgetClient({
                       )}
 
                       {/* Totals row */}
-                      <tr className="border-t border-gray-200 bg-gray-50 sticky bottom-0 z-20">
+                      <tr className="border-t border-black/[0.08] bg-[#F9FAFB] sticky bottom-0 z-20">
                         {COLS.map((col) => (
                           <td
                             key={col.key}
-                            className={`px-3 py-3 text-xs whitespace-nowrap bg-gray-50 ${
-                              col.key === "description" ? "sticky left-0 z-30" : ""
+                            className={`px-3 py-3 text-xs whitespace-nowrap bg-[#F9FAFB] ${
+                              col.key === "description"
+                                ? "sticky left-0 z-30"
+                                : "font-mono tabular-nums text-right"
                             }`}
                           >
                             {renderCell(null, col.key)}
                           </td>
                         ))}
-                        <td className="bg-gray-50" />
+                        <td className="bg-[#F9FAFB]" />
                       </tr>
                     </tbody>
                   </table>
@@ -3039,7 +3339,7 @@ export default function BudgetClient({
               function renderForecastCell(item: BudgetLineItem | null, key: string) {
                 if (item === null) {
                   switch (key) {
-                    case "description": return <span className="font-semibold text-gray-900">Total</span>;
+                    case "description": return <span className="font-display italic text-sm text-gray-900">Total</span>;
                     case "sub_job": return null;
                     case "revised_budget": return <span className="font-semibold">{fmt(forecastTotals.revisedBudget)}</span>;
                     case "projected_budget": return <span className="font-semibold">{fmt(forecastTotals.projectedBudget)}</span>;
@@ -3060,8 +3360,8 @@ export default function BudgetClient({
                   case "description":
                     return (
                       <div>
-                        <p className="text-xs font-medium text-gray-500">{item.cost_code}</p>
-                        <p className="text-xs text-blue-600">{item.description}</p>
+                        <p className="font-display italic text-[13px] text-[color:var(--brand-700)]">{item.cost_code}</p>
+                        <p className="text-xs text-gray-600">{item.description}</p>
                       </div>
                     );
                   case "sub_job": return <span className="text-gray-600">{tiers.tier1}</span>;
@@ -3090,15 +3390,15 @@ export default function BudgetClient({
               }
 
               return (
-                <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+                <div className="budget">
                   <div className="overflow-auto max-h-[70vh]">
                     <table className="w-full text-xs">
                       <thead className="sticky top-0 z-20">
-                        <tr className="border-b border-gray-100 bg-gray-50">
+                        <tr className="border-b border-black/[0.06] bg-[#F9FAFB]">
                           {FORECAST_COLS.map((col) => (
                             <th
                               key={col.key}
-                              className={`text-left px-3 py-3 font-semibold text-gray-700 whitespace-nowrap bg-gray-50 ${col.width} ${
+                              className={`text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 whitespace-nowrap bg-[#F9FAFB] ${col.width} ${
                                 col.key === "description" ? "sticky left-0 z-30" : ""
                               }`}
                             >
@@ -3110,24 +3410,24 @@ export default function BudgetClient({
                       <tbody>
                         {filteredForecastItems.length === 0 ? (
                           <tr>
-                            <td colSpan={FORECAST_COLS.length} className="px-3 py-12 text-center text-sm text-gray-400">
-                              No line items match the current filters
+                            <td colSpan={FORECAST_COLS.length} className="px-3 py-12 text-center">
+                              <p className="font-display italic text-base text-[color:var(--brand-700)]">No line items match the current filters</p>
                             </td>
                           </tr>
                         ) : forecastGroupBy ? (
                           groupedForecastItems.map(([groupName, groupItems]) => (
                             <Fragment key={`fg-${groupName}`}>
-                              <tr className="bg-gray-100 border-y border-gray-200">
-                                <td colSpan={FORECAST_COLS.length} className="px-3 py-2 text-xs font-semibold text-gray-700">
+                              <tr className="bg-[#F1EEE6] border-y border-black/[0.06]">
+                                <td colSpan={FORECAST_COLS.length} className="px-3 py-2 font-display italic text-[13px] text-gray-700">
                                   {groupName}
                                 </td>
                               </tr>
                               {groupItems.map((item) => (
-                                <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0">
+                                <tr key={item.id} className="border-b border-black/[0.04] hover:bg-[#F9FAFB] transition-colors last:border-b-0 group">
                                   {FORECAST_COLS.map((col) => (
                                     <td
                                       key={col.key}
-                                      className={`px-3 py-3 text-xs whitespace-nowrap ${col.key === "description" ? "sticky left-0 z-10 bg-white" : ""}`}
+                                      className={`px-3 py-3 text-xs whitespace-nowrap ${col.key === "description" ? "sticky left-0 z-10 bg-white group-hover:bg-[#F9FAFB]" : "font-mono tabular-nums text-right"}`}
                                     >
                                       {renderForecastCell(item, col.key)}
                                     </td>
@@ -3138,11 +3438,11 @@ export default function BudgetClient({
                           ))
                         ) : (
                           filteredForecastItems.map((item) => (
-                            <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0">
+                            <tr key={item.id} className="border-b border-black/[0.04] hover:bg-[#F9FAFB] transition-colors last:border-b-0 group">
                               {FORECAST_COLS.map((col) => (
                                 <td
                                   key={col.key}
-                                  className={`px-3 py-3 text-xs whitespace-nowrap ${col.key === "description" ? "sticky left-0 z-10 bg-white" : ""}`}
+                                  className={`px-3 py-3 text-xs whitespace-nowrap ${col.key === "description" ? "sticky left-0 z-10 bg-white group-hover:bg-[#F9FAFB]" : "font-mono tabular-nums text-right"}`}
                                 >
                                   {renderForecastCell(item, col.key)}
                                 </td>
@@ -3151,11 +3451,11 @@ export default function BudgetClient({
                           ))
                         )}
                         {/* Totals row */}
-                        <tr className="border-t border-gray-200 bg-gray-50 sticky bottom-0 z-20">
+                        <tr className="border-t border-black/[0.08] bg-[#F9FAFB] sticky bottom-0 z-20">
                           {FORECAST_COLS.map((col) => (
                             <td
                               key={col.key}
-                              className={`px-3 py-3 text-xs whitespace-nowrap bg-gray-50 ${col.key === "description" ? "sticky left-0 z-30" : ""}`}
+                              className={`px-3 py-3 text-xs whitespace-nowrap bg-[#F9FAFB] ${col.key === "description" ? "sticky left-0 z-30" : "font-mono tabular-nums text-right"}`}
                             >
                               {renderForecastCell(null, col.key)}
                             </td>
@@ -3609,18 +3909,27 @@ export default function BudgetClient({
         />
       )}
       {showErpModal && (
-        <ErpConfirmModal onConfirm={handleErpResend} onCancel={() => setShowErpModal(false)} />
+        <ErpConfirmModal
+          connected={erpStatus.connected}
+          busy={erpBusy}
+          result={erpResult}
+          onConfirm={handleErpResync}
+          onCancel={() => { if (!erpBusy) { setShowErpModal(false); setErpResult(null); } }}
+        />
       )}
-      {showCommittedCostsModal && (
-        <CommittedCostsModal
-          projectId={projectId}
-          loading={committedCostsLoading}
-          error={committedCostsError}
-          data={committedCostsData}
+      {breakdownModal && (
+        <BreakdownModal
+          columnLabel={BREAKDOWN_LABELS[breakdownModal.column]}
+          column={breakdownModal.column}
+          costCode={breakdownModal.costCode}
+          cellValue={breakdownModal.cellValue}
+          loading={breakdownLoading}
+          error={breakdownError}
+          data={breakdownData}
           onClose={() => {
-            setShowCommittedCostsModal(false);
-            setCommittedCostsData(null);
-            setCommittedCostsError(null);
+            setBreakdownModal(null);
+            setBreakdownData(null);
+            setBreakdownError(null);
           }}
         />
       )}
@@ -3644,27 +3953,67 @@ export default function BudgetClient({
   );
 }
 
-function CommittedCostsModal({
-  projectId,
+function BreakdownModal({
+  columnLabel,
+  column,
+  costCode,
+  cellValue,
   loading,
   error,
   data,
   onClose,
 }: {
-  projectId: string;
+  columnLabel: string;
+  column: BreakdownColumn;
+  costCode: string;
+  cellValue: number;
   loading: boolean;
   error: string | null;
-  data: CommittedCostsDetail | null;
+  data: BreakdownData | null;
   onClose: () => void;
 }) {
-  const sectionTitleClass = "text-sm font-semibold text-gray-900";
-  const sectionCountClass = "text-xs text-gray-500";
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const groups = data?.groups ?? [];
+  const sourceSum = groups.reduce((s, g) => s + g.rows.reduce((t, r) => t + r.amount, 0), 0);
+  const delta = Math.round((cellValue - sourceSum) * 100) / 100;
+
+  // A balancing row so the listed sources always tie back to the value shown in
+  // the budget table: any remainder is an amount entered directly on the budget
+  // line item (or, for ERP actuals, the full pulled-in value).
+  const displayGroups: BreakdownGroup[] = [...groups];
+  if (Math.abs(delta) >= 0.005) {
+    displayGroups.push({
+      label: column === "job_to_date_costs" ? "ERP Job to Date Costs" : "Direct budget entry",
+      rows: [
+        {
+          description:
+            column === "job_to_date_costs"
+              ? "Actual costs pulled from your connected ERP"
+              : "Entered directly on the budget line item",
+          source_label: null,
+          source_href: null,
+          amount: delta,
+        },
+      ],
+    });
+  }
+
+  let rowNum = 0;
+  const hasRows = displayGroups.some((g) => g.rows.length > 0);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-5xl max-h-[90vh] bg-white rounded-xl shadow-xl overflow-hidden">
+      <div className="w-full max-w-3xl max-h-[90vh] bg-white rounded-xl shadow-xl overflow-hidden flex flex-col">
         <div className="bg-gray-800 text-white px-4 py-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">
-            Committed Costs {data?.cost_code ? `for ${data.cost_code}` : ""}
+            {columnLabel} for {costCode}
           </h2>
           <button
             type="button"
@@ -3676,131 +4025,78 @@ function CommittedCostsModal({
           </button>
         </div>
 
-        <div className="p-4 overflow-auto max-h-[calc(90vh-58px)]">
-          {loading && <p className="text-sm text-gray-500">Loading committed cost details…</p>}
+        <div className="p-4 overflow-auto">
+          {loading && <p className="text-sm text-gray-500">Loading details…</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
           {!loading && !error && data && (
-            <div className="space-y-6">
-              <CommitmentSection
-                projectId={projectId}
-                title="Approved Subcontracts"
-                items={data.subcontracts}
-                sectionTitleClass={sectionTitleClass}
-                sectionCountClass={sectionCountClass}
-              />
-              <CommitmentSection
-                projectId={projectId}
-                title="Approved Purchase Order Contracts"
-                items={data.purchase_orders}
-                sectionTitleClass={sectionTitleClass}
-                sectionCountClass={sectionCountClass}
-              />
-              <div>
-                <div className="flex items-baseline justify-between mb-2">
-                  <h3 className={sectionTitleClass}>Approved Commitment Change Orders</h3>
-                  <span className={sectionCountClass}>{data.commitment_change_orders.length} items</span>
-                </div>
-                {data.commitment_change_orders.length === 0 ? (
-                  <p className="text-xs text-gray-500">No approved commitment change orders for this cost code.</p>
-                ) : (
-                  <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
-                    <thead className="bg-gray-50 text-gray-700">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-semibold">Change Order</th>
-                        <th className="px-3 py-2 text-left font-semibold">Company</th>
-                        <th className="px-3 py-2 text-left font-semibold">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.commitment_change_orders.map((co) => (
-                        <tr key={co.id} className="border-t border-gray-100">
-                          <td className="px-3 py-2">
-                            <Link
-                              href={`/projects/${projectId}/change-orders/${co.id}`}
-                              className="text-blue-700 hover:text-blue-900 hover:underline"
-                            >
-                              {co.number} - {co.title || "Untitled"}
-                            </Link>
-                          </td>
-                          <td className="px-3 py-2">{co.contract_company || "—"}</td>
-                          <td className="px-3 py-2">{fmt(co.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CommitmentSection({
-  projectId,
-  title,
-  items,
-  sectionTitleClass,
-  sectionCountClass,
-}: {
-  projectId: string;
-  title: string;
-  items: CommitmentSummary[];
-  sectionTitleClass: string;
-  sectionCountClass: string;
-}) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between mb-2">
-        <h3 className={sectionTitleClass}>{title}</h3>
-        <span className={sectionCountClass}>{items.length} items</span>
-      </div>
-      {items.length === 0 ? (
-        <p className="text-xs text-gray-500">No matching approved commitments for this cost code.</p>
-      ) : (
-        <div className="space-y-3">
-          {items.map((commitment) => (
-            <div key={commitment.id} className="border border-gray-200 rounded-lg overflow-hidden">
-              <div className="bg-gray-50 px-3 py-2 flex items-center justify-between gap-3 text-xs">
-                <div className="min-w-0">
-                  <Link
-                    href={`/projects/${projectId}/commitments/${commitment.id}`}
-                    className="text-blue-700 hover:text-blue-900 hover:underline"
-                  >
-                    #{commitment.number} - {commitment.title || "Untitled Commitment"}
-                  </Link>
-                  <p className="text-gray-500 truncate">{commitment.contract_company || "—"}</p>
-                </div>
-                <div className="font-semibold text-gray-900 whitespace-nowrap">{fmt(commitment.total_amount)}</div>
-              </div>
-              <table className="w-full text-xs">
-                <thead className="bg-white text-gray-700">
-                  <tr className="border-t border-gray-200">
+            <>
+              <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold w-12">No.</th>
                     <th className="px-3 py-2 text-left font-semibold">Description</th>
-                    <th className="px-3 py-2 text-left font-semibold">QTY</th>
-                    <th className="px-3 py-2 text-left font-semibold">UOM</th>
-                    <th className="px-3 py-2 text-left font-semibold">Unit Cost</th>
-                    <th className="px-3 py-2 text-left font-semibold">Amount</th>
+                    <th className="px-3 py-2 text-left font-semibold">Source</th>
+                    <th className="px-3 py-2 text-right font-semibold w-36">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {commitment.lines.map((line) => (
-                    <tr key={line.id} className="border-t border-gray-100">
-                      <td className="px-3 py-2">{line.description || "—"}</td>
-                      <td className="px-3 py-2">{line.qty}</td>
-                      <td className="px-3 py-2">{line.uom || "—"}</td>
-                      <td className="px-3 py-2">{fmt(line.unit_cost)}</td>
-                      <td className="px-3 py-2">{fmt(line.amount)}</td>
+                  {!hasRows ? (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-6 text-center text-gray-500">
+                        No contributing records for this cost code.
+                      </td>
                     </tr>
-                  ))}
+                  ) : (
+                    displayGroups.map((group) =>
+                      group.rows.length === 0 ? null : (
+                        <Fragment key={group.label}>
+                          <tr className="bg-gray-100/70">
+                            <td colSpan={4} className="px-3 py-1.5 font-semibold text-gray-700">
+                              {group.label}
+                            </td>
+                          </tr>
+                          {group.rows.map((row, i) => {
+                            rowNum += 1;
+                            return (
+                              <tr key={`${group.label}-${i}`} className="border-t border-gray-100">
+                                <td className="px-3 py-2 text-gray-500">{rowNum}</td>
+                                <td className="px-3 py-2">{row.description || "—"}</td>
+                                <td className="px-3 py-2">
+                                  {row.source_href ? (
+                                    <Link
+                                      href={row.source_href}
+                                      className="text-blue-700 hover:text-blue-900 hover:underline"
+                                    >
+                                      {row.source_label}
+                                    </Link>
+                                  ) : (
+                                    <span className="text-gray-400">{row.source_label || "—"}</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(row.amount)}</td>
+                              </tr>
+                            );
+                          })}
+                        </Fragment>
+                      )
+                    )
+                  )}
+                  <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+                    <td className="px-3 py-2" colSpan={3}>
+                      Total:
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt(cellValue)}</td>
+                  </tr>
                 </tbody>
               </table>
-            </div>
-          ))}
+              <p className="mt-3 text-[11px] text-gray-400">
+                Sources are matched to this budget code. Amounts entered directly on the budget line
+                item appear under “Direct budget entry” so the breakdown totals to the column value.
+              </p>
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

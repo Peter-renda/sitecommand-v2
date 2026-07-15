@@ -40,12 +40,12 @@
   --ink-soft: #171717;       /* --foreground token in app                */
 
   /* ── 3. Brand accent — single-color brand.                            */
-  /* "#D4500A" is declared as `--accent` in globals.css and used for the
+  /* "#2563EB" is declared as `--accent` in globals.css and used for the
      eyebrow dot, progress fills, focus rings, and hero-card chrome.     */
-  --brand-500: #D4500A;      /* pure brand accent                        */
-  --brand-600: #C2410C;      /* hover/darker accent, status text         */
-  --brand-700: #B45309;      /* deepest, rare                            */
-  --brand-100: #FFF7ED;      /* accent chip fill                         */
+  --brand-500: #2563EB;      /* pure brand accent                        */
+  --brand-600: #1D4ED8;      /* hover/darker accent, status text         */
+  --brand-700: #1D4ED8;      /* deepest, rare                            */
+  --brand-100: #EFF6FF;      /* accent chip fill                         */
   --brand-200: #FED7AA;      /* accent chip border                       */
   --brand-tint: rgba(212, 80, 10, 0.08); /* soft brand wash (icon cups)  */
   --brand-glow: rgba(212, 80, 10, 0.06); /* ambient hero glow            */
@@ -64,7 +64,7 @@
   --danger-500:  #DC2626;  --danger-50:  #FEF2F2;  --danger-200:  #FECACA;
 
   /* Feature-tag dots used on the landing bento grid.                    */
-  --tag-rfi:       #D4500A; /* orange   */
+  --tag-rfi:       #2563EB; /* orange   */
   --tag-submittal: #6366F1; /* indigo   */
   --tag-daily-log: #0EA5E9; /* sky      */
   --tag-drawing:   #111110; /* ink      */

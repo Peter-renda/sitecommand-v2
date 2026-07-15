@@ -35,6 +35,7 @@ export async function PATCH(
     "sort_order",
     "is_partial_line_item",
     "is_gst_line_item",
+    "report_fields",
   ];
 
   const updates: Record<string, unknown> = {};

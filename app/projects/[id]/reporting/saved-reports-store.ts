@@ -6,6 +6,7 @@ export type StoredReport = {
   id: string;
   name: string;
   reportType: string;
+  templateValue?: string;
   description: string;
   createdBy: string;
   createdAt: string;
@@ -18,8 +19,18 @@ export type StoredReport = {
     source: string;
     fieldKey: string;
     fieldLabel: string;
-    format?: "currency" | "date" | "text";
+    format?: "currency" | "date" | "text" | "number";
   }[];
+  singleToolTabs?: {
+    id: string;
+    name: string;
+    dataSetId: string | null;
+    selectedColumns: string[];
+    filters?: Record<string, unknown>[];
+  }[];
+  visualConfig?: Record<string, unknown>;
+  calculatedColumns?: Record<string, unknown>[];
+  filters?: Record<string, unknown>[];
   lastRunRecordCount?: number;
 };
 

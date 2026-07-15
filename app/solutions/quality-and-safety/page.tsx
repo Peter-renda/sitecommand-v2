@@ -106,7 +106,7 @@ export default function QualityAndSafetyPage() {
         <div className="max-w-7xl mx-auto">
           <div className="max-w-3xl">
             <div className="animate-fade-up inline-flex items-center gap-2 mb-8">
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
               <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Construction · Quality &amp; Safety</span>
             </div>
             <h1 className="font-display animate-fade-up delay-100" style={{ fontSize: "clamp(2.8rem,6.5vw,5rem)", lineHeight: "0.96" }}>
@@ -171,7 +171,7 @@ export default function QualityAndSafetyPage() {
                 "Full audit trail for every observation and incident",
               ].map((point) => (
                 <div key={point} className="flex items-start gap-3">
-                  <svg className="w-5 h-5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#D4500A" }}>
+                  <svg className="w-5 h-5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#2563EB" }}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                   <span className="text-sm text-gray-700">{point}</span>
@@ -193,8 +193,8 @@ export default function QualityAndSafetyPage() {
             {features.map((f) => (
               <div key={f.name} className="rounded-2xl" style={{ background: "linear-gradient(145deg, rgba(255,255,255,0.95) 0%, rgba(235,235,233,0.5) 100%)", border: "1px solid rgba(0,0,0,0.055)", boxShadow: "0 2px 8px rgba(0,0,0,0.04), 0 1px 0 rgba(255,255,255,0.7) inset", padding: "1.5px" }}>
                 <div className="h-full rounded-[14px] p-6 flex flex-col gap-4" style={{ background: "#FFFFFF", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)" }}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "rgba(212,80,10,0.08)" }}>
-                    <div style={{ color: "#D4500A" }}>{f.icon}</div>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "rgba(37,99,235,0.08)" }}>
+                    <div style={{ color: "#2563EB" }}>{f.icon}</div>
                   </div>
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900 mb-1.5">{f.name}</h3>
@@ -234,7 +234,7 @@ export default function QualityAndSafetyPage() {
             ].map((item) => (
               <div key={item.step} className="flex flex-col gap-4">
                 <div className="inline-flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
                   <span className="text-xs font-bold tracking-widest text-gray-400 uppercase">{item.step}</span>
                 </div>
                 <h3 className="text-base font-semibold text-gray-900">{item.title}</h3>
@@ -286,7 +286,7 @@ export default function QualityAndSafetyPage() {
               <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(212,80,10,0.04) 0%, transparent 70%)" }} />
               <div className="relative">
                 <span className="inline-flex items-center gap-2 mb-6">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
                   <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Get started today</span>
                 </span>
                 <h2 className="text-4xl sm:text-5xl font-display text-gray-950 leading-tight">Build safer projects, starting today</h2>

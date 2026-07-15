@@ -57,15 +57,15 @@ function numVal(s: string): number {
   return isNaN(n) ? 0 : n;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  approved: "bg-green-100 text-green-700",
-  draft: "bg-gray-100 text-gray-500",
-  void: "bg-red-50 text-red-500",
-  terminated: "bg-orange-50 text-orange-600",
+const STATUS_PILL: Record<string, string> = {
+  approved: "pill-open",
+  draft: "pill-warn",
+  void: "pill-post",
+  terminated: "pill-post",
 };
 
 const ERP_STATUS_COLORS: Record<string, string> = {
-  synced: "text-green-600",
+  synced: "text-[color:var(--brand-700)]",
   not_synced: "text-gray-400",
   pending: "text-amber-500",
 };
@@ -557,9 +557,12 @@ export default function CommitmentsClient({
   const [rowMenuId, setRowMenuId] = useState<string | null>(null);
   const rowMenuRef = useRef<HTMLDivElement>(null);
 
-  // Sage sync
-  const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<{ id: string; message: string } | null>(null);
+  // ERP sync (auto-detects the company's connected accounting platform)
+  const [erpConnected, setErpConnected] = useState<
+    "quickbooks" | "sage300cre" | "multiple" | null | undefined
+  >(undefined);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Column & display management
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
@@ -597,6 +600,15 @@ export default function CommitmentsClient({
       setLoading(false);
     });
   }, [projectId]);
+
+  // Detect which accounting ERP the company has connected so the single Sync
+  // button can route to the right platform automatically.
+  useEffect(() => {
+    fetch(`/api/integrations/erp/status`)
+      .then((r) => r.json())
+      .then((data) => setErpConnected(data?.connected ?? null))
+      .catch(() => setErpConnected(null));
+  }, []);
 
   async function handleEdit(data: CommitmentFormData) {
     if (!editingItem) return;
@@ -660,27 +672,81 @@ export default function CommitmentsClient({
     setRestoringItem(null);
   }
 
-  async function handleSyncToSage(item: Commitment) {
-    setRowMenuId(null);
-    setSyncError(null);
-    setSyncingId(item.id);
-    // Optimistically show pending
-    setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, erp_status: "pending" } : i));
+  // Single Sync action: figures out the connected ERP and pushes every active
+  // commitment to it, so users don't have to pick a platform per record.
+  async function handleSyncAll() {
+    if (syncingAll) return;
+    setSyncNotice(null);
 
-    const res = await fetch("/api/integrations/sage/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recordType: "commitments", recordId: item.id }),
-    });
-    const data = await res.json();
-    setSyncingId(null);
-
-    if (!res.ok) {
-      setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, erp_status: "not_synced" } : i));
-      setSyncError({ id: item.id, message: data.error ?? "Sync failed" });
-    } else {
-      setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, erp_status: "synced" } : i));
+    if (erpConnected === undefined) {
+      setSyncNotice({ ok: false, message: "Checking ERP connection… please try again in a moment." });
+      return;
     }
+    if (erpConnected === null) {
+      setSyncNotice({
+        ok: false,
+        message: "No accounting ERP is connected. Connect QuickBooks or Sage 300 CRE in Settings → Integrations.",
+      });
+      return;
+    }
+    if (erpConnected === "multiple") {
+      setSyncNotice({
+        ok: false,
+        message: "Multiple ERPs are connected. Disconnect one in Settings → Integrations before syncing.",
+      });
+      return;
+    }
+
+    const endpoint =
+      erpConnected === "quickbooks"
+        ? "/api/integrations/quickbooks/sync"
+        : "/api/integrations/sage300cre/sync";
+    const erpLabel = erpConnected === "quickbooks" ? "QuickBooks Online" : "Sage 300 CRE";
+
+    const targets = items;
+    if (targets.length === 0) {
+      setSyncNotice({ ok: false, message: "There are no commitments to sync." });
+      return;
+    }
+
+    setSyncingAll(true);
+    let ok = 0;
+    let fail = 0;
+    let firstError = "";
+
+    for (const item of targets) {
+      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, erp_status: "pending" } : i)));
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recordType: "commitments", recordId: item.id }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          ok++;
+          setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, erp_status: "synced" } : i)));
+        } else {
+          fail++;
+          if (!firstError) firstError = data?.error ?? `Sync failed (${res.status})`;
+          setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, erp_status: "not_synced" } : i)));
+        }
+      } catch {
+        fail++;
+        if (!firstError) firstError = "Network error while syncing.";
+        setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, erp_status: "not_synced" } : i)));
+      }
+    }
+
+    setSyncingAll(false);
+    setSyncNotice(
+      fail === 0
+        ? { ok: true, message: `Synced ${ok} commitment${ok === 1 ? "" : "s"} to ${erpLabel}.` }
+        : {
+            ok: false,
+            message: `Synced ${ok} of ${targets.length} commitment${targets.length === 1 ? "" : "s"} to ${erpLabel}. ${fail} failed${firstError ? `: ${firstError}` : "."}`,
+          }
+    );
   }
 
   async function handleLogout() {
@@ -756,18 +822,27 @@ export default function CommitmentsClient({
 
   function renderCell(item: Commitment, key: string) {
     switch (key) {
-      case "number":
+      case "number": {
+        const idxStatus =
+          item.status === "approved"
+            ? "open"
+            : item.status === "void" || item.status === "terminated"
+            ? "closed"
+            : "draft";
         return (
           <a
             href={`/projects/${projectId}/commitments/${item.id}`}
-            className="text-blue-600 font-medium hover:underline"
+            className="hover:underline"
           >
-            {item.number}
+            <span className={`idx-italic status-${idxStatus}`}>
+              {String(item.number).padStart(3, "0")}
+            </span>
           </a>
         );
+      }
       case "contract_company":
         return (
-          <span className="flex items-center gap-1 text-gray-900">
+          <span className="flex items-center gap-1 text-[color:var(--ink)] font-medium">
             {item.contract_company || <span className="text-gray-300">—</span>}
             {item.contract_company && (
               <svg
@@ -787,11 +862,11 @@ export default function CommitmentsClient({
           </span>
         );
       case "title":
-        return <span className="text-gray-700">{item.title || <span className="text-gray-300">—</span>}</span>;
+        return <span className="text-gray-600">{item.title || <span className="text-gray-300">—</span>}</span>;
       case "erp_status":
         return <ErpStatusIcon status={item.erp_status} />;
       case "status": {
-        const cls = STATUS_COLORS[item.status] ?? "bg-gray-100 text-gray-500";
+        const cls = STATUS_PILL[item.status] ?? "pill-post";
         const label =
           item.status === "approved"
             ? "Approved"
@@ -800,13 +875,7 @@ export default function CommitmentsClient({
             : item.status === "terminated"
             ? "Terminated"
             : "Draft";
-        return (
-          <span
-            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${cls}`}
-          >
-            {label}
-          </span>
-        );
+        return <span className={`pill ${cls}`}>{label}</span>;
       }
       case "executed":
         return (
@@ -817,29 +886,29 @@ export default function CommitmentsClient({
           <span className="text-gray-500">{item.ssov_status || ""}</span>
         );
       case "original_contract_amount":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.original_contract_amount)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.original_contract_amount)}</span>;
       case "approved_change_orders":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.approved_change_orders)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.approved_change_orders)}</span>;
       case "revised_contract_amount": {
         const revised =
           item.original_contract_amount + item.approved_change_orders;
-        return <span className="text-gray-900 tabular-nums">{fmt(revised)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(revised)}</span>;
       }
       case "pending_change_orders":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.pending_change_orders)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.pending_change_orders)}</span>;
       case "draft_amount":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.draft_amount)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.draft_amount)}</span>;
       case "invoiced":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.invoiced)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.invoiced)}</span>;
       case "payments_issued":
-        return <span className="text-gray-900 tabular-nums">{fmt(item.payments_issued)}</span>;
+        return <span className="font-mono tabular-nums text-[color:var(--ink)]">{fmt(item.payments_issued)}</span>;
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a
           href="/dashboard"
           className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors"
@@ -865,8 +934,8 @@ export default function CommitmentsClient({
           <div className="min-w-0">
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Commitments</h1>
             {items.length > 0 && (
-              <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+              <p className="sub mt-1.5">
+                <em>Purchase orders and subcontracts</em>
                 <span className="sep">·</span>
                 <span className="num" style={{ color: "var(--brand-500)" }}>{items.filter((i) => i.status === "approved").length}</span> approved
                 <span className="sep">·</span>
@@ -878,6 +947,37 @@ export default function CommitmentsClient({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Unified ERP sync — auto-detects the connected platform */}
+            <button
+              onClick={handleSyncAll}
+              disabled={syncingAll}
+              title={
+                erpConnected === "quickbooks"
+                  ? "Sync all commitments to QuickBooks Online"
+                  : erpConnected === "sage300cre"
+                  ? "Sync all commitments to Sage 300 CRE"
+                  : "Sync all commitments to your connected accounting ERP"
+              }
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg
+                className={`w-4 h-4 ${syncingAll ? "animate-spin" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {syncingAll
+                ? "Syncing…"
+                : erpConnected === "quickbooks"
+                ? "Sync to QuickBooks"
+                : erpConnected === "sage300cre"
+                ? "Sync to Sage 300 CRE"
+                : "Sync to ERP"}
+            </button>
+
             {/* Export dropdown */}
             <div ref={exportRef} className="relative">
               <button
@@ -966,7 +1066,7 @@ export default function CommitmentsClient({
             <div ref={createRef} className="relative">
               <button
                 onClick={() => setShowCreateMenu((o) => !o)}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
               >
                 <svg
                   className="w-4 h-4"
@@ -1038,33 +1138,56 @@ export default function CommitmentsClient({
           </div>
         </div>
 
+        {/* Stat strip */}
+        {!loading && items.length > 0 && (() => {
+          const totalRevised = items.reduce(
+            (s, i) => s + i.original_contract_amount + i.approved_change_orders,
+            0
+          );
+          const totalInvoiced = items.reduce((s, i) => s + i.invoiced, 0);
+          const totalOutstanding = totalRevised - totalInvoiced;
+          const pendingCount = items.filter(
+            (i) => i.pending_change_orders !== 0
+          ).length;
+          return (
+            <div className="stats mb-6">
+              <div className="stat">
+                <div className="lbl">Revised Value</div>
+                <div className="val">{fmt(totalRevised)}</div>
+                <div className="delta">{items.length} commitments</div>
+              </div>
+              <div className="stat calm">
+                <div className="lbl">Invoiced to Date</div>
+                <div className="val">{fmt(totalInvoiced)}</div>
+                <div className="delta">across all contracts</div>
+              </div>
+              <div className="stat">
+                <div className="lbl">Outstanding</div>
+                <div className="val">{fmt(totalOutstanding)}</div>
+                <div className="delta">revised less invoiced</div>
+              </div>
+              <div className={`stat${pendingCount > 0 ? " warn" : ""}`}>
+                <div className="lbl">Pending Changes</div>
+                <div className="val">{pendingCount}</div>
+                <div className="delta">with pending change orders</div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 mb-5">
-          <button
-            onClick={() => setActiveTab("contracts")}
-            className={`px-1 pb-3 mr-6 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === "contracts"
-                ? "border-gray-900 text-gray-900"
-                : "border-transparent text-gray-400 hover:text-gray-700"
-            }`}
-          >
-            Contracts
-          </button>
-          <button
-            onClick={() => setActiveTab("recycle_bin")}
-            className={`px-1 pb-3 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === "recycle_bin"
-                ? "border-gray-900 text-gray-900"
-                : "border-transparent text-gray-400 hover:text-gray-700"
-            }`}
-          >
-            Recycle Bin
-            {deletedItems.length > 0 && (
-              <span className="ml-1.5 px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500">
-                {deletedItems.length}
-              </span>
-            )}
-          </button>
+        <div className="mb-5">
+          <div className="seg">
+            <button onClick={() => setActiveTab("contracts")} className={activeTab === "contracts" ? "active" : ""}>Contracts</button>
+            <button onClick={() => setActiveTab("recycle_bin")} className={activeTab === "recycle_bin" ? "active" : ""}>
+              Recycle Bin
+              {deletedItems.length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 text-xs rounded-full bg-gray-200 text-gray-600">
+                  {deletedItems.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Search + filter bar */}
@@ -1270,13 +1393,15 @@ export default function CommitmentsClient({
 
         {/* Table */}
         {loading ? (
-          <p className="text-sm text-gray-400">Loading...</p>
+          <div className="bg-white border hairline rounded-xl p-10 text-center">
+            <p className="text-sm text-gray-400 serif-italic">Loading commitments…</p>
+          </div>
         ) : (
-          <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+          <div className="bg-white border hairline rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50">
+                  <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
                     {COLS.map((col) => {
                       const isSorted = sortConfig?.key === col.key;
                       return (
@@ -1291,7 +1416,7 @@ export default function CommitmentsClient({
                                 : { key: col.key, dir: "asc" }
                             )
                           }
-                          className={`text-left px-3 py-3 font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:bg-gray-100 transition-colors ${col.width}`}
+                          className={`text-left px-3 py-3 mono-label whitespace-nowrap cursor-pointer select-none hover:bg-black/[0.03] transition-colors ${col.width}`}
                         >
                           <span className="flex items-center gap-1">
                             {col.label}
@@ -1317,17 +1442,17 @@ export default function CommitmentsClient({
                         className="px-3 py-16 text-center"
                       >
                         {activeTab === "recycle_bin" ? (
-                          <p className="text-sm text-gray-400">
+                          <p className="text-sm text-gray-400 serif-italic">
                             Recycle bin is empty
                           </p>
                         ) : (
                           <>
-                            <p className="text-sm text-gray-400">
+                            <p className="font-display text-lg text-[color:var(--ink)]">
                               No commitments yet
                             </p>
-                            <p className="text-xs text-gray-300 mt-1">
+                            <p className="text-xs text-gray-400 mt-1">
                               Click{" "}
-                              <span className="font-medium">+ Create</span> to
+                              <span className="font-medium text-[color:var(--ink)]">Create</span> to
                               add a Subcontract or Purchase Order
                             </p>
                           </>
@@ -1338,7 +1463,7 @@ export default function CommitmentsClient({
                     visibleItems.map((item) => (
                       <tr
                         key={item.id}
-                        className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0 group"
+                        className="border-b border-black/[0.05] hover:bg-[color:var(--surface-sunken)] transition-colors last:border-b-0 group"
                       >
                         {COLS.map((col) => (
                           <td
@@ -1386,16 +1511,6 @@ export default function CommitmentsClient({
                                       Edit
                                     </button>
                                     <button
-                                      onClick={() => handleSyncToSage(item)}
-                                      disabled={syncingId === item.id}
-                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 disabled:opacity-50"
-                                    >
-                                      <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                      </svg>
-                                      Sync to Sage
-                                    </button>
-                                    <button
                                       onClick={() => handleDelete(item.id)}
                                       className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
                                     >
@@ -1430,24 +1545,24 @@ export default function CommitmentsClient({
                   const totalInvoiced = visibleItems.reduce((s, i) => s + i.invoiced, 0);
                   const totalPayments = visibleItems.reduce((s, i) => s + i.payments_issued, 0);
                   const totals: Record<string, React.ReactNode> = {
-                    number: <span className="font-semibold text-gray-700">Totals</span>,
+                    number: <span className="mono-label">Totals</span>,
                     contract_company: null,
                     title: null,
                     erp_status: null,
                     status: null,
                     executed: null,
                     ssov_status: null,
-                    original_contract_amount: <span className="font-semibold tabular-nums">{fmt(totalOriginal)}</span>,
-                    approved_change_orders: <span className="font-semibold tabular-nums">{fmt(totalApproved)}</span>,
-                    revised_contract_amount: <span className="font-semibold tabular-nums">{fmt(totalRevised)}</span>,
-                    pending_change_orders: <span className="font-semibold tabular-nums">{fmt(totalPending)}</span>,
-                    draft_amount: <span className="font-semibold tabular-nums">{fmt(totalDraft)}</span>,
-                    invoiced: <span className="font-semibold tabular-nums">{fmt(totalInvoiced)}</span>,
-                    payments_issued: <span className="font-semibold tabular-nums">{fmt(totalPayments)}</span>,
+                    original_contract_amount: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalOriginal)}</span>,
+                    approved_change_orders: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalApproved)}</span>,
+                    revised_contract_amount: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalRevised)}</span>,
+                    pending_change_orders: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalPending)}</span>,
+                    draft_amount: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalDraft)}</span>,
+                    invoiced: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalInvoiced)}</span>,
+                    payments_issued: <span className="font-mono font-semibold tabular-nums text-[color:var(--ink)]">{fmt(totalPayments)}</span>,
                   };
                   return (
                     <tfoot>
-                      <tr className="border-t-2 border-gray-200 bg-gray-50">
+                      <tr className="border-t-2 border-black/[0.1] bg-[color:var(--surface-sunken)]">
                         {COLS.map((col) => (
                           <td key={col.key} className="px-3 py-3 text-xs whitespace-nowrap">
                             {totals[col.key]}
@@ -1464,14 +1579,22 @@ export default function CommitmentsClient({
         )}
       </main>
 
-      {/* Sage sync error toast */}
-      {syncError && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-red-600 text-white text-sm px-4 py-3 rounded-lg shadow-lg max-w-sm">
+      {/* ERP sync notice toast */}
+      {syncNotice && (
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 text-white text-sm px-4 py-3 rounded-lg shadow-lg max-w-md ${
+            syncNotice.ok ? "bg-green-600" : "bg-red-600"
+          }`}
+        >
           <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            {syncNotice.ok ? (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            )}
           </svg>
-          <span className="flex-1">Sage sync failed: {syncError.message}</span>
-          <button onClick={() => setSyncError(null)} className="text-white/70 hover:text-white">
+          <span className="flex-1">{syncNotice.message}</span>
+          <button onClick={() => setSyncNotice(null)} className="text-white/70 hover:text-white">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>

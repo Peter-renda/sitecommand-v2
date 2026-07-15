@@ -29,12 +29,18 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  scheduled: "bg-blue-50 text-blue-700",
-  awaiting_minutes: "bg-red-50 text-red-600",
-  minutes_approved: "bg-green-50 text-green-700",
-  cancelled: "bg-gray-100 text-gray-500",
+const STATUS_PILL: Record<string, string> = {
+  scheduled: "pill-open",
+  awaiting_minutes: "pill-warn",
+  minutes_approved: "pill-post",
+  cancelled: "pill-post",
 };
+
+function MeetingStatusPill({ status }: { status: string }) {
+  const cls = STATUS_PILL[status] ?? "pill-post";
+  const label = STATUS_LABELS[status] ?? status;
+  return <span className={`pill ${cls}`}>{label}</span>;
+}
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -173,10 +179,16 @@ export default function MeetingsClient({
   const startEntry = totalCount === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const endEntry = Math.min(safePage * pageSize, totalCount);
 
+  // Live metrics across the project (non-deleted meetings)
+  const liveMeetings = meetings.filter((m) => !m.deleted_at);
+  const upcomingCount = liveMeetings.filter((m) => m.status === "scheduled").length;
+  const awaitingCount = liveMeetings.filter((m) => m.status === "awaiting_minutes").length;
+  const approvedCount = liveMeetings.filter((m) => m.status === "minutes_approved").length;
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Top nav bar */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -192,14 +204,18 @@ export default function MeetingsClient({
 
       <main className="px-6 py-0">
         {/* Page header */}
-        <div className="flex items-center justify-between py-4 border-b border-gray-100 bg-white -mx-6 px-6">
+        <div className="flex items-end justify-between py-6 border-b border-black/[0.06] bg-white -mx-6 px-6 gap-4 flex-wrap">
           <div className="min-w-0">
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Meetings</h1>
-            {meetings.filter((m) => !m.deleted_at).length > 0 && (
-              <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+            {!loading && liveMeetings.length > 0 && (
+              <p className="sub mt-1.5">
+                <em>Where the project gets decided</em>
                 <span className="sep">·</span>
-                <span className="num" style={{ color: "var(--brand-500)" }}>{meetings.filter((m) => !m.deleted_at).length}</span> meetings
+                <span className="num" style={{ color: "var(--brand-500)" }}>{upcomingCount}</span> upcoming
+                <span className="sep">·</span>
+                <span className="num">{awaitingCount}</span> awaiting minutes
+                <span className="sep">·</span>
+                <span className="num">{liveMeetings.length}</span> total
               </p>
             )}
           </div>
@@ -208,12 +224,11 @@ export default function MeetingsClient({
           <div ref={createDropdownRef} className="relative">
             <button
               onClick={() => { window.location.href = `/projects/${projectId}/meetings/new`; }}
-              className="flex items-center gap-0 text-sm font-medium text-white rounded-md overflow-hidden"
-              style={{ backgroundColor: "#d4500a" }}
+              className="flex items-center gap-0 text-sm font-semibold text-white rounded-md overflow-hidden bg-[color:var(--ink)] hover:bg-black transition-colors"
             >
               <span className="px-4 py-2">+ Create Meeting</span>
               <span
-                className="px-2 py-2 border-l border-white/30 hover:bg-black/10 transition-colors"
+                className="px-2 py-2 border-l border-white/20 hover:bg-white/10 transition-colors"
                 onClick={(e) => { e.stopPropagation(); setShowCreateDropdown((o) => !o); }}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -222,10 +237,10 @@ export default function MeetingsClient({
               </span>
             </button>
             {showCreateDropdown && (
-              <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-100 rounded-xl shadow-lg py-1 z-20">
+              <div className="absolute right-0 mt-2 w-48 bg-white border hairline rounded-xl shadow-lg py-1 z-20">
                 <button
                   onClick={() => { window.location.href = `/projects/${projectId}/meetings/new`; }}
-                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors"
                 >
                   Create Meeting
                 </button>
@@ -234,32 +249,42 @@ export default function MeetingsClient({
           </div>
         </div>
 
+        {/* Stat strip */}
+        {!loading && liveMeetings.length > 0 && (
+          <div className="stats -mx-6 px-6 py-5 bg-white border-b border-black/[0.06]">
+            <div className="stat">
+              <div className="lbl">Upcoming</div>
+              <div className="val">{upcomingCount}</div>
+              <div className="delta">Scheduled meetings</div>
+            </div>
+            <div className={`stat${awaitingCount > 0 ? " warn" : ""}`}>
+              <div className="lbl">Minutes Pending</div>
+              <div className="val">{awaitingCount}</div>
+              <div className="delta">Awaiting minutes</div>
+            </div>
+            <div className={`stat${approvedCount > 0 ? " calm" : ""}`}>
+              <div className="lbl">Minutes Approved</div>
+              <div className="val">{approvedCount}</div>
+              <div className="delta">Decisions logged</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Total Meetings</div>
+              <div className="val">{liveMeetings.length}</div>
+              <div className="delta">Across this project</div>
+            </div>
+          </div>
+        )}
+
         {/* Tabs */}
-        <div className="flex items-center gap-0 border-b border-gray-200 bg-white -mx-6 px-6">
-          <button
-            onClick={() => { setActiveTab("list"); setPage(1); }}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === "list"
-                ? "border-gray-900 text-gray-900"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            Meetings
-          </button>
-          <button
-            onClick={() => { setActiveTab("recycle"); setPage(1); }}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === "recycle"
-                ? "border-gray-900 text-gray-900"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            Recycle Bin
-          </button>
+        <div className="mb-4">
+          <div className="seg">
+            <button onClick={() => { setActiveTab("list"); setPage(1); }} className={activeTab === "list" ? "active" : ""}>Meetings</button>
+            <button onClick={() => { setActiveTab("recycle"); setPage(1); }} className={activeTab === "recycle" ? "active" : ""}>Recycle Bin</button>
+          </div>
         </div>
 
         {/* Toolbar */}
-        <div className="flex items-center justify-between py-3 bg-white border-b border-gray-100 -mx-6 px-6">
+        <div className="flex items-center justify-between py-3 bg-white border-b border-black/[0.06] -mx-6 px-6">
           {/* Left: search + filters */}
           <div className="flex items-center gap-2">
             <div className="relative">
@@ -320,7 +345,7 @@ export default function MeetingsClient({
         </div>
 
         {/* Content */}
-        <div className="bg-white border border-gray-100 rounded-b-xl overflow-hidden -mx-6 mt-0">
+        <div className="bg-white border hairline rounded-b-xl overflow-hidden -mx-6 mt-0">
           {loading ? (
             <SkeletonTable rows={5} cols={8} />
           ) : filtered.length === 0 ? (
@@ -337,7 +362,7 @@ export default function MeetingsClient({
             <div className="overflow-x-auto">
               <table className="w-full min-w-max">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-white">
+                  <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
                     {[
                       { label: "Series", w: "w-36" },
                       { label: "Title", w: "w-48" },
@@ -351,7 +376,7 @@ export default function MeetingsClient({
                     ].map(({ label, w }) => (
                       <th
                         key={label}
-                        className={`text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${w}`}
+                        className={`text-left px-4 py-3 mono-label whitespace-nowrap ${w}`}
                       >
                         <div className="flex items-center gap-1.5">
                           {label}
@@ -370,7 +395,7 @@ export default function MeetingsClient({
                             {/* Series group header row */}
                             <tr
                               key={`series-${seriesName}`}
-                              className="bg-blue-50/60 border-b border-gray-100 cursor-pointer hover:bg-blue-50 transition-colors"
+                              className="bg-[color:var(--surface-sunken)] border-b hairline cursor-pointer hover:bg-[color:var(--brand-50)] transition-colors"
                               onClick={() => toggleSeries(seriesName)}
                             >
                               <td colSpan={9} className="px-4 py-2.5">
@@ -384,7 +409,7 @@ export default function MeetingsClient({
                                   >
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                                   </svg>
-                                  <span className="text-sm font-semibold text-gray-800">{seriesName}</span>
+                                  <span className="font-display text-[15px] italic text-[color:var(--ink)]">{seriesName}</span>
                                   <span className="text-xs text-gray-400 ml-1">({items.length})</span>
                                 </div>
                               </td>
@@ -407,7 +432,7 @@ export default function MeetingsClient({
 
           {/* Pagination footer */}
           {!loading && filtered.length > 0 && (
-            <div className="flex items-center justify-end gap-4 px-4 py-3 border-t border-gray-100 text-xs text-gray-500">
+            <div className="flex items-center justify-end gap-4 px-4 py-3 border-t hairline text-xs text-gray-500">
               <span>
                 {startEntry}–{endEntry} of {totalCount}
               </span>
@@ -452,10 +477,17 @@ export default function MeetingsClient({
 
 // ── Meeting table row ─────────────────────────────────────────────────────────
 
+const STATUS_IDX: Record<string, string> = {
+  scheduled: "status-open",
+  awaiting_minutes: "status-draft",
+  minutes_approved: "status-closed",
+  cancelled: "status-closed",
+};
+
 function MeetingRow({ meeting, projectId }: { meeting: Meeting; projectId: string }) {
   return (
     <tr
-      className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-b-0 cursor-pointer"
+      className="border-b border-black/[0.04] hover:bg-[color:var(--surface-sunken)] transition-colors last:border-b-0 cursor-pointer"
       onClick={() => window.location.href = `/projects/${projectId}/meetings/${meeting.id}`}
     >
       {/* Series */}
@@ -465,7 +497,7 @@ function MeetingRow({ meeting, projectId }: { meeting: Meeting; projectId: strin
       {/* Title */}
       <td className="px-4 py-3">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium text-blue-600 hover:underline">{meeting.title}</span>
+          <span className="text-sm font-medium text-[color:var(--ink)]">{meeting.title}</span>
           {meeting.is_locked && (
             <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -474,7 +506,11 @@ function MeetingRow({ meeting, projectId }: { meeting: Meeting; projectId: strin
         </div>
       </td>
       {/* Number */}
-      <td className="px-4 py-3 text-sm text-gray-500">{meeting.meeting_number}</td>
+      <td className="px-4 py-3">
+        <span className={`idx-italic ${STATUS_IDX[meeting.status] ?? "status-draft"}`}>
+          {String(meeting.meeting_number).padStart(3, "0")}
+        </span>
+      </td>
       {/* Overview */}
       <td className="px-4 py-3 text-sm text-gray-500 max-w-xs">
         {meeting.overview ? (
@@ -484,7 +520,7 @@ function MeetingRow({ meeting, projectId }: { meeting: Meeting; projectId: strin
         )}
       </td>
       {/* Date */}
-      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">
         {formatDateRange(meeting.date, meeting.end_date)}
       </td>
       {/* Location */}
@@ -493,14 +529,10 @@ function MeetingRow({ meeting, projectId }: { meeting: Meeting; projectId: strin
       </td>
       {/* Status */}
       <td className="px-4 py-3">
-        <span
-          className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[meeting.status] ?? "bg-gray-100 text-gray-500"}`}
-        >
-          {STATUS_LABELS[meeting.status] ?? meeting.status}
-        </span>
+        <MeetingStatusPill status={meeting.status} />
       </td>
       {/* Agenda Items */}
-      <td className="px-4 py-3 text-sm text-gray-500 text-center">{meeting.agenda_items_count}</td>
+      <td className="px-4 py-3 text-sm text-gray-500 text-center tabular-nums">{meeting.agenda_items_count}</td>
       {/* Template */}
       <td className="px-4 py-3 text-sm text-gray-500">
         {meeting.template ?? <span className="text-gray-300">—</span>}

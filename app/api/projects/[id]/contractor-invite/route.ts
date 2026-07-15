@@ -17,14 +17,15 @@ export async function POST(
 
   const supabase = getSupabase();
 
-  // Get project name for the email
+  // Get project + owning company name for the email
   const { data: project } = await supabase
     .from("projects")
-    .select("name")
+    .select("name, companies(name)")
     .eq("id", projectId)
     .single();
 
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  const company = project.companies as unknown as { name: string } | null;
 
   // Create invite record
   const { data: invite, error } = await supabase
@@ -45,7 +46,7 @@ export async function POST(
   const inviteUrl = `${base}/contractor-invite/${invite.token}`;
 
   try {
-    await sendContractorInviteEmail(email, inviteUrl, project.name, contact_name ?? "");
+    await sendContractorInviteEmail(email, inviteUrl, project.name, contact_name ?? "", company?.name);
   } catch (e) {
     // Delete the invite if email failed
     await supabase.from("contractor_invitations").delete().eq("token", invite.token);

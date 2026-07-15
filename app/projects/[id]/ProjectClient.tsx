@@ -11,6 +11,7 @@ type DirectoryContact = {
   first_name: string | null;
   last_name: string | null;
   email: string | null;
+  phone: string | null;
   company: string | null;
   job_title: string | null;
 };
@@ -23,6 +24,7 @@ function contactName(c: DirectoryContact): string {
 type ScheduleTask = {
   uid: number;
   name: string;
+  outlineLevel: number;
   isSummary: boolean;
   isMilestone: boolean;
   start: string;
@@ -71,6 +73,13 @@ type WeatherDay = {
 };
 
 
+// Local-timezone YYYY-MM-DD (toISOString shifts to UTC and can be a day off)
+function localISODate(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
 function timeAgo(timestamp: string): string {
   const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
   if (seconds < 60) return "just now";
@@ -110,10 +119,13 @@ function buildRainAlert(days: WeatherDay[]): string | null {
     if (curr - prev !== 86400000) { consecutive = false; break; }
   }
 
-  if (rainy.length === 1) return `Rain expected on ${fmt(rainy[0])}`;
-  if (consecutive) return `Rain expected ${fmt(rainy[0])} through ${fmt(rainy[rainy.length - 1])}`;
+  const total = rainy.reduce((sum, d) => sum + d.precip, 0);
+  const totalStr = `${total.toFixed(1)}"`;
+
+  if (rainy.length === 1) return `Rain expected on ${fmt(rainy[0])} (${totalStr})`;
+  if (consecutive) return `Rain expected ${fmt(rainy[0])} through ${fmt(rainy[rainy.length - 1])} (${totalStr} total)`;
   const names = rainy.map(fmt);
-  return `Rain expected on ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `Rain expected on ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} (${totalStr} total)`;
 }
 
 function WeatherWidget({ zipCode, onDays }: { zipCode: string; onDays?: (days: WeatherDay[]) => void }) {
@@ -396,12 +408,13 @@ export default function ProjectClient({
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [primeContractValue, setPrimeContractValue] = useState(0);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [rainAlert, setRainAlert] = useState<string | null>(null);
   const [openTaskAlerts, setOpenTaskAlerts] = useState<{ id: string; title: string }[]>([]);
   const [scheduleTasks, setScheduleTasks] = useState<ScheduleTask[]>([]);
   const [workTab, setWorkTab] = useState<"ongoing" | "upcoming">("ongoing");
-  const [workExpanded, setWorkExpanded] = useState(false);
+  const [collapsedWorkUids, setCollapsedWorkUids] = useState<Set<number>>(new Set());
   const [recentActivityExpanded, setRecentActivityExpanded] = useState(false);
   const [lastLoginAt] = useState<number | null>(() => {
     if (typeof window === "undefined") return null;
@@ -563,6 +576,15 @@ export default function ProjectClient({
         });
     }
 
+    // Sum revised contract amounts from prime contracts
+    fetch(`/api/projects/${projectId}/prime-contracts`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((contracts: { original_contract_amount?: number; approved_change_orders?: number }[]) => {
+        if (!Array.isArray(contracts)) return;
+        const total = contracts.reduce((sum, c) => sum + (c.original_contract_amount ?? 0) + (c.approved_change_orders ?? 0), 0);
+        setPrimeContractValue(total);
+      });
+
     // Load team roles for the team tile
     Promise.all([
       fetch(`/api/projects/${projectId}/roles`).then((r) => r.json()),
@@ -713,9 +735,9 @@ export default function ProjectClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-4 sm:px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-4 sm:px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="hover:opacity-80 transition-opacity shrink-0">
           <Brand />
         </a>
@@ -728,18 +750,19 @@ export default function ProjectClient({
       {project && <ProjectNav projectId={project.id} showBackToProject={false} />}
 
       {rainAlert && (
-        <div className="bg-red-600 border-b border-red-700 px-4 sm:px-6 py-3 flex items-center gap-3 relative">
-          <button
-            onClick={() => setRainAlert(null)}
-            className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-6 h-6 rounded-full bg-red-700 hover:bg-red-800 text-white transition-colors shrink-0"
-            aria-label="Dismiss rain alert"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <span className="text-sky-100 ml-8"><WeatherGlyph kind="rain" /></span>
-          <p className="text-sm font-medium text-white">{rainAlert}</p>
+        <div className="flex justify-center px-4 sm:px-6 py-3">
+          <Pill className="pill-danger">
+            <span>{rainAlert}</span>
+            <button
+              onClick={() => setRainAlert(null)}
+              className="ml-1 -mr-1 flex items-center justify-center hover:opacity-70 transition-opacity"
+              aria-label="Dismiss rain alert"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </Pill>
         </div>
       )}
 
@@ -764,70 +787,98 @@ export default function ProjectClient({
           <p className="text-sm text-gray-500">Project not found.</p>
         ) : project ? (
           <>
-            {/* Centered project name */}
-            <div className="text-center mb-6 sm:mb-10">
-              <h1 className="font-display text-2xl sm:text-4xl lg:text-5xl text-[color:var(--ink)]">{project.name}</h1>
-              <div className="mt-2">
-                <Pill className="pill-coc">{project.status || "active"}</Pill>
-              </div>
-            </div>
+            {(() => {
+              const workTasks = scheduleTasks.filter((t) => !t.isSummary && !t.isMilestone && t.start && t.finish);
+              const completedTasks = workTasks.filter((t) => t.percentComplete >= 100).length;
 
-            {/* Two-column layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              // Duration-weighted schedule percent complete
+              let weightedPct = 0;
+              let totalDuration = 0;
+              for (const t of workTasks) {
+                const start = new Date(t.start.slice(0, 10) + "T12:00:00").getTime();
+                const finish = new Date(t.finish.slice(0, 10) + "T12:00:00").getTime();
+                const days = Math.max(1, Math.round((finish - start) / 86400000) + 1);
+                weightedPct += days * t.percentComplete;
+                totalDuration += days;
+              }
+              const schedulePct = totalDuration > 0 ? Math.round(weightedPct / totalDuration) : null;
 
-              {/* Left: Team + Activity */}
-              <div className="lg:col-span-2 space-y-6">
-                <div className="bg-white border border-gray-100 rounded-xl p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-sm font-semibold text-gray-900">Project Team</h2>
-                    {(companyRole === "super_admin" || companyRole === "admin") && (
-                      <div ref={teamMenuRef} className="relative">
-                        <button
-                          onClick={() => setTeamMenuOpen((o) => !o)}
-                          className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                          aria-label="Team options"
-                        >
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                            <circle cx="5" cy="12" r="1.5" />
-                            <circle cx="12" cy="12" r="1.5" />
-                            <circle cx="19" cy="12" r="1.5" />
-                          </svg>
-                        </button>
-                        {teamMenuOpen && (
-                          <div className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 min-w-[100px]">
-                            <button
-                              onClick={openRolesEdit}
-                              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
-                            >
-                              Edit
-                            </button>
-                          </div>
-                        )}
-                      </div>
+              // Start date: project dates first, then the earliest scheduled task
+              const earliestTaskStart = workTasks.reduce<string | null>(
+                (min, t) => (!min || t.start < min ? t.start : min),
+                null,
+              );
+              const startDateValue = project.actual_start_date || project.start_date || earliestTaskStart;
+
+              const fmtDate = (d: string) =>
+                new Date(d.slice(0, 10) + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+              const cityStateZip = [
+                [project.city, project.state].filter(Boolean).join(", "),
+                project.zip_code,
+              ].filter(Boolean).join(" ");
+              const fullAddress = [project.address, cityStateZip].filter(Boolean).join(", ");
+
+              return (
+                <div className="home-hero">
+                  <div className="eyebrow">
+                    {[
+                      "Project",
+                      project.project_number || null,
+                      project.sector || null,
+                    ].filter(Boolean).join(" · ")}
+                  </div>
+                  <h1>{project.name}</h1>
+                  <div className="sub-line">
+                    {fullAddress && <em>{fullAddress}</em>}
+                    {fullAddress && primeContractValue > 0 && (
+                      <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
+                    )}
+                    {primeContractValue > 0 && (
+                      <span style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                        ${primeContractValue.toLocaleString()} contract
+                      </span>
+                    )}
+                    {(primeContractValue > 0 || fullAddress) && (
+                      <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
+                    )}
+                    <span style={{ fontFamily: "JetBrains Mono, monospace", textTransform: "capitalize" }}>
+                      {project.status || "active"}
+                    </span>
+                    {startDateValue && (
+                      <>
+                        <span style={{ color: "rgba(255,217,176,0.5)" }}>·</span>
+                        <span style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                          Start: {fmtDate(startDateValue)}
+                        </span>
+                      </>
                     )}
                   </div>
-                  {teamRoles.length === 0 ? (
-                    <p className="text-sm text-gray-400">No team members assigned.</p>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {teamRoles.map(({ contact, roleName }, i) => (
-                        <div key={`${contact.id}-${roleName}-${i}`} className="flex items-center gap-3 py-2.5 px-4 bg-gray-50 rounded-lg">
-                          <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-sm font-semibold text-gray-600 shrink-0">
-                            {contactName(contact)[0]?.toUpperCase() ?? "?"}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-gray-900">{contactName(contact)}</p>
-                            <p className="text-xs text-gray-400">{roleName}</p>
-                          </div>
-                        </div>
-                      ))}
+                  <div className="row cols-3">
+                    <div>
+                      <div className="lbl">My open tasks</div>
+                      <div className="val">{openTaskAlerts.length}</div>
                     </div>
-                  )}
+                    <div>
+                      <div className="lbl">Schedule</div>
+                      <div className="val">{schedulePct == null ? "—" : `${schedulePct}% complete`}</div>
+                    </div>
+                    <div>
+                      <div className="lbl">Tasks complete</div>
+                      <div className="val">{workTasks.length > 0 ? `${completedTasks} of ${workTasks.length}` : "—"}</div>
+                    </div>
+                  </div>
                 </div>
+              );
+            })()}
 
-                {/* Recent Activity */}
-                <div className="bg-white border border-gray-100 rounded-xl p-6">
-                  <h2 className="text-sm font-semibold text-gray-900 mb-4">Recent Activity</h2>
+            {/* Two-column layout */}
+            <div className="grid-2">
+
+              {/* Left: Activity + Work */}
+              <div>
+                <h3 className="h3-warm">Today&apos;s activity</h3>
+                <div className="card card-pad">
                   {activity.length === 0 ? (
                     <p className="text-sm text-gray-400">No activity yet.</p>
                   ) : (
@@ -835,7 +886,7 @@ export default function ProjectClient({
                       <div className="space-y-4">
                         {(recentActivityExpanded ? activity : activity.slice(0, 5)).map((item) => (
                           <div key={item.id} className="flex items-start gap-3">
-                            <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${lastLoginAt !== null && new Date(item.created_at).getTime() > lastLoginAt ? "bg-emerald-500 animate-pulse" : "bg-gray-300"}`} />
+                            <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${lastLoginAt !== null && new Date(item.created_at).getTime() > lastLoginAt ? "bg-[color:var(--brand-500)] animate-pulse" : "bg-gray-300"}`} />
                             <div>
                               <p className="text-sm text-gray-700">{item.description}</p>
                               <p className="text-xs text-gray-400 mt-0.5">
@@ -849,7 +900,7 @@ export default function ProjectClient({
                       {activity.length > 5 && (
                         <button
                           onClick={() => setRecentActivityExpanded((x) => !x)}
-                          className="mt-3 w-full py-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                          className="btn-secondary mt-4 w-full"
                         >
                           {recentActivityExpanded ? "Show less" : `Show ${activity.length - 5} more`}
                         </button>
@@ -860,87 +911,170 @@ export default function ProjectClient({
 
                 {/* Ongoing / Upcoming Work */}
                 {(() => {
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  const todayStr = today.toISOString().slice(0, 10);
-                  const twoWeeksOut = new Date(today);
-                  twoWeeksOut.setDate(today.getDate() + 14);
-                  const twoWeeksStr = twoWeeksOut.toISOString().slice(0, 10);
+                  const todayStr = localISODate(new Date());
+                  const twoWeeksOut = new Date();
+                  twoWeeksOut.setDate(twoWeeksOut.getDate() + 14);
+                  const twoWeeksStr = localISODate(twoWeeksOut);
 
-                  const workTasks = scheduleTasks.filter((t) => !t.isMilestone && t.start && t.finish);
+                  const dateOnly = (s: string) => s.slice(0, 10);
+                  const matchesTab = (t: ScheduleTask) =>
+                    workTab === "ongoing"
+                      ? dateOnly(t.start) <= todayStr && dateOnly(t.finish) >= todayStr
+                      : dateOnly(t.start) > todayStr && dateOnly(t.start) <= twoWeeksStr;
 
-                  const ongoing = workTasks.filter((t) => t.start <= todayStr && t.finish >= todayStr);
-                  const upcoming = workTasks.filter((t) => t.start > todayStr && t.start <= twoWeeksStr);
-                  const list = workTab === "ongoing" ? ongoing : upcoming;
+                  // Build the visible tree: matching leaf tasks plus the summary
+                  // tasks (hierarchy) they sit under, preserving schedule order.
+                  type WorkRow = {
+                    task: ScheduleTask;
+                    depth: number;
+                    isSummary: boolean;
+                    ancestorUids: number[];
+                  };
+                  const rows: WorkRow[] = [];
+                  const stack: ScheduleTask[] = []; // current summary ancestor chain
+                  const emittedSummaries = new Set<number>();
+                  let leafCount = 0;
+                  for (const t of scheduleTasks) {
+                    while (stack.length > 0 && stack[stack.length - 1].outlineLevel >= t.outlineLevel) {
+                      stack.pop();
+                    }
+                    if (t.isSummary) {
+                      stack.push(t);
+                      continue;
+                    }
+                    if (t.isMilestone || !t.start || !t.finish || !matchesTab(t)) continue;
+                    stack.forEach((s, i) => {
+                      if (!emittedSummaries.has(s.uid)) {
+                        emittedSummaries.add(s.uid);
+                        rows.push({
+                          task: s,
+                          depth: i,
+                          isSummary: true,
+                          ancestorUids: stack.slice(0, i).map((a) => a.uid),
+                        });
+                      }
+                    });
+                    rows.push({
+                      task: t,
+                      depth: stack.length,
+                      isSummary: false,
+                      ancestorUids: stack.map((a) => a.uid),
+                    });
+                    leafCount++;
+                  }
+
+                  const summaryUids = rows.filter((r) => r.isSummary).map((r) => r.task.uid);
+                  const allCollapsed = summaryUids.length > 0 && summaryUids.every((u) => collapsedWorkUids.has(u));
+                  const visibleRows = rows.filter((r) => !r.ancestorUids.some((u) => collapsedWorkUids.has(u)));
+
+                  function toggleCollapse(uidToToggle: number) {
+                    setCollapsedWorkUids((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(uidToToggle)) next.delete(uidToToggle);
+                      else next.add(uidToToggle);
+                      return next;
+                    });
+                  }
+
+                  const fmtShort = (d: string) =>
+                    new Date(dateOnly(d) + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
                   return (
-                    <div className="bg-white border border-gray-100 rounded-xl p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-sm font-semibold text-gray-900">Work Summary</h2>
-                        <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs font-medium">
-                          <button
-                            onClick={() => { setWorkTab("ongoing"); setWorkExpanded(false); }}
-                            className={`px-3 py-1.5 transition-colors ${workTab === "ongoing" ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"}`}
-                          >
-                            Ongoing
-                          </button>
-                          <button
-                            onClick={() => { setWorkTab("upcoming"); setWorkExpanded(false); }}
-                            className={`px-3 py-1.5 border-l border-gray-200 transition-colors ${workTab === "upcoming" ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"}`}
-                          >
-                            Upcoming
-                          </button>
-                        </div>
-                      </div>
-
-                      {scheduleTasks.length === 0 ? (
-                        <p className="text-sm text-gray-400">No schedule uploaded for this project.</p>
-                      ) : list.length === 0 ? (
-                        <p className="text-sm text-gray-400">
-                          {workTab === "ongoing" ? "No tasks in progress today." : "No tasks starting in the next two weeks."}
-                        </p>
-                      ) : (
-                        <>
-                          <div className="space-y-2">
-                            {(workExpanded ? list : list.slice(0, 3)).map((t) => (
-                              <div key={t.uid} className="flex items-start justify-between gap-4 py-2.5 px-3 bg-gray-50 rounded-lg">
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 truncate">{t.name}</p>
-                                  <p className="text-xs text-gray-400 mt-0.5">
-                                    {new Date(t.start + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                                    {" — "}
-                                    {new Date(t.finish + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                                  </p>
-                                </div>
-                                <div className="shrink-0 text-right">
-                                  <span className="text-xs font-semibold text-gray-700">{t.percentComplete}%</span>
-                                  <div className="w-16 h-1.5 bg-gray-200 rounded-full mt-1 overflow-hidden">
-                                    <div className="h-full bg-gray-700 rounded-full" style={{ width: `${t.percentComplete}%` }} />
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          {list.length > 3 && (
+                    <>
+                      <div className="gap" />
+                      <div className="sec-row">
+                        <h3 className="h3-warm">Work summary</h3>
+                        <div className="flex items-center gap-2">
+                          {summaryUids.length > 0 && (
                             <button
-                              onClick={() => setWorkExpanded((x) => !x)}
-                              className="mt-3 w-full py-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                              onClick={() =>
+                                setCollapsedWorkUids(allCollapsed ? new Set() : new Set(summaryUids))
+                              }
+                              className="btn-quiet"
                             >
-                              {workExpanded ? "Show less" : `Show ${list.length - 3} more`}
+                              {allCollapsed ? "Expand all" : "Collapse all"}
                             </button>
                           )}
-                        </>
-                      )}
-                    </div>
+                          <div className="seg">
+                            <button
+                              onClick={() => { setWorkTab("ongoing"); setCollapsedWorkUids(new Set()); }}
+                              className={workTab === "ongoing" ? "active" : ""}
+                            >
+                              Ongoing
+                            </button>
+                            <button
+                              onClick={() => { setWorkTab("upcoming"); setCollapsedWorkUids(new Set()); }}
+                              className={workTab === "upcoming" ? "active" : ""}
+                            >
+                              Upcoming
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="card card-pad">
+                        {scheduleTasks.length === 0 ? (
+                          <p className="text-sm text-gray-400">No schedule uploaded for this project.</p>
+                        ) : leafCount === 0 ? (
+                          <p className="text-sm text-gray-400">
+                            {workTab === "ongoing" ? "No tasks in progress today." : "No tasks starting in the next two weeks."}
+                          </p>
+                        ) : (
+                          <div className="space-y-0.5">
+                            {visibleRows.map((row) =>
+                              row.isSummary ? (
+                                <button
+                                  key={row.task.uid}
+                                  onClick={() => toggleCollapse(row.task.uid)}
+                                  className="w-full flex items-center gap-1.5 py-1.5 text-left hover:bg-gray-50 rounded-md"
+                                  style={{ paddingLeft: `${row.depth * 16}px` }}
+                                >
+                                  <svg
+                                    className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform ${collapsedWorkUids.has(row.task.uid) ? "" : "rotate-90"}`}
+                                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                  </svg>
+                                  <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide truncate">
+                                    {row.task.name || "Untitled section"}
+                                  </span>
+                                </button>
+                              ) : (
+                                <div
+                                  key={row.task.uid}
+                                  className="flex items-start justify-between gap-4 py-2"
+                                  style={{ paddingLeft: `${row.depth * 16 + 20}px` }}
+                                >
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">{row.task.name}</p>
+                                    <p className="text-xs text-gray-400 mt-0.5 font-mono">
+                                      {fmtShort(row.task.start)}
+                                      {" — "}
+                                      {fmtShort(row.task.finish)}
+                                    </p>
+                                  </div>
+                                  <div className="shrink-0 text-right">
+                                    <span className="text-xs font-semibold text-gray-700 tabular-nums">{row.task.percentComplete}%</span>
+                                    <div className="w-16 h-1.5 bg-gray-200 rounded-full mt-1 overflow-hidden">
+                                      <div className="h-full bg-[color:var(--brand-500)] rounded-full" style={{ width: `${row.task.percentComplete}%` }} />
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </>
                   );
                 })()}
               </div>
 
-              {/* Right: Photo, Info, Weather, Edit */}
-              <div className="space-y-5">
+              {/* Right: Photo, Info, Team, Weather */}
+              <div>
 
                 {/* Photo */}
-                <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+                <h3 className="h3-warm">Project photo</h3>
+                <div className="card overflow-hidden">
                   <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
                   {project.photo_url ? (
                     <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
@@ -980,36 +1114,32 @@ export default function ProjectClient({
                 </div>
 
                 {/* Project Info Card */}
-                <div className="bg-white border border-gray-100 rounded-xl p-5 space-y-3">
-                  {/* Card header with three-dot edit menu */}
-                  <div className="flex items-center justify-between -mt-0.5">
-                    <h2 className="text-sm font-semibold text-gray-900">Project Details</h2>
-                    {(companyRole === "super_admin" || companyRole === "admin") && (
-                      <div ref={infoMenuRef} className="relative">
-                        <button
-                          onClick={() => setShowInfoMenu((o) => !o)}
-                          className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                          aria-label="Project options"
-                        >
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                            <circle cx="5" cy="12" r="1.5" />
-                            <circle cx="12" cy="12" r="1.5" />
-                            <circle cx="19" cy="12" r="1.5" />
-                          </svg>
-                        </button>
-                        {showInfoMenu && (
-                          <div className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 min-w-[100px]">
-                            <button
-                              onClick={openEdit}
-                              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
-                            >
-                              Edit
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                <div className="gap" />
+                <div className="sec-row">
+                  <h3 className="h3-warm">Project details</h3>
+                  {(companyRole === "super_admin" || companyRole === "admin") && (
+                    <div ref={infoMenuRef} className="relative">
+                      <button
+                        onClick={() => setShowInfoMenu((o) => !o)}
+                        className="btn-quiet"
+                        aria-label="Project options"
+                      >
+                        Edit
+                      </button>
+                      {showInfoMenu && (
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 min-w-[100px]">
+                          <button
+                            onClick={openEdit}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="card card-pad space-y-3">
 
                   {/* Status + Value */}
                   <div className="flex items-center gap-3">
@@ -1106,9 +1236,90 @@ export default function ProjectClient({
                   )}
                 </div>
 
+                {/* Upcoming milestones */}
+                {(() => {
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const todayStr = today.toISOString().slice(0, 10);
+                  const milestones = scheduleTasks
+                    .filter((t) => t.isMilestone && t.finish && t.finish >= todayStr)
+                    .sort((a, b) => a.finish.localeCompare(b.finish));
+                  if (milestones.length === 0) return null;
+                  return (
+                    <>
+                      <div className="gap" />
+                      <h3 className="h3-warm">Upcoming milestones</h3>
+                      <div className="card card-pad">
+                        <div className="timeline">
+                          {milestones.slice(0, 6).map((m, i) => (
+                            <div key={m.uid} className={`tl-item${i === 0 ? " now" : ""}`}>
+                              <span className="when">
+                                {new Date(m.finish + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                              </span>
+                              <span className="what">{m.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {/* Project leads */}
+                <div className="gap" />
+                <div className="sec-row">
+                  <h3 className="h3-warm">Project leads</h3>
+                  {(companyRole === "super_admin" || companyRole === "admin") && (
+                    <div ref={teamMenuRef} className="relative">
+                      <button
+                        onClick={() => setTeamMenuOpen((o) => !o)}
+                        className="btn-quiet"
+                        aria-label="Team options"
+                      >
+                        Edit
+                      </button>
+                      {teamMenuOpen && (
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 min-w-[100px]">
+                          <button
+                            onClick={openRolesEdit}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="card card-pad">
+                  {teamRoles.length === 0 ? (
+                    <p className="text-sm text-gray-400">No team members assigned.</p>
+                  ) : (
+                    <div className="people">
+                      {teamRoles.map(({ contact, roleName }, i) => (
+                        <div key={`${contact.id}-${roleName}-${i}`} className="person">
+                          <div className={`av av-${(i % 5) + 1}`}>
+                            {contactName(contact)[0]?.toUpperCase() ?? "?"}
+                          </div>
+                          <div>
+                            <div className="nm">{contactName(contact)}</div>
+                            <div className="role">{roleName}</div>
+                            {contact.phone ? (
+                              <a href={`tel:${contact.phone}`} className="ph">{contact.phone}</a>
+                            ) : (
+                              <div className="ph ph-empty">No phone on file</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Weather */}
-                <div className="bg-white border border-gray-100 rounded-xl p-5">
-                  <h2 className="text-sm font-semibold text-gray-900 mb-4">7-Day Forecast</h2>
+                <div className="gap" />
+                <h3 className="h3-warm">7-day forecast</h3>
+                <div className="card card-pad">
                   <WeatherWidget
                     zipCode={project.zip_code ?? ""}
                     onDays={(days) => setRainAlert(buildRainAlert(days))}

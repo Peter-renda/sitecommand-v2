@@ -50,6 +50,7 @@ export async function PATCH(
     "due_date", "final_approver_id", "distribution_list", "location",
     "priority", "trade", "reference", "schedule_impact", "cost_impact",
     "cost_codes", "private", "description", "attachments",
+    "report_fields",
   ];
   const update: Record<string, unknown> = {};
   for (const key of allowed) {

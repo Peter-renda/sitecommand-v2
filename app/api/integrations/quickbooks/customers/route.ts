@@ -24,7 +24,7 @@ export async function GET() {
   }
 
   const [appCreds, companyCreds] = await Promise.all([
-    getQBOAppCredentials(),
+    getQBOAppCredentials(session.company_id),
     getQBOCompanyCredentials(session.company_id),
   ]);
 

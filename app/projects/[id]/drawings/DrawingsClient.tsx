@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo, DragEvent } from "react";
 import { Hand } from "lucide-react";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { DRAWING_REPORT_FIELDS } from "@/lib/report-fields";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +15,7 @@ type DrawingUpload = {
   storage_path: string;
   uploaded_by_name: string;
   uploaded_at: string;
+  set_id?: string | null;
 };
 
 type DrawingPage = {
@@ -26,6 +29,7 @@ type DrawingPage = {
   received_date: string | null;
   category: string | null;
   updated_at: string;
+  report_fields?: ReportFieldValues | null;
   // resolved by API: per-page extracted PDF path (new) or shared upload path (legacy)
   storage_path: string;
   // which page of storage_path to show: 1 for extracted pages, page_number for legacy
@@ -37,6 +41,15 @@ type DrawingPage = {
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
 
+
+// ── Search types ──────────────────────────────────────────────────────────────
+
+type SearchResult = {
+  drawing: DrawingPage;
+  matchCount: number;
+};
+
+type HighlightRect = { left: number; top: number; width: number; height: number };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +64,17 @@ function drawingLabel(d: DrawingPage) {
     return `${d.drawing_no ?? ""}${d.drawing_no && d.title ? " — " : ""}${d.title ?? ""}`.trim();
   }
   return `Page ${d.page_number} of ${d.filename}`;
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let idx = haystack.indexOf(needle);
+  while (idx !== -1) {
+    count++;
+    idx = haystack.indexOf(needle, idx + needle.length);
+  }
+  return count;
 }
 
 const DISCIPLINE_LABELS: Record<string, string> = {
@@ -68,6 +92,9 @@ function disciplineLabelFromCode(code: string | null | undefined): string | null
 function inferDiscipline(drawingNo: string | null, category?: string | null): string {
   const fromCategory = disciplineLabelFromCode(category);
   if (fromCategory) return fromCategory;
+  // A non-empty category that isn't a known built-in code is a custom
+  // discipline label, stored verbatim — show it as-is.
+  if (category && category.trim()) return category.trim();
   if (!drawingNo) return "General";
   const m = drawingNo.match(/^([A-Za-z]+)[-\d]/);
   if (!m) return "General";
@@ -324,6 +351,7 @@ function DrawingPdfViewerModal({
   userRole,
   userName,
   userId,
+  search,
 }: {
   drawing: DrawingPage;
   allDrawings: DrawingPage[];
@@ -334,6 +362,16 @@ function DrawingPdfViewerModal({
   userRole: string;
   userName: string;
   userId: string;
+  search: {
+    query: string;
+    results: SearchResult[];
+    building: boolean;
+    panelOpen: boolean;
+    onTogglePanel: () => void;
+    onRun: (q: string) => void;
+    thumbnails: Map<string, string>;
+    thumbVersion: number;
+  };
 }) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const safeViewerPage = drawing.viewer_page > 0 ? drawing.viewer_page : 1;
@@ -342,6 +380,30 @@ function DrawingPdfViewerModal({
 
   const [loading, setLoading] = useState(true);
   const [renderError, setRenderError] = useState<string | null>(null);
+
+  // ── Zoom state ────────────────────────────────────────────────────────────
+  // 1 = fit-to-container (the size computed during render). Display size
+  // scales by this multiplier; the supersampled raster keeps things crisp.
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 8;
+  const ZOOM_STEP = 1.25;
+  const [zoom, setZoom] = useState(1);
+  const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+  const zoomIn = () => setZoom((z) => clampZoom(z * ZOOM_STEP));
+  const zoomOut = () => setZoom((z) => clampZoom(z / ZOOM_STEP));
+  const zoomReset = () => setZoom(1);
+  // Reset zoom whenever the rendered page changes
+  useEffect(() => { setZoom(1); }, [drawing.id, safeViewerPage]);
+
+  // ── PDF text-search highlight state ───────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pageRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fitViewportRef = useRef<any>(null);
+  const [highlights, setHighlights] = useState<HighlightRect[]>([]);
+  const [panelQuery, setPanelQuery] = useState(search.query);
+  const firstHighlightRef = useRef<HTMLDivElement>(null);
+  const autoScrolledRef = useRef<string>("");
 
   // ── Annotation state ──────────────────────────────────────────────────────
   const [annotationMode, setAnnotationMode] = useState(false);
@@ -360,6 +422,9 @@ function DrawingPdfViewerModal({
   const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
   const pdfDimsRef = useRef<{ w: number; h: number } | null>(null);
   const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null);
+  // Displayed CSS size of the rendered page (smaller than the raster's
+  // intrinsic pixels — we supersample so zoom-in stays crisp).
+  const [pdfDisplaySize, setPdfDisplaySize] = useState<{ w: number; h: number } | null>(null);
   const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
   const selectedStrokeIdRef = useRef<string | null>(null);
   const dragOffsetRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -374,6 +439,8 @@ function DrawingPdfViewerModal({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") { onClose(); return; }
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
       const idx = allDrawings.findIndex((d) => d.id === drawing.id);
       if (e.key === "ArrowLeft" && idx > 0) onNavigate(allDrawings[idx - 1]);
       if (e.key === "ArrowRight" && idx < allDrawings.length - 1) onNavigate(allDrawings[idx + 1]);
@@ -415,6 +482,94 @@ function DrawingPdfViewerModal({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const previewSurfaceRef = useRef<HTMLDivElement>(null);
+
+  // ── Wheel + pinch gesture zoom ────────────────────────────────────────────
+  // Ctrl/⌘+wheel zooms on desktop (trackpad pinch also arrives as a wheel
+  // event with ctrlKey=true); two-finger pinch zooms on touch devices.
+  // Plain wheel keeps panning, so users can still scroll a zoomed drawing.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    function applyZoomFactor(factor: number, clientX: number, clientY: number) {
+      const surface = previewSurfaceRef.current;
+      const containerEl = containerRef.current;
+      if (!surface || !containerEl) {
+        setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z * factor)));
+        return;
+      }
+      const sRect = surface.getBoundingClientRect();
+      const contentX = clientX - sRect.left;
+      const contentY = clientY - sRect.top;
+      setZoom((prev) => {
+        const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev * factor));
+        if (Math.abs(next - prev) < 1e-9) return prev;
+        const ratio = next / prev;
+        // After the new zoom is laid out, re-measure and shift scroll so the
+        // anchor point stays under the cursor / pinch midpoint.
+        requestAnimationFrame(() => {
+          const surface2 = previewSurfaceRef.current;
+          const container2 = containerRef.current;
+          if (!surface2 || !container2) return;
+          const newSRect = surface2.getBoundingClientRect();
+          const dx = newSRect.left + contentX * ratio - clientX;
+          const dy = newSRect.top + contentY * ratio - clientY;
+          container2.scrollLeft += dx;
+          container2.scrollTop += dy;
+        });
+        return next;
+      });
+    }
+
+    function handleWheel(e: WheelEvent) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.01);
+      applyZoomFactor(factor, e.clientX, e.clientY);
+    }
+
+    let pinchPrevDist: number | null = null;
+    function handleTouchStart(e: TouchEvent) {
+      if (e.touches.length === 2) {
+        const t1 = e.touches[0]!;
+        const t2 = e.touches[1]!;
+        pinchPrevDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      } else {
+        pinchPrevDist = null;
+      }
+    }
+    function handleTouchMove(e: TouchEvent) {
+      if (e.touches.length !== 2 || pinchPrevDist == null) return;
+      e.preventDefault();
+      const t1 = e.touches[0]!;
+      const t2 = e.touches[1]!;
+      const newDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      if (pinchPrevDist > 0 && newDist > 0) {
+        const factor = newDist / pinchPrevDist;
+        const cx = (t1.clientX + t2.clientX) / 2;
+        const cy = (t1.clientY + t2.clientY) / 2;
+        applyZoomFactor(factor, cx, cy);
+      }
+      pinchPrevDist = newDist;
+    }
+    function handleTouchEnd(e: TouchEvent) {
+      if (e.touches.length < 2) pinchPrevDist = null;
+    }
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+    container.addEventListener("touchmove", handleTouchMove, { passive: false });
+    container.addEventListener("touchend", handleTouchEnd, { passive: true });
+    container.addEventListener("touchcancel", handleTouchEnd, { passive: true });
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("touchend", handleTouchEnd);
+      container.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  }, []);
+
   // When annotation canvas is toggled on, restore its dimensions and redraw
   useEffect(() => {
     if (!annotationsVisible) return;
@@ -461,6 +616,7 @@ function DrawingPdfViewerModal({
       setLoading(true);
       setRenderError(null);
       setPdfDataUrl(null);
+      setPdfDisplaySize(null);
       try {
         await ensurePdfJs();
         const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -469,10 +625,25 @@ function DrawingPdfViewerModal({
         if (cancelled) return;
         const page = await pdf.getPage(safeViewerPage);
         if (cancelled) return;
+        pageRef.current = page;
         const containerW = Math.max((containerRef.current?.clientWidth ?? 900) - 32, 200);
+        const containerH = Math.max((containerRef.current?.clientHeight ?? 700) - 32, 200);
         const baseVp = page.getViewport({ scale: 1 });
-        const scale = containerW / baseVp.width;
-        const vp = page.getViewport({ scale });
+        const fitScale = Math.min(containerW / baseVp.width, containerH / baseVp.height);
+        // Supersample so the raster still has pixel detail when the user
+        // zooms in (browser zoom or pinch). Cap render dimensions to keep
+        // memory + toDataURL latency reasonable on huge sheets.
+        const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
+        const desiredSupersample = Math.max(dpr, 1) * 3;
+        const MAX_RENDER_PX = 4096;
+        const maxScaleByPixels = Math.min(
+          MAX_RENDER_PX / baseVp.width,
+          MAX_RENDER_PX / baseVp.height,
+        );
+        const renderScale = Math.min(fitScale * desiredSupersample, maxScaleByPixels);
+        const fitVp = page.getViewport({ scale: fitScale });
+        fitViewportRef.current = fitVp;
+        const vp = page.getViewport({ scale: renderScale });
         // Render to an offscreen canvas — never touched by React
         const offscreen = document.createElement("canvas");
         offscreen.width = vp.width;
@@ -481,12 +652,13 @@ function DrawingPdfViewerModal({
         if (!ctx || cancelled) return;
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
         if (cancelled) return;
-        pdfDimsRef.current = { w: vp.width, h: vp.height };
+        pdfDimsRef.current = { w: fitVp.width, h: fitVp.height };
+        setPdfDisplaySize({ w: fitVp.width, h: fitVp.height });
         setPdfDataUrl(offscreen.toDataURL());
         const annoCanvas = annotationCanvasRef.current;
         if (annoCanvas) {
-          annoCanvas.width = vp.width;
-          annoCanvas.height = vp.height;
+          annoCanvas.width = fitVp.width;
+          annoCanvas.height = fitVp.height;
           redrawCanvas();
         }
       } catch (err) {
@@ -500,6 +672,82 @@ function DrawingPdfViewerModal({
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawing.id, drawing.storage_path, safeViewerPage, supabaseUrl]);
+
+  // Compute highlight boxes for the active search query on the rendered page
+  useEffect(() => {
+    let cancelled = false;
+    async function computeHighlights() {
+      const page = pageRef.current;
+      const vp = fitViewportRef.current;
+      const q = search.query.trim().toLowerCase();
+      if (!page || !vp || !q) { setHighlights([]); return; }
+      try {
+        const tc = await page.getTextContent();
+        if (cancelled) return;
+        // Concatenate item text (separated by a space, matching the search
+        // index) so a match spanning adjacent text items is still found.
+        const segs: { str: string; start: number; transform: number[]; width: number; height: number }[] = [];
+        let full = "";
+        for (const it of tc.items) {
+          if (typeof it.str !== "string") continue;
+          segs.push({ str: it.str, start: full.length, transform: it.transform, width: it.width ?? 0, height: it.height ?? 0 });
+          full += it.str + " ";
+        }
+        const lowerFull = full.toLowerCase();
+        const rects: HighlightRect[] = [];
+        let matchIdx = lowerFull.indexOf(q);
+        while (matchIdx !== -1 && rects.length < 1000) {
+          const matchEnd = matchIdx + q.length;
+          for (const seg of segs) {
+            const len = seg.str.length;
+            if (len === 0) continue;
+            const itemStart = seg.start;
+            const itemEnd = seg.start + len;
+            const overlapStart = Math.max(matchIdx, itemStart);
+            const overlapEnd = Math.min(matchEnd, itemEnd);
+            if (overlapStart >= overlapEnd) continue;
+            const w = seg.width;
+            if (w <= 0) continue;
+            const e = seg.transform[4];
+            const f = seg.transform[5];
+            const h = seg.height > 0 ? seg.height : Math.abs(seg.transform[3]) || 8;
+            const startFrac = (overlapStart - itemStart) / len;
+            const endFrac = (overlapEnd - itemStart) / len;
+            const p0 = vp.convertToViewportPoint(e + w * startFrac, f + h);
+            const p1 = vp.convertToViewportPoint(e + w * endFrac, f);
+            rects.push({
+              left: Math.min(p0[0], p1[0]) / vp.width,
+              top: Math.min(p0[1], p1[1]) / vp.height,
+              width: Math.abs(p1[0] - p0[0]) / vp.width,
+              height: Math.abs(p1[1] - p0[1]) / vp.height,
+            });
+          }
+          matchIdx = lowerFull.indexOf(q, matchEnd);
+        }
+        if (!cancelled) setHighlights(rects);
+      } catch {
+        if (!cancelled) setHighlights([]);
+      }
+    }
+    computeHighlights();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfDataUrl, search.query]);
+
+  // Scroll the first match into view once per drawing/query
+  useEffect(() => {
+    if (highlights.length === 0) return;
+    const key = `${drawing.id}|${search.query}`;
+    if (autoScrolledRef.current === key) return;
+    autoScrolledRef.current = key;
+    const raf = requestAnimationFrame(() => {
+      firstHighlightRef.current?.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [highlights, drawing.id, search.query]);
+
+  // Keep the panel input in sync with the active query
+  useEffect(() => { setPanelQuery(search.query); }, [search.query]);
 
   function toRel(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
     const rect = canvas.getBoundingClientRect();
@@ -883,6 +1131,13 @@ function DrawingPdfViewerModal({
 
         {/* Right actions */}
         <div className="flex items-center gap-2 shrink-0">
+          <button onClick={search.onTogglePanel} title="Search drawing text"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${search.panelOpen ? "bg-blue-500 border-blue-400 text-white" : "text-gray-300 border-gray-600 hover:bg-gray-700"}`}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+            </svg>
+            Search
+          </button>
           <button onClick={onEditDetails} title="Edit drawing details"
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-300 border border-gray-600 rounded-md hover:bg-gray-700 transition-colors">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -925,8 +1180,11 @@ function DrawingPdfViewerModal({
         </div>
       </div>
 
+      {/* Body: PDF viewer + optional search results panel */}
+      <div className="flex flex-1 min-h-0">
       {/* PDF canvas + annotation overlay in a scrollable container */}
-      <div ref={containerRef} className="relative flex-1 overflow-auto bg-gray-950">
+      <div className="relative flex-1 min-h-0">
+      <div ref={containerRef} className="absolute inset-0 overflow-auto bg-gray-950">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-950 z-10">
             <svg className="w-8 h-8 text-gray-500 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -935,10 +1193,20 @@ function DrawingPdfViewerModal({
             </svg>
           </div>
         )}
-        <div className="flex justify-center p-4">
+        <div className="flex justify-center items-center p-4 min-h-full min-w-min">
           <div ref={previewSurfaceRef} className="relative inline-block">
             {pdfDataUrl && (
-              <img src={pdfDataUrl} alt={name} className="block max-w-full shadow-xl" draggable={false} />
+              <img
+                src={pdfDataUrl}
+                alt={name}
+                className="block shadow-xl"
+                draggable={false}
+                style={
+                  pdfDisplaySize
+                    ? { width: pdfDisplaySize.w * zoom, height: pdfDisplaySize.h * zoom, maxWidth: "none" }
+                    : { maxWidth: "none" }
+                }
+              />
             )}
             {!pdfDataUrl && !loading && (
               <div className="w-[min(92vw,1100px)] h-[80vh] bg-white rounded overflow-hidden shadow-xl border border-gray-300">
@@ -952,6 +1220,26 @@ function DrawingPdfViewerModal({
             {renderError && (
               <div className="absolute top-2 left-2 right-2 z-20 rounded bg-yellow-100 text-yellow-900 border border-yellow-300 px-3 py-2 text-xs">
                 {renderError}
+              </div>
+            )}
+            {pdfDataUrl && search.query && highlights.length > 0 && (
+              <div className="absolute inset-0" style={{ zIndex: 5, pointerEvents: "none" }}>
+                {highlights.map((h, i) => (
+                  <div
+                    key={i}
+                    ref={i === 0 ? firstHighlightRef : undefined}
+                    style={{
+                      position: "absolute",
+                      left: `${h.left * 100}%`,
+                      top: `${h.top * 100}%`,
+                      width: `${h.width * 100}%`,
+                      height: `${h.height * 100}%`,
+                      background: "rgba(250, 204, 21, 0.4)",
+                      boxShadow: "0 0 0 1.5px rgba(202, 138, 4, 0.85)",
+                      borderRadius: "1px",
+                    }}
+                  />
+                ))}
               </div>
             )}
             {annotationsVisible && (
@@ -974,6 +1262,593 @@ function DrawingPdfViewerModal({
           </div>
         </div>
       </div>
+        {/* Zoom controls — pinned to the bottom-left of the viewer area */}
+        {pdfDataUrl && (
+          <div className="absolute bottom-4 left-4 z-30 inline-flex items-center gap-1 rounded-md border border-gray-700 bg-gray-900/90 px-1.5 py-1 shadow-lg backdrop-blur">
+            <button
+              onClick={zoomOut}
+              disabled={zoom <= ZOOM_MIN + 1e-6}
+              title="Zoom out"
+              className="flex items-center justify-center w-7 h-7 rounded text-gray-200 hover:bg-gray-700 disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20 12H4" />
+              </svg>
+            </button>
+            <button
+              onClick={zoomReset}
+              title="Reset zoom"
+              className="px-2 h-7 text-xs font-medium text-gray-200 rounded hover:bg-gray-700 tabular-nums min-w-[3.25rem]"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              onClick={zoomIn}
+              disabled={zoom >= ZOOM_MAX - 1e-6}
+              title="Zoom in"
+              className="flex items-center justify-center w-7 h-7 rounded text-gray-200 hover:bg-gray-700 disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
+        )}
+        </div>
+        {search.panelOpen && (
+          <aside className="w-80 shrink-0 flex flex-col bg-gray-900 border-l border-gray-800">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
+              <h3 className="text-sm font-semibold text-white">Search</h3>
+              <button onClick={search.onTogglePanel} title="Close search"
+                className="p-1 text-gray-400 hover:text-white rounded transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-3 py-3 border-b border-gray-800 shrink-0">
+              <form onSubmit={(e) => { e.preventDefault(); search.onRun(panelQuery); }}>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={panelQuery}
+                    onChange={(e) => setPanelQuery(e.target.value)}
+                    placeholder="Search all drawings…"
+                    className="w-full bg-gray-800 text-white text-sm rounded-md pl-3 pr-14 py-2 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
+                  />
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
+                    {panelQuery && (
+                      <button type="button" onClick={() => setPanelQuery("")} title="Clear"
+                        className="p-1 text-gray-500 hover:text-white transition-colors">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                    <button type="submit" title="Search"
+                      className="p-1 text-blue-400 hover:text-blue-300 transition-colors">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+            <div className="flex-1 overflow-auto">
+              {search.building ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-12 text-gray-400 text-sm">
+                  <svg className="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Indexing drawings…
+                </div>
+              ) : !search.query ? (
+                <div className="px-4 py-12 text-center text-gray-500 text-sm leading-relaxed">
+                  Type a word or phrase to search the text inside every drawing in this project.
+                </div>
+              ) : search.results.length === 0 ? (
+                <div className="px-4 py-12 text-center text-gray-400 text-sm">
+                  No drawings contain “{search.query}”.
+                </div>
+              ) : (
+                <>
+                  <div className="px-4 py-2 text-xs text-gray-400 border-b border-gray-800">
+                    {search.results.length} drawing{search.results.length !== 1 ? "s" : ""} ·{" "}
+                    {search.results.reduce((sum, r) => sum + r.matchCount, 0)} matches
+                  </div>
+                  {search.results.map((r) => {
+                    const active = r.drawing.id === drawing.id;
+                    const thumb = search.thumbnails.get(r.drawing.id);
+                    void search.thumbVersion;
+                    return (
+                      <button
+                        key={r.drawing.id}
+                        onClick={() => onNavigate(r.drawing)}
+                        className={`block w-full text-left px-3 py-3 border-b border-gray-800 transition-colors ${active ? "bg-blue-600/20 border-l-2 border-l-blue-500" : "hover:bg-gray-800 border-l-2 border-l-transparent"}`}
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <span className={`text-xs font-medium leading-snug ${active ? "text-white" : "text-gray-200"}`}>
+                            {drawingLabel(r.drawing)}
+                          </span>
+                          <span className="shrink-0 text-[10px] font-semibold text-yellow-900 bg-yellow-400 rounded px-1.5 py-0.5">
+                            {r.matchCount} Found
+                          </span>
+                        </div>
+                        {thumb ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={thumb} alt={drawingLabel(r.drawing)} className="w-full max-h-40 object-contain bg-white rounded" />
+                        ) : (
+                          <div className="w-full h-28 flex items-center justify-center bg-gray-800 rounded text-gray-600">
+                            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Upload Drawings Modal ─────────────────────────────────────────────────────
+
+type DrawingSet = {
+  id: string;
+  name: string;
+  default_drawing_date: string | null;
+  default_received_date: string | null;
+  default_revision: string | null;
+  drawing_no_rev_mode: string | null;
+  get_number_from_filename: boolean | null;
+  drawing_language: string | null;
+  created_at?: string | null;
+};
+
+type DrawingNoRevMode = "none" | "first_decimal" | "first_underscore" | "last_underscore";
+
+const REV_MODE_OPTIONS: Array<{ value: DrawingNoRevMode; label: string }> = [
+  { value: "none", label: "No Rev in Drawing Number" },
+  { value: "first_decimal", label: "Rev is after First Decimal" },
+  { value: "first_underscore", label: "Rev is after First Underscore" },
+  { value: "last_underscore", label: "Rev is after Last Underscore" },
+];
+
+const LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "en", label: "English" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+  { value: "de", label: "German" },
+  { value: "pt", label: "Portuguese" },
+  { value: "it", label: "Italian" },
+  { value: "ja", label: "Japanese" },
+  { value: "zh", label: "Chinese" },
+];
+
+export type UploadDrawingsSubmission = {
+  files: File[];
+  setId: string;
+  setName: string;
+  defaultDrawingDate: string;
+  defaultReceivedDate: string;
+  defaultRevision: string;
+  drawingNoRevMode: DrawingNoRevMode;
+  getNumberFromFilename: boolean;
+  drawingLanguage: string;
+};
+
+function UploadDrawingsModal({
+  projectId,
+  initialFiles,
+  onClose,
+  onSubmit,
+}: {
+  projectId: string;
+  initialFiles?: File[];
+  onClose: () => void;
+  onSubmit: (data: UploadDrawingsSubmission) => Promise<void> | void;
+}) {
+  const NEW_SET_VALUE = "__new__";
+
+  const [sets, setSets] = useState<DrawingSet[]>([]);
+  const [setsLoading, setSetsLoading] = useState(true);
+  const [files, setFiles] = useState<File[]>(() => initialFiles ?? []);
+  const [setId, setSetId] = useState<string>("");
+  const [newSetName, setNewSetName] = useState("");
+  const [defaultDrawingDate, setDefaultDrawingDate] = useState("");
+  const [defaultReceivedDate, setDefaultReceivedDate] = useState("");
+  const [defaultRevision, setDefaultRevision] = useState("");
+  const [drawingNoRevMode, setDrawingNoRevMode] = useState<DrawingNoRevMode>("none");
+  const [getNumberFromFilename, setGetNumberFromFilename] = useState(false);
+  const [drawingLanguage, setDrawingLanguage] = useState("en");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/drawings/sets`);
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setSets(data.sets ?? []);
+        }
+      } finally {
+        if (!cancelled) setSetsLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  // Pre-fill defaults from the chosen existing set so the form mirrors
+  // how the set was originally created.
+  useEffect(() => {
+    if (!setId || setId === NEW_SET_VALUE) return;
+    const set = sets.find((s) => s.id === setId);
+    if (!set) return;
+    setDefaultDrawingDate(set.default_drawing_date ?? "");
+    setDefaultReceivedDate(set.default_received_date ?? "");
+    setDefaultRevision(set.default_revision ?? "");
+    if (set.drawing_no_rev_mode) {
+      const mode = REV_MODE_OPTIONS.find((m) => m.value === set.drawing_no_rev_mode);
+      if (mode) setDrawingNoRevMode(mode.value);
+    }
+    setGetNumberFromFilename(!!set.get_number_from_filename);
+    if (set.drawing_language) setDrawingLanguage(set.drawing_language);
+  }, [setId, sets]);
+
+  function addFiles(incoming: FileList | File[]) {
+    const next: File[] = [];
+    const list = Array.from(incoming);
+    for (const f of list) {
+      if (!f.name.toLowerCase().endsWith(".pdf")) continue;
+      if (files.some((existing) => existing.name === f.name && existing.size === f.size)) continue;
+      next.push(f);
+    }
+    if (next.length === 0) return;
+    setFiles((prev) => [...prev, ...next]);
+  }
+
+  function removeFile(index: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function handleDropFiles(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
+  }
+
+  function handleDragOverFiles(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDragLeaveFiles(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+  }
+
+  const isCreatingNewSet = setId === NEW_SET_VALUE;
+  const requiredSetReady = isCreatingNewSet
+    ? newSetName.trim().length > 0
+    : setId.length > 0;
+  const canSubmit = files.length > 0 && requiredSetReady && !submitting;
+
+  async function handleProcess() {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      let resolvedSetId = setId;
+      let resolvedSetName = sets.find((s) => s.id === setId)?.name ?? "";
+
+      if (isCreatingNewSet) {
+        const createRes = await fetch(`/api/projects/${projectId}/drawings/sets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: newSetName.trim(),
+            default_drawing_date: defaultDrawingDate || null,
+            default_received_date: defaultReceivedDate || null,
+            default_revision: defaultRevision || null,
+            drawing_no_rev_mode: drawingNoRevMode,
+            get_number_from_filename: getNumberFromFilename,
+            drawing_language: drawingLanguage,
+          }),
+        });
+        if (!createRes.ok) {
+          const errBody = await createRes.json().catch(() => ({}));
+          throw new Error(errBody.error ?? "Could not create drawing set");
+        }
+        const created = await createRes.json();
+        resolvedSetId = created.id;
+        resolvedSetName = created.name;
+      }
+
+      await onSubmit({
+        files,
+        setId: resolvedSetId,
+        setName: resolvedSetName,
+        defaultDrawingDate,
+        defaultReceivedDate,
+        defaultRevision,
+        drawingNoRevMode,
+        getNumberFromFilename,
+        drawingLanguage,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-lg font-semibold text-gray-900">Upload Drawings</h2>
+          <div className="flex items-center gap-2">
+            <span
+              title="Each page becomes a drawing you can tag with sheet number, title, revision, etc."
+              className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-500 text-xs font-medium cursor-help"
+            >
+              ?
+            </span>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {/* Attach files */}
+          <div
+            onDrop={handleDropFiles}
+            onDragOver={handleDragOverFiles}
+            onDragLeave={handleDragLeaveFiles}
+            className={`rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors ${
+              isDragging ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-gray-50"
+            }`}
+          >
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-4 py-1.5 bg-gray-700 text-white text-sm font-medium rounded-md hover:bg-gray-800 transition-colors"
+              type="button"
+            >
+              Attach Files
+            </button>
+            <p className="text-xs text-gray-500 mt-2">or Drag &amp; Drop</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.length) addFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+
+          {files.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {files.map((file, i) => (
+                <span
+                  key={`${file.name}-${i}`}
+                  className="inline-flex items-center gap-1.5 max-w-full pl-3 pr-1.5 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium"
+                >
+                  <span className="truncate max-w-[260px]" title={file.name}>{file.name}</span>
+                  <button
+                    onClick={() => removeFile(i)}
+                    className="flex items-center justify-center w-5 h-5 rounded-full hover:bg-blue-200 transition-colors"
+                    title="Remove file"
+                    type="button"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Drawing Set */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-800 mb-1">
+              Drawing Set<span className="text-red-500 ml-0.5">*</span>
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              Group and label drawings into a collection as they are issued to keep them organized.
+            </p>
+            <select
+              value={setId}
+              onChange={(e) => setSetId(e.target.value)}
+              disabled={setsLoading}
+              className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">{setsLoading ? "Loading…" : "Select or Create set"}</option>
+              {sets.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+              <option value={NEW_SET_VALUE}>+ Create new set…</option>
+            </select>
+            {isCreatingNewSet && (
+              <input
+                type="text"
+                value={newSetName}
+                onChange={(e) => setNewSetName(e.target.value)}
+                placeholder="New set name"
+                className="mt-2 w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            )}
+          </div>
+
+          {/* Default dates */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">Default Drawing Date</label>
+              <p className="text-xs text-gray-500 mb-2">Enter the date the drawing was authored.</p>
+              <input
+                type="date"
+                value={defaultDrawingDate}
+                onChange={(e) => setDefaultDrawingDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">Default Received Date</label>
+              <p className="text-xs text-gray-500 mb-2">Enter the date the drawings were received from the design team.</p>
+              <input
+                type="date"
+                value={defaultReceivedDate}
+                onChange={(e) => setDefaultReceivedDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Advanced */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              className="flex items-center gap-2 text-sm font-semibold text-gray-800"
+            >
+              <span
+                className={`flex items-center justify-center w-7 h-7 border border-gray-300 rounded-md transition-transform ${advancedOpen ? "rotate-90" : ""}`}
+              >
+                <svg className="w-3.5 h-3.5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </span>
+              Advanced Options
+              <span
+                title="These settings guide how the AI scans each sheet's title block."
+                className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 text-gray-500 text-xs font-medium cursor-help"
+              >
+                ?
+              </span>
+            </button>
+
+            {advancedOpen && (
+              <div className="mt-4 space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Default Revision</label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Enter your drawing set&apos;s default revision number or letter, if applicable.
+                  </p>
+                  <input
+                    type="text"
+                    value={defaultRevision}
+                    onChange={(e) => setDefaultRevision(e.target.value)}
+                    className="w-24 border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Drawing No. Contains Rev</label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Select the option that applies to your drawing revision number.
+                  </p>
+                  <select
+                    value={drawingNoRevMode}
+                    onChange={(e) => setDrawingNoRevMode(e.target.value as DrawingNoRevMode)}
+                    className="w-full max-w-xs border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    {REV_MODE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Drawing Number</label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Have the AI pull the number and title of an individual drawing based off the filename.
+                  </p>
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={getNumberFromFilename}
+                      onChange={(e) => setGetNumberFromFilename(e.target.checked)}
+                      className="rounded border-gray-300 focus:ring-blue-500"
+                    />
+                    Get From Filename
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Drawing Language</label>
+                  <p className="text-xs text-gray-500 mb-2">Select the language your drawings are in.</p>
+                  <select
+                    value={drawingLanguage}
+                    onChange={(e) => setDrawingLanguage(e.target.value)}
+                    className="w-40 border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    {LANGUAGE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+          <p className="text-xs text-gray-500"><span className="text-red-500">*</span> Required fields</p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="px-4 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-md transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleProcess}
+              disabled={!canSubmit}
+              className={`px-5 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                canSubmit
+                  ? "bg-blue-600 text-white hover:bg-blue-700"
+                  : "bg-rose-200 text-rose-400 cursor-not-allowed"
+              }`}
+            >
+              {submitting ? "Processing…" : "Process"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -983,12 +1858,18 @@ function DrawingPdfViewerModal({
 type ReviewRow = {
   drawing_id: string;
   page_number: number;
+  filename: string;
+  uploaded_at: string;
+  storage_path: string;
+  viewer_page: number;
   title: string;
   drawing_no: string;
   category: string;
   revision: string;
   drawing_date: string;
-  approved: boolean;
+  received_date: string;
+  confirmed: boolean;
+  viewed: boolean;
   saving: boolean;
 };
 
@@ -1006,36 +1887,267 @@ const CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "FP", label: "FP — Fire Protection" },
 ];
 
+// A selectable discipline: `value` is what gets stored in
+// project_drawings.category (a short code for built-ins, the label itself for
+// custom disciplines); `label` is the human-readable name shown to the user.
+type DisciplineOption = { value: string; label: string };
+
+// Built-in disciplines, derived from the fixed category codes above.
+const BUILTIN_DISCIPLINE_OPTIONS: DisciplineOption[] = CATEGORY_OPTIONS
+  .filter((o) => o.value)
+  .map((o) => ({ value: o.value, label: DISCIPLINE_LABELS[o.value] ?? o.label }));
+
+// A type-ahead combobox for the Discipline field. The user can type to filter
+// existing disciplines and pick one, or type a brand-new name and create it.
+function DisciplineCombobox({
+  value,
+  options,
+  onChange,
+  onCreate,
+  placeholder,
+  className,
+}: {
+  value: string;
+  options: DisciplineOption[];
+  onChange: (value: string) => void;
+  onCreate: (label: string) => Promise<string | null>;
+  placeholder?: string;
+  className?: string;
+}) {
+  const resolvedLabel = useMemo(() => {
+    const opt = options.find((o) => o.value === value);
+    return opt ? opt.label : value;
+  }, [options, value]);
+
+  const [text, setText] = useState(resolvedLabel);
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Keep the field in sync when the committed value (e.g. switching rows) changes.
+  useEffect(() => { setText(resolvedLabel); }, [resolvedLabel]);
+
+  // Close (and revert any uncommitted text) when clicking outside.
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setText(resolvedLabel);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [resolvedLabel]);
+
+  const q = text.trim().toLowerCase();
+  const filtered = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+  const exactMatch = options.find((o) => o.label.toLowerCase() === q);
+  const showCreate = q.length > 0 && !exactMatch;
+
+  function commit(opt: DisciplineOption) {
+    onChange(opt.value);
+    setText(opt.label);
+    setOpen(false);
+  }
+
+  async function handleCreate() {
+    const label = text.trim();
+    if (!label || creating) return;
+    setCreating(true);
+    const newValue = await onCreate(label);
+    setCreating(false);
+    if (newValue !== null) {
+      onChange(newValue);
+      setText(label);
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => { setText(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (exactMatch) commit(exactMatch);
+            else if (showCreate) handleCreate();
+          } else if (e.key === "Escape") {
+            setOpen(false);
+            setText(resolvedLabel);
+          }
+        }}
+        placeholder={placeholder}
+        className={className}
+        autoComplete="off"
+      />
+      {open && (filtered.length > 0 || showCreate) && (
+        <ul className="absolute z-20 mt-1 w-full max-h-56 overflow-auto bg-white border border-gray-200 rounded-md shadow-lg text-sm">
+          {filtered.map((o) => (
+            <li key={o.value}>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); commit(o); }}
+                className={`w-full text-left px-3 py-1.5 hover:bg-gray-50 ${
+                  o.value === value ? "font-semibold text-gray-900" : "text-gray-700"
+                }`}
+              >
+                {o.label}
+              </button>
+            </li>
+          ))}
+          {showCreate && (
+            <li className={filtered.length > 0 ? "border-t border-gray-100" : ""}>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); handleCreate(); }}
+                disabled={creating}
+                className="w-full text-left px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
+                style={{ color: "var(--brand-600)" }}
+              >
+                {creating ? "Creating…" : `Create "${text.trim()}"`}
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ReviewPreviewCanvas({
+  storagePath,
+  pageNumber,
+  rotation,
+}: {
+  storagePath: string;
+  pageNumber: number;
+  rotation: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    (async () => {
+      try {
+        await ensurePdfJs();
+        const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (!supabaseUrl) throw new Error("Supabase URL missing");
+        const url = `${supabaseUrl}/storage/v1/object/public/project-drawings/${storagePath}`;
+        const pdf = await getDocument(url).promise;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const page: any = await pdf.getPage(pageNumber);
+        const base = page.getViewport({ scale: 1 });
+        const target = 2200;
+        const scale = Math.min(2, target / Math.max(base.width, base.height));
+        const vp = page.getViewport({ scale, rotation });
+        if (cancelled) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.width = vp.width;
+        canvas.height = vp.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        if (!cancelled) setStatus("ready");
+      } catch {
+        if (!cancelled) setStatus("error");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [storagePath, pageNumber, rotation]);
+
+  return (
+    <div className="flex-1 overflow-auto flex items-center justify-center p-6 relative">
+      {status === "loading" && (
+        <div className="absolute flex items-center gap-2 text-sm text-gray-500">
+          <svg className="w-5 h-5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+          </svg>
+          Rendering page…
+        </div>
+      )}
+      {status === "error" && (
+        <div className="text-sm text-gray-500">Could not render this page.</div>
+      )}
+      <canvas
+        ref={canvasRef}
+        style={{ maxWidth: "100%", maxHeight: "100%", display: status === "ready" ? "block" : "none" }}
+        className="bg-white shadow-lg"
+      />
+    </div>
+  );
+}
+
 function ReviewExtractedModal({
   projectId,
   uploadId,
   drawings,
+  disciplineOptions,
+  onCreateDiscipline,
   onClose,
   onApplied,
+  onDeleted,
 }: {
   projectId: string;
   uploadId: string;
   drawings: DrawingPage[];
+  disciplineOptions: DisciplineOption[];
+  onCreateDiscipline: (label: string) => Promise<string | null>;
   onClose: () => void;
   onApplied: (updates: DrawingPage[]) => void;
+  onDeleted: (drawingId: string) => void;
 }) {
   const [rows, setRows] = useState<ReviewRow[]>(() =>
-    drawings.map((d) => ({
-      drawing_id: d.id,
-      page_number: d.page_number,
-      title: d.title ?? "",
-      drawing_no: d.drawing_no ?? "",
-      category: d.category ?? "",
-      revision: d.revision ?? "",
-      drawing_date: d.drawing_date ?? "",
-      approved: false,
-      saving: false,
-    })),
+    drawings.map((d) => {
+      const uploadedDate = d.uploaded_at ? d.uploaded_at.slice(0, 10) : "";
+      return {
+        drawing_id: d.id,
+        page_number: d.page_number,
+        filename: d.filename,
+        uploaded_at: d.uploaded_at,
+        storage_path: d.storage_path,
+        viewer_page: d.viewer_page,
+        title: d.title ?? "",
+        drawing_no: d.drawing_no ?? "",
+        category: d.category ?? "",
+        revision: d.revision || "0",
+        drawing_date: d.drawing_date ?? "",
+        received_date: d.received_date ?? uploadedDate,
+        confirmed: false,
+        viewed: false,
+        saving: false,
+      };
+    }),
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [applyingAll, setApplyingAll] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    drawings.length > 0 ? drawings[0].id : null,
+  );
+  const [rotation, setRotation] = useState(0);
 
+  // Reset rotation when selection changes
+  useEffect(() => { setRotation(0); }, [selectedId]);
+
+  // Mark the selected row as viewed (once per row)
+  useEffect(() => {
+    if (!selectedId) return;
+    setRows((prev) => {
+      if (!prev.some((r) => r.drawing_id === selectedId && !r.viewed)) return prev;
+      return prev.map((r) => (r.drawing_id === selectedId && !r.viewed ? { ...r, viewed: true } : r));
+    });
+  }, [selectedId]);
+
+  // Run AI extraction once on mount
   useEffect(() => {
     let cancelled = false;
     async function run() {
@@ -1074,7 +2186,7 @@ function ReviewExtractedModal({
               title: m.title || row.title,
               drawing_no: m.sheet_number || row.drawing_no,
               category: m.category || row.category,
-              revision: m.revision || row.revision,
+              revision: m.revision || row.revision || "0",
               drawing_date: m.date || row.drawing_date,
             };
           }),
@@ -1089,12 +2201,25 @@ function ReviewExtractedModal({
     return () => { cancelled = true; };
   }, [projectId, uploadId]);
 
-  function updateRow(drawingId: string, patch: Partial<ReviewRow>) {
-    setRows((prev) => prev.map((r) => (r.drawing_id === drawingId ? { ...r, ...patch } : r)));
+  const selected = rows.find((r) => r.drawing_id === selectedId) ?? null;
+  const confirmedCount = rows.filter((r) => r.confirmed).length;
+  const allConfirmed = rows.length > 0 && confirmedCount === rows.length;
+
+  function updateSelected(patch: Partial<ReviewRow>) {
+    if (!selectedId) return;
+    setRows((prev) =>
+      prev.map((r) => (r.drawing_id === selectedId ? { ...r, ...patch } : r)),
+    );
+  }
+
+  function isValid(r: ReviewRow) {
+    return !!r.drawing_no.trim() && !!r.category;
   }
 
   async function applyRow(row: ReviewRow): Promise<DrawingPage | null> {
-    updateRow(row.drawing_id, { saving: true });
+    setRows((prev) =>
+      prev.map((r) => (r.drawing_id === row.drawing_id ? { ...r, saving: true } : r)),
+    );
     try {
       const res = await fetch(
         `/api/projects/${projectId}/drawings/${row.drawing_id}`,
@@ -1102,191 +2227,322 @@ function ReviewExtractedModal({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            drawing_no: row.drawing_no || null,
-            title: row.title || null,
-            revision: row.revision || null,
+            drawing_no: row.drawing_no.trim() || null,
+            title: row.title.trim() || null,
+            revision: row.revision.trim() || "0",
             drawing_date: row.drawing_date || null,
+            received_date: row.received_date || null,
             category: row.category || null,
           }),
         },
       );
       if (!res.ok) throw new Error("Save failed");
-      const updated = await res.json();
-      updateRow(row.drawing_id, { approved: true, saving: false });
-      return updated as DrawingPage;
+      const updated = (await res.json()) as DrawingPage;
+      setRows((prev) =>
+        prev.map((r) => (r.drawing_id === row.drawing_id ? { ...r, confirmed: true, saving: false } : r)),
+      );
+      return updated;
     } catch {
-      updateRow(row.drawing_id, { saving: false });
+      setRows((prev) =>
+        prev.map((r) => (r.drawing_id === row.drawing_id ? { ...r, saving: false } : r)),
+      );
       return null;
     }
   }
 
-  async function handleApprove(row: ReviewRow) {
-    const updated = await applyRow(row);
-    if (updated) onApplied([updated]);
+  async function handleConfirm() {
+    if (!selected || !isValid(selected) || selected.confirmed) return;
+    const updated = await applyRow(selected);
+    if (updated) {
+      onApplied([updated]);
+      // Advance to the next unconfirmed row (wrap to start if needed)
+      const idx = rows.findIndex((r) => r.drawing_id === selected.drawing_id);
+      const next =
+        rows.slice(idx + 1).find((r) => !r.confirmed) ??
+        rows.slice(0, idx).find((r) => !r.confirmed);
+      if (next) setSelectedId(next.drawing_id);
+    }
   }
 
-  async function handleApproveAll() {
+  async function handleConfirmAll() {
     setApplyingAll(true);
-    const pending = rows.filter((r) => !r.approved);
     const applied: DrawingPage[] = [];
-    for (const row of pending) {
+    const invalidIds: string[] = [];
+    const failedIds: string[] = [];
+    for (const row of rows) {
+      if (row.confirmed) continue;
+      if (!isValid(row)) { invalidIds.push(row.drawing_id); continue; }
       const updated = await applyRow(row);
       if (updated) applied.push(updated);
+      else failedIds.push(row.drawing_id);
     }
     if (applied.length > 0) onApplied(applied);
     setApplyingAll(false);
+    if (invalidIds.length === 0 && failedIds.length === 0) {
+      onClose();
+    } else {
+      setSelectedId(invalidIds[0] ?? failedIds[0] ?? selectedId);
+    }
   }
 
-  const allApproved = rows.length > 0 && rows.every((r) => r.approved);
-  const approvedCount = rows.filter((r) => r.approved).length;
+  async function handleDelete() {
+    if (!selected) return;
+    const label = selected.drawing_no.trim() || `page ${selected.page_number}`;
+    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
+    const res = await fetch(`/api/projects/${projectId}/drawings/${selected.drawing_id}`, { method: "DELETE" });
+    if (!res.ok) return;
+    const deletedId = selected.drawing_id;
+    const idx = rows.findIndex((r) => r.drawing_id === deletedId);
+    const remaining = rows.filter((r) => r.drawing_id !== deletedId);
+    setRows(remaining);
+    onDeleted(deletedId);
+    if (remaining.length === 0) {
+      onClose();
+    } else {
+      const next = remaining[Math.min(idx, remaining.length - 1)];
+      setSelectedId(next.drawing_id);
+    }
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Review extracted drawing info</h2>
-            <p className="text-sm text-gray-500 mt-0.5">
-              We read the title block on each page. Edit any field, then approve to save.
-            </p>
+    <div className="fixed inset-0 z-50 flex flex-col sm:flex-row bg-white overflow-auto">
+      {/* Left panel: drawing list */}
+      <aside className="w-full sm:w-72 shrink-0 border-b sm:border-b-0 sm:border-r border-black/[0.06] flex flex-col bg-white max-h-[30vh] sm:max-h-none">
+        <div className="px-4 py-3 border-b border-black/[0.06] flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold" style={{ color: "var(--brand-600)" }}>
+            {confirmedCount} of {rows.length} confirmed
+          </span>
+          <button
+            onClick={handleConfirmAll}
+            disabled={applyingAll || loading || allConfirmed || rows.length === 0}
+            className="text-xs font-semibold text-gray-700 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {applyingAll ? "Confirming…" : "Confirm All"}
+          </button>
+        </div>
+        <ul className="flex-1 overflow-y-auto">
+          {rows.map((row) => {
+            const isSelected = row.drawing_id === selectedId;
+            const numLabel = row.drawing_no.trim() || `Page ${row.page_number}`;
+            const titleLabel = row.title.trim() || "—";
+            return (
+              <li key={row.drawing_id}>
+                <button
+                  onClick={() => setSelectedId(row.drawing_id)}
+                  className={`w-full text-left px-4 py-3 border-b border-black/[0.04] flex items-start justify-between gap-2 transition-colors ${
+                    isSelected ? "bg-[#FBF0E6]" : "bg-white hover:bg-gray-50"
+                  }`}
+                  style={
+                    isSelected
+                      ? { borderLeft: "3px solid var(--brand-500)", paddingLeft: "13px" }
+                      : undefined
+                  }
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 truncate">{numLabel}</div>
+                    <div className="text-[11px] uppercase tracking-wide text-gray-500 truncate mt-0.5">
+                      {titleLabel}
+                    </div>
+                  </div>
+                  <div className="shrink-0 pt-0.5">
+                    {row.confirmed ? (
+                      <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : row.viewed ? (
+                      <span className="text-[10px] uppercase tracking-wide text-gray-400">Viewed</span>
+                    ) : null}
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </aside>
+
+      {/* Center panel: PDF preview */}
+      <section className="flex-1 min-w-0 flex flex-col bg-gray-100 relative">
+        {selected ? (
+          <>
+            <ReviewPreviewCanvas
+              key={selected.drawing_id}
+              storagePath={selected.storage_path}
+              pageNumber={selected.viewer_page > 0 ? selected.viewer_page : selected.page_number}
+              rotation={rotation}
+            />
+            <div className="absolute bottom-4 left-4">
+              <button
+                onClick={() => setRotation((r) => (r + 90) % 360)}
+                className="btn-secondary"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M20 20v-6h-6M5 10a8 8 0 0114-3M19 14a8 8 0 01-14 3" />
+                </svg>
+                Rotate Drawing
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
+            Select a drawing on the left to start.
           </div>
+        )}
+      </section>
+
+      {/* Right panel: General information */}
+      <aside className="w-full sm:w-[440px] shrink-0 border-t sm:border-t-0 sm:border-l border-black/[0.06] flex flex-col bg-white">
+        <div className="px-5 py-4 border-b border-black/[0.06] flex items-start justify-between gap-2">
+          <h2 className="text-base font-semibold text-gray-900">General information</h2>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+            className="p-1 -mt-0.5 -mr-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
             aria-label="Close"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
         {loading && (
-          <div className="px-6 py-12 flex flex-col items-center justify-center text-sm text-gray-500">
-            <svg className="w-6 h-6 animate-spin text-blue-500 mb-3" fill="none" viewBox="0 0 24 24">
+          <div className="px-5 py-2 text-xs text-gray-500 border-b border-black/[0.04] flex items-center gap-2">
+            <svg className="w-3.5 h-3.5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
             Reading the title block on each page…
           </div>
         )}
-
         {error && !loading && (
-          <div className="px-6 py-4 bg-amber-50 border-b border-amber-100 text-sm text-amber-800">
-            {error}. You can still edit fields manually and approve.
+          <div className="px-5 py-2 text-xs bg-amber-50 border-b border-amber-100 text-amber-800">
+            {error}. You can still edit fields manually and confirm.
           </div>
         )}
 
-        {!loading && (
-          <div className="flex-1 overflow-y-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide sticky top-0">
-                <tr>
-                  <th className="px-3 py-2 text-left w-12">#</th>
-                  <th className="px-3 py-2 text-left">Sheet No.</th>
-                  <th className="px-3 py-2 text-left">Title</th>
-                  <th className="px-3 py-2 text-left w-44">Category</th>
-                  <th className="px-3 py-2 text-left w-24">Rev.</th>
-                  <th className="px-3 py-2 text-left w-40">Date</th>
-                  <th className="px-3 py-2 text-left w-32"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {rows.map((row) => (
-                  <tr key={row.drawing_id} className={row.approved ? "bg-emerald-50/50" : ""}>
-                    <td className="px-3 py-2 text-gray-500">{row.page_number}</td>
-                    <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={row.drawing_no}
-                        onChange={(e) => updateRow(row.drawing_id, { drawing_no: e.target.value, approved: false })}
-                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="A-101"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={row.title}
-                        onChange={(e) => updateRow(row.drawing_id, { title: e.target.value, approved: false })}
-                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Floor Plan"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <select
-                        value={row.category}
-                        onChange={(e) => updateRow(row.drawing_id, { category: e.target.value, approved: false })}
-                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+        {selected ? (
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Drawing Number<span className="text-rose-600">*</span>
+              </label>
+              <input
+                type="text"
+                value={selected.drawing_no}
+                onChange={(e) => updateSelected({ drawing_no: e.target.value })}
+                placeholder="A-101"
+                className="w-full text-sm border border-gray-200 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Discipline<span className="text-rose-600">*</span>
+              </label>
+              <DisciplineCombobox
+                value={selected.category}
+                options={disciplineOptions}
+                onChange={(v) => updateSelected({ category: v })}
+                onCreate={onCreateDiscipline}
+                placeholder="Select or type a discipline…"
+                className="w-full text-sm border border-gray-200 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)] bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Drawing Title</label>
+              <input
+                type="text"
+                value={selected.title}
+                onChange={(e) => updateSelected({ title: e.target.value })}
+                placeholder="Floor Plan"
+                className="w-full text-sm border border-gray-200 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+              />
+            </div>
+
+            <div className="pt-2">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">Versions</h3>
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 text-[10px] font-medium text-gray-500 uppercase tracking-wide">
+                    <tr>
+                      <th className="px-2 py-1.5 text-left">Revision<span className="text-rose-600">*</span></th>
+                      <th className="px-2 py-1.5 text-left">Drawing Date</th>
+                      <th className="px-2 py-1.5 text-left">Received Date</th>
+                      <th className="px-2 py-1.5 text-left">Drawing Set</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="px-2 py-1.5 align-middle">
+                        <input
+                          type="text"
+                          value={selected.revision}
+                          onChange={(e) => updateSelected({ revision: e.target.value })}
+                          className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+                        />
+                      </td>
+                      <td className="px-2 py-1.5 align-middle">
+                        <input
+                          type="date"
+                          value={selected.drawing_date}
+                          onChange={(e) => updateSelected({ drawing_date: e.target.value })}
+                          className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+                        />
+                      </td>
+                      <td className="px-2 py-1.5 align-middle">
+                        <input
+                          type="date"
+                          value={selected.received_date}
+                          onChange={(e) => updateSelected({ received_date: e.target.value })}
+                          className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+                        />
+                      </td>
+                      <td
+                        className="px-2 py-1.5 align-middle text-gray-700 truncate max-w-[100px]"
+                        title={selected.filename}
                       >
-                        {CATEGORY_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>{opt.label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={row.revision}
-                        onChange={(e) => updateRow(row.drawing_id, { revision: e.target.value, approved: false })}
-                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="2"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        type="date"
-                        value={row.drawing_date}
-                        onChange={(e) => updateRow(row.drawing_id, { drawing_date: e.target.value, approved: false })}
-                        className="w-full border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      {row.approved ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-medium">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                          Approved
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleApprove(row)}
-                          disabled={row.saving || applyingAll}
-                          className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
-                        >
-                          {row.saving ? "Saving…" : "Approve"}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        {selected.filename}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <p className="text-[11px] italic text-rose-600 pt-1">* Required fields</p>
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-sm text-gray-500 px-4">
+            No drawing selected.
           </div>
         )}
 
-        <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
-          <p className="text-xs text-gray-500">
-            {approvedCount} of {rows.length} approved
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-1.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
-            >
-              {allApproved ? "Close" : "Skip"}
-            </button>
-            <button
-              onClick={handleApproveAll}
-              disabled={loading || applyingAll || allApproved}
-              className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
-            >
-              {applyingAll ? "Approving…" : "Approve All"}
-            </button>
-          </div>
+        <div className="px-5 py-3 border-t border-black/[0.06] flex items-center justify-end gap-2">
+          <button
+            onClick={handleDelete}
+            disabled={!selected || !!selected?.saving || applyingAll}
+            className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Delete
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={
+              !selected ||
+              !isValid(selected) ||
+              selected.saving ||
+              applyingAll ||
+              selected.confirmed
+            }
+            className="px-4 py-1.5 text-sm font-semibold text-white rounded-md disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            style={{ backgroundColor: "var(--brand-500)" }}
+          >
+            {selected?.saving
+              ? "Saving…"
+              : selected?.confirmed
+              ? "Confirmed"
+              : "Confirm"}
+          </button>
         </div>
-      </div>
+      </aside>
     </div>
   );
 }
@@ -1314,10 +2570,18 @@ export default function DrawingsClient({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [disciplineFilter, setDisciplineFilter] = useState("");
   const [setFilter, setSetFilter] = useState("");
+  const [customDisciplines, setCustomDisciplines] = useState<{ label: string }[]>([]);
+  const [sets, setSets] = useState<DrawingSet[]>([]);
+  const [viewingSetId, setViewingSetId] = useState<string | null>(null);
+  const [setsSearch, setSetsSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewerSearch, setViewerSearch] = useState<{ query: string; results: SearchResult[] } | null>(null);
+  const [viewerSearchPanelOpen, setViewerSearchPanelOpen] = useState(false);
+  const [searchIndexBuilding, setSearchIndexBuilding] = useState(false);
+  const pageTextIndex = useRef<Map<string, string>>(new Map());
   const [showUploadsPanel, setShowUploadsPanel] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -1327,6 +2591,7 @@ export default function DrawingsClient({
   const [editRevision, setEditRevision] = useState("");
   const [editDrawingDate, setEditDrawingDate] = useState("");
   const [editReceivedDate, setEditReceivedDate] = useState("");
+  const [editReportFields, setEditReportFields] = useState<ReportFieldValues>({});
   const [editCategory, setEditCategory] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -1335,27 +2600,124 @@ export default function DrawingsClient({
   // Review modal state — opens after upload so user can approve auto-extracted metadata
   const [reviewModal, setReviewModal] = useState<{ uploadId: string; drawings: DrawingPage[] } | null>(null);
 
+  // Upload Drawings modal — the new Procore-style entry point for uploading.
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [prefillFiles, setPrefillFiles] = useState<File[]>([]);
+
   // Thumbnail cache: drawingId → dataUrl
   const thumbnails = useRef<Map<string, string>>(new Map());
   const [thumbVersion, setThumbVersion] = useState(0); // force re-render when thumb ready
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showReportsMenu, setShowReportsMenu] = useState(false);
+
   const uploadsPanelRef = useRef<HTMLDivElement>(null);
+  const reportsMenuRef = useRef<HTMLDivElement>(null);
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/projects/${projectId}/drawings`);
+    const [res, setsRes] = await Promise.all([
+      fetch(`/api/projects/${projectId}/drawings`),
+      fetch(`/api/projects/${projectId}/drawings/sets`),
+    ]);
     if (res.ok) {
       const data = await res.json();
       setDrawings(data.drawings ?? []);
       setUploads(data.uploads ?? []);
     }
+    if (setsRes.ok) {
+      const setsData = await setsRes.json();
+      setSets(setsData.sets ?? []);
+    }
     setLoading(false);
   }, [projectId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // ── Disciplines ────────────────────────────────────────────────────────────
+  const fetchDisciplines = useCallback(async () => {
+    const res = await fetch(`/api/projects/${projectId}/drawings/disciplines`);
+    if (res.ok) {
+      const data = await res.json();
+      setCustomDisciplines((data.disciplines ?? []).map((d: { label: string }) => ({ label: d.label })));
+    }
+  }, [projectId]);
+
+  useEffect(() => { fetchDisciplines(); }, [fetchDisciplines]);
+
+  // Built-in disciplines plus any custom ones the user created (deduped by label).
+  const disciplineOptions = useMemo<DisciplineOption[]>(() => {
+    const seen = new Set(BUILTIN_DISCIPLINE_OPTIONS.map((o) => o.label.toLowerCase()));
+    const custom = customDisciplines
+      .filter((d) => d.label && !seen.has(d.label.toLowerCase()))
+      .map((d) => ({ value: d.label, label: d.label }));
+    return [...BUILTIN_DISCIPLINE_OPTIONS, ...custom];
+  }, [customDisciplines]);
+
+  // Create a new custom discipline. Returns the value to store in `category`
+  // (the label for customs) or the matched built-in code, or null on failure.
+  const createDiscipline = useCallback(async (label: string): Promise<string | null> => {
+    const trimmed = label.trim();
+    if (!trimmed) return null;
+    // If the typed text matches a built-in label, reuse its code instead.
+    const builtin = BUILTIN_DISCIPLINE_OPTIONS.find((o) => o.label.toLowerCase() === trimmed.toLowerCase());
+    if (builtin) return builtin.value;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/drawings/disciplines`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: trimmed }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const newLabel: string = data.discipline?.label ?? trimmed;
+      setCustomDisciplines((prev) =>
+        prev.some((d) => d.label.toLowerCase() === newLabel.toLowerCase())
+          ? prev
+          : [...prev, { label: newLabel }],
+      );
+      return newLabel;
+    } catch {
+      return null;
+    }
+  }, [projectId]);
+
+  // ── Drawing Sets ───────────────────────────────────────────────────────────
+  // upload_id → set_id, so each drawing page can be traced back to its set.
+  const uploadSetMap = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const u of uploads) m.set(u.id, u.set_id ?? null);
+    return m;
+  }, [uploads]);
+
+  const viewingSet = useMemo(
+    () => (viewingSetId ? sets.find((s) => s.id === viewingSetId) ?? null : null),
+    [sets, viewingSetId],
+  );
+
+  // Each set with its page counts. A page counts as "Published" once it has a
+  // drawing number (i.e. it's been identified / reviewed); the rest are
+  // "Unpublished" drafts still awaiting a sheet number.
+  const setsWithCounts = useMemo(() => {
+    return sets
+      .map((s) => {
+        const pages = drawings.filter((d) => uploadSetMap.get(d.upload_id) === s.id);
+        const published = pages.filter((d) => (d.drawing_no ?? "").trim()).length;
+        return {
+          set: s,
+          date: s.default_drawing_date || (s.created_at ? s.created_at.slice(0, 10) : ""),
+          total: pages.length,
+          published,
+          unpublished: pages.length - published,
+        };
+      })
+      .filter((row) => {
+        const q = setsSearch.trim().toLowerCase();
+        return !q || row.set.name.toLowerCase().includes(q);
+      })
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }, [sets, drawings, uploadSetMap, setsSearch]);
 
   // Sync edit panel when selection changes
   useEffect(() => {
@@ -1366,6 +2728,7 @@ export default function DrawingsClient({
       setEditDrawingDate(selected.drawing_date ?? "");
       setEditReceivedDate(selected.received_date ?? "");
       setEditCategory(selected.category ?? "");
+      setEditReportFields(selected.report_fields ?? {});
       setDeleteConfirm(false);
     }
   }, [selected]);
@@ -1375,6 +2738,9 @@ export default function DrawingsClient({
     function handleClick(e: MouseEvent) {
       if (uploadsPanelRef.current && !uploadsPanelRef.current.contains(e.target as Node)) {
         setShowUploadsPanel(false);
+      }
+      if (reportsMenuRef.current && !reportsMenuRef.current.contains(e.target as Node)) {
+        setShowReportsMenu(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
@@ -1429,10 +2795,20 @@ export default function DrawingsClient({
 
   // ── Upload ───────────────────────────────────────────────────────────────────
 
-  async function handleUpload(file: File) {
+  type HandleUploadOptions = {
+    setId?: string;
+    defaultDrawingDate?: string;
+    defaultReceivedDate?: string;
+    defaultRevision?: string;
+    drawingNoRevMode?: DrawingNoRevMode;
+    getNumberFromFilename?: boolean;
+    drawingLanguage?: string;
+  };
+
+  async function handleUpload(file: File, opts: HandleUploadOptions = {}): Promise<DrawingUpload | null> {
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       alert("Only PDF files are accepted.");
-      return;
+      return null;
     }
 
     setUploading(true);
@@ -1462,7 +2838,17 @@ export default function DrawingsClient({
       const processRes = await fetch(`/api/projects/${projectId}/drawings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storagePath, filename: file.name }),
+        body: JSON.stringify({
+          storagePath,
+          filename: file.name,
+          setId: opts.setId ?? null,
+          defaultDrawingDate: opts.defaultDrawingDate ?? null,
+          defaultReceivedDate: opts.defaultReceivedDate ?? null,
+          defaultRevision: opts.defaultRevision ?? null,
+          drawingNoRevMode: opts.drawingNoRevMode ?? "none",
+          getNumberFromFilename: opts.getNumberFromFilename ?? false,
+          drawingLanguage: opts.drawingLanguage ?? "en",
+        }),
       });
 
       if (!processRes.ok) {
@@ -1480,26 +2866,47 @@ export default function DrawingsClient({
       if (data.upload?.id && newDrawings.length > 0) {
         setReviewModal({ uploadId: data.upload.id as string, drawings: newDrawings });
       }
+      return data.upload as DrawingUpload;
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed");
       setUploadStatus("");
+      return null;
     } finally {
       setUploading(false);
     }
   }
 
-  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files?.[0]) {
-      handleUpload(e.target.files[0]);
-      e.target.value = "";
+  async function handleUploadModalSubmit(data: UploadDrawingsSubmission) {
+    setShowUploadModal(false);
+    for (const file of data.files) {
+      await handleUpload(file, {
+        setId: data.setId,
+        defaultDrawingDate: data.defaultDrawingDate,
+        defaultReceivedDate: data.defaultReceivedDate,
+        defaultRevision: data.defaultRevision,
+        drawingNoRevMode: data.drawingNoRevMode,
+        getNumberFromFilename: data.getNumberFromFilename,
+        drawingLanguage: data.drawingLanguage,
+      });
+    }
+    // Refresh the sets list so a newly created set shows up in the Drawing Sets tab.
+    const setsRes = await fetch(`/api/projects/${projectId}/drawings/sets`);
+    if (setsRes.ok) {
+      const setsData = await setsRes.json();
+      setSets(setsData.sets ?? []);
     }
   }
 
   function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) handleUpload(file);
+    // Drag-and-drop onto the page surfaces the Upload Drawings modal
+    // with the dropped file(s) attached, so the user still picks a set
+    // and reviews defaults before processing.
+    const dropped = Array.from(e.dataTransfer.files ?? []).filter((f) => f.name.toLowerCase().endsWith(".pdf"));
+    if (dropped.length === 0) return;
+    setPrefillFiles(dropped);
+    setShowUploadModal(true);
   }
 
   function handleDragOver(e: DragEvent<HTMLDivElement>) {
@@ -1526,6 +2933,7 @@ export default function DrawingsClient({
         drawing_date: editDrawingDate || null,
         received_date: editReceivedDate || null,
         category: editCategory || null,
+        report_fields: editReportFields,
       }),
     });
     if (res.ok) {
@@ -1590,6 +2998,77 @@ export default function DrawingsClient({
     window.location.href = "/";
   }
 
+  // ── PDF full-text search ─────────────────────────────────────────────────────
+
+  // Builds (lazily, on first search) a map of drawingId → lowercased page text
+  // by extracting the text layer of every drawing PDF with pdfjs.
+  const ensureSearchIndex = useCallback(async () => {
+    await ensurePdfJs();
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) return;
+
+    // Group not-yet-indexed pages by PDF so each document loads only once
+    const byPath = new Map<string, DrawingPage[]>();
+    for (const d of drawings) {
+      if (pageTextIndex.current.has(d.id)) continue;
+      const group = byPath.get(d.storage_path) ?? [];
+      group.push(d);
+      byPath.set(d.storage_path, group);
+    }
+
+    for (const [storagePath, pages] of byPath) {
+      const url = `${supabaseUrl}/storage/v1/object/public/project-drawings/${storagePath}`;
+      try {
+        const pdf = await getDocument(url).promise;
+        for (const d of pages) {
+          try {
+            const pageInDoc = d.viewer_page > 0 ? d.viewer_page : d.page_number;
+            const page = await pdf.getPage(pageInDoc);
+            const tc = await page.getTextContent();
+            const text = tc.items
+              .map((it) => ("str" in it && typeof it.str === "string" ? it.str : ""))
+              .join(" ");
+            pageTextIndex.current.set(d.id, text.toLowerCase());
+          } catch {
+            pageTextIndex.current.set(d.id, "");
+          }
+        }
+      } catch {
+        for (const d of pages) pageTextIndex.current.set(d.id, "");
+      }
+    }
+  }, [drawings]);
+
+  const runPdfSearch = useCallback(async (rawQuery: string) => {
+    const query = rawQuery.trim();
+    if (!query) return;
+    setSearchIndexBuilding(true);
+    try {
+      await ensureSearchIndex();
+    } finally {
+      setSearchIndexBuilding(false);
+    }
+    const q = query.toLowerCase();
+    const results: SearchResult[] = [];
+    for (const d of drawings) {
+      const text = pageTextIndex.current.get(d.id);
+      if (!text) continue;
+      const matchCount = countOccurrences(text, q);
+      if (matchCount > 0) results.push({ drawing: d, matchCount });
+    }
+    setViewerSearch({ query, results });
+    setViewerSearchPanelOpen(true);
+    if (results.length > 0) {
+      setViewingDrawing(results[0].drawing);
+    } else if (!viewingDrawing) {
+      // Nothing open and nothing matched — surface a lightweight notice
+      alert(`No drawings contain “${query}”.`);
+      setViewerSearch(null);
+      setViewerSearchPanelOpen(false);
+    }
+  }, [drawings, ensureSearchIndex, viewingDrawing]);
+
   // ── Filter ───────────────────────────────────────────────────────────────────
 
   const filteredDrawings = drawings.filter((d) => {
@@ -1604,6 +3083,7 @@ export default function DrawingsClient({
     }
     if (disciplineFilter && inferDiscipline(d.drawing_no, d.category) !== disciplineFilter) return false;
     if (setFilter && d.upload_id !== setFilter) return false;
+    if (viewingSetId && uploadSetMap.get(d.upload_id) !== viewingSetId) return false;
     return true;
   });
 
@@ -1619,7 +3099,7 @@ export default function DrawingsClient({
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([discipline, drawings]) => ({ discipline, drawings }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawings, searchQuery, disciplineFilter, setFilter]);
+  }, [drawings, searchQuery, disciplineFilter, setFilter, viewingSetId, uploadSetMap]);
 
   // ── Thumbnail helper ─────────────────────────────────────────────────────────
 
@@ -1648,8 +3128,8 @@ export default function DrawingsClient({
 
   if (!loading && drawings.length === 0) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
-        <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between shrink-0">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
+        <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
           <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
             SiteCommand
           </a>
@@ -1671,7 +3151,7 @@ export default function DrawingsClient({
             <svg className="w-12 h-12 text-gray-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            <p className="text-base font-semibold text-gray-700 mb-1">Drop a PDF drawing set here</p>
+            <p className="text-base font-semibold text-gray-700 mb-1">Upload Drawings</p>
             <p className="text-sm text-gray-400 mb-6">Each page becomes a drawing you can tag with No., Title, Rev…</p>
             {uploading ? (
               <div className="flex items-center justify-center gap-2 text-sm text-blue-600">
@@ -1683,21 +3163,22 @@ export default function DrawingsClient({
               </div>
             ) : (
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => { setPrefillFiles([]); setShowUploadModal(true); }}
                 className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
               >
-                Choose File
+                Upload Drawings
               </button>
             )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              className="hidden"
-              onChange={handleFileInput}
-            />
           </div>
         </div>
+        {showUploadModal && (
+          <UploadDrawingsModal
+            projectId={projectId}
+            initialFiles={prefillFiles}
+            onClose={() => { setShowUploadModal(false); setPrefillFiles([]); }}
+            onSubmit={handleUploadModalSubmit}
+          />
+        )}
       </div>
     );
   }
@@ -1705,13 +3186,15 @@ export default function DrawingsClient({
   // ── Main layout ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       {/* Review extracted metadata after upload */}
       {reviewModal && (
         <ReviewExtractedModal
           projectId={projectId}
           uploadId={reviewModal.uploadId}
           drawings={reviewModal.drawings}
+          disciplineOptions={disciplineOptions}
+          onCreateDiscipline={createDiscipline}
           onClose={() => setReviewModal(null)}
           onApplied={(updates) => {
             setDrawings((prev) => {
@@ -1722,6 +3205,19 @@ export default function DrawingsClient({
               });
             });
           }}
+          onDeleted={(drawingId) => {
+            const uploadId = reviewModal.uploadId;
+            setDrawings((prev) => {
+              const remaining = prev.filter((d) => d.id !== drawingId);
+              const stillInUpload = remaining.some((d) => d.upload_id === uploadId);
+              if (!stillInUpload) {
+                setUploads((prevUploads) => prevUploads.filter((u) => u.id !== uploadId));
+              }
+              return remaining;
+            });
+            thumbnails.current.delete(drawingId);
+            if (selected?.id === drawingId) setSelected(null);
+          }}
         />
       )}
 
@@ -1730,19 +3226,42 @@ export default function DrawingsClient({
         <DrawingPdfViewerModal
           key={viewingDrawing.id}
           drawing={viewingDrawing}
-          allDrawings={filteredDrawings}
-          onClose={() => setViewingDrawing(null)}
+          allDrawings={
+            viewerSearch && viewerSearch.results.length > 0
+              ? viewerSearch.results.map((r) => r.drawing)
+              : filteredDrawings
+          }
+          onClose={() => {
+            setViewingDrawing(null);
+            setViewerSearch(null);
+            setViewerSearchPanelOpen(false);
+          }}
           onNavigate={setViewingDrawing}
-          onEditDetails={() => { setSelected(viewingDrawing); setViewingDrawing(null); }}
+          onEditDetails={() => {
+            setSelected(viewingDrawing);
+            setViewingDrawing(null);
+            setViewerSearch(null);
+            setViewerSearchPanelOpen(false);
+          }}
           projectId={projectId}
           userRole={role}
           userName={username}
           userId={userId}
+          search={{
+            query: viewerSearch?.query ?? "",
+            results: viewerSearch?.results ?? [],
+            building: searchIndexBuilding,
+            panelOpen: viewerSearchPanelOpen,
+            onTogglePanel: () => setViewerSearchPanelOpen((o) => !o),
+            onRun: runPdfSearch,
+            thumbnails: thumbnails.current,
+            thumbVersion,
+          }}
         />
       )}
 
       {/* Global header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between shrink-0">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -1752,305 +3271,433 @@ export default function DrawingsClient({
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Logout</button>
         </div>
       </header>
-      <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileInput} />
+      {showUploadModal && (
+        <UploadDrawingsModal
+          projectId={projectId}
+          initialFiles={prefillFiles}
+          onClose={() => { setShowUploadModal(false); setPrefillFiles([]); }}
+          onSubmit={handleUploadModalSubmit}
+        />
+      )}
 
       <ProjectNav projectId={projectId} />
 
       {/* Page title */}
-      <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0 flex items-end justify-between gap-4 flex-wrap">
-        <div className="min-w-0">
-          <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Drawings</h1>
-          {drawings.length > 0 ? (
-            <p className="sec-sub mt-1.5">
-              <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
-              <span className="sep">·</span>
-              <span className="num" style={{ color: "var(--brand-500)" }}>{drawings.length}</span> sheets
-            </p>
-          ) : (
-            <p className="sec-sub mt-1.5">View, manage, and upload all of your drawings from the Drawings log.</p>
-          )}
+      <div className="bg-white border-b border-black/[0.06] px-6 pt-7 pb-5 shrink-0">
+        <div className="sec-row">
+          <div className="min-w-0">
+            <h1 className="h2-warm">Drawings</h1>
+            {drawings.length > 0 ? (
+              <p className="sub mt-1.5">
+                <em>Across this project</em>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{drawings.length}</span> sheets
+                <span className="sep">·</span>
+                <span className="num">{disciplineGroups.length}</span> disciplines
+                <span className="sep">·</span>
+                <span className="num">{uploads.length}</span> sets
+              </p>
+            ) : (
+              <p className="sub mt-1.5">
+                <em>View, manage, and upload</em> all of your drawings from the Drawings log.
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {uploading && (
+              <span className="text-xs flex items-center gap-1.5" style={{ color: "var(--brand-600)" }}>
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                {uploadStatus}
+              </span>
+            )}
+            <div ref={reportsMenuRef} className="relative">
+              <button
+                onClick={() => setShowReportsMenu((o) => !o)}
+                className="btn-secondary flex items-center gap-1.5"
+              >
+                Reports
+                <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${showReportsMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {showReportsMenu && (
+                <div className="absolute right-0 mt-2 w-52 bg-white border border-gray-100 rounded-xl shadow-lg py-1 z-20">
+                  {["All Sets and Revisions", "Sketches", "Measurements"].map((option) => (
+                    <button
+                      key={option}
+                      onClick={() => setShowReportsMenu(false)}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button className="btn-secondary">View Locations</button>
+            <button className="btn-secondary">Export</button>
+            <button
+              onClick={() => { setPrefillFiles([]); setShowUploadModal(true); }}
+              disabled={uploading}
+              className="btn-primary disabled:opacity-50"
+            >
+              Upload
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {uploading && (
-            <span className="text-xs text-blue-600 flex items-center gap-1.5">
-              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-              {uploadStatus}
-            </span>
-          )}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="px-4 py-1.5 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
-          >
-            Upload
-          </button>
-          <button className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-200 text-gray-600 rounded-md hover:bg-gray-50 transition-colors">
-            Reports
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          <button className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-200 text-gray-600 rounded-md hover:bg-gray-50 transition-colors">
-            View Locations
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          <button className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-200 text-gray-600 rounded-md hover:bg-gray-50 transition-colors">
-            Export
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-        </div>
+
+        {/* Stat strip */}
+        {drawings.length > 0 && (
+          <div className="stats" style={{ marginTop: 18 }}>
+            <div className="stat">
+              <div className="lbl">Sheets</div>
+              <div className="val">{drawings.length}</div>
+              <div className="delta">Across {disciplineGroups.length} disciplines</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Disciplines</div>
+              <div className="val">{disciplineGroups.length}</div>
+              <div className="delta">{disciplineGroups.map((g) => g.discipline).slice(0, 3).join(" · ") || "—"}</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Drawing sets</div>
+              <div className="val">{uploads.length}</div>
+              <div className="delta">{uploads.length === 1 ? "1 upload" : `${uploads.length} uploads`}</div>
+            </div>
+            <div className="stat calm">
+              <div className="lbl">Last uploaded</div>
+              <div className="val">{uploads[0] ? formatDate(uploads[0].uploaded_at).replace(/, \d{4}$/, "") : "—"}</div>
+              <div className="delta">{uploads[0]?.filename ?? "No sets yet"}</div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Tabs */}
-      <div className="bg-white border-b border-gray-100 px-6 shrink-0">
-        <nav className="flex">
-          {(["current", "sets", "recycle"] as const).map((tab) => {
-            const labels = { current: "Current Drawings", sets: "Drawing Sets", recycle: "Recycle Bin" };
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                  activeTab === tab
-                    ? "border-blue-500 text-blue-600"
-                    : "border-transparent text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {labels[tab]}
-              </button>
-            );
-          })}
-        </nav>
-      </div>
+      {/* Tabs / breadcrumb */}
+      {viewingSet ? (
+        <div className="bg-white border-b border-black/[0.06] px-6 py-3 shrink-0 flex items-center gap-2 text-sm">
+          <button
+            onClick={() => { setViewingSetId(null); setActiveTab("sets"); }}
+            className="text-gray-500 hover:text-gray-800 transition-colors"
+          >
+            Drawing Sets
+          </button>
+          <span className="text-gray-400">›</span>
+          <span className="font-semibold text-gray-900 truncate">
+            {viewingSet.name}
+            {viewingSet.default_drawing_date ? ` (${formatDate(viewingSet.default_drawing_date)})` : ""}
+          </span>
+        </div>
+      ) : (
+        <div className="bg-white border-b border-black/[0.06] px-6 shrink-0">
+          <nav className="flex">
+            {(["current", "sets", "recycle"] as const).map((tab) => {
+              const labels = { current: "Current Drawings", sets: "Drawing Sets", recycle: "Recycle Bin" };
+              return (
+                <button
+                  key={tab}
+                  onClick={() => { setActiveTab(tab); setViewingSetId(null); }}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    activeTab === tab
+                      ? "border-[color:var(--brand-500)] text-[color:var(--ink)]"
+                      : "border-transparent text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {labels[tab]}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      )}
 
       {/* Filter bar */}
-      <div className="bg-white border-b border-gray-100 px-6 py-3 flex items-center gap-3 shrink-0">
-        <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-48"
-          />
+      {activeTab === "sets" && !viewingSet ? (
+        <div className="bg-white border-b border-black/[0.06] px-6 py-3 shrink-0">
+          <div className="filters">
+            <div className="search">
+              <svg className="w-4 h-4 shrink-0" style={{ color: "var(--brand-500)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search drawing sets"
+                value={setsSearch}
+                onChange={(e) => setSetsSearch(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-          </svg>
-          Filters
-        </button>
-        <select
-          value={disciplineFilter}
-          onChange={(e) => setDisciplineFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">Discipline</option>
-          {[...new Set(drawings.map((d) => inferDiscipline(d.drawing_no)))].sort().map((disc) => (
-            <option key={disc} value={disc}>{disc}</option>
-          ))}
-        </select>
-        <select
-          value={setFilter}
-          onChange={(e) => setSetFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">Set</option>
-          {uploads.map((u) => (
-            <option key={u.id} value={u.id}>{u.filename}</option>
-          ))}
-        </select>
-        <div className="flex-1" />
-        <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
-          <button
-            onClick={() => setActiveView("table")}
-            title="List view"
-            className={`p-2 transition-colors ${activeView === "table" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}
-          >
+      ) : (
+      <div className="bg-white border-b border-black/[0.06] px-6 py-3 shrink-0">
+        <div className="filters">
+          <div className="search">
+            <button
+              type="button"
+              onClick={() => runPdfSearch(searchQuery)}
+              disabled={searchIndexBuilding || !searchQuery.trim()}
+              title="Search the text inside every drawing PDF"
+              className="shrink-0 flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}
+            >
+              {searchIndexBuilding ? (
+                <svg className="w-4 h-4 animate-spin" style={{ color: "var(--brand-500)" }} fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" style={{ color: "var(--brand-500)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+                </svg>
+              )}
+            </button>
+            <input
+              type="text"
+              placeholder="Search drawings — press Enter to search inside PDFs"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runPdfSearch(searchQuery);
+                }
+              }}
+            />
+          </div>
+          <button className="btn-secondary">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
             </svg>
+            Filters
           </button>
-          <button
-            onClick={() => setActiveView("grid")}
-            title="Grid view"
-            className={`p-2 transition-colors ${activeView === "grid" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}
+          <select
+            value={disciplineFilter}
+            onChange={(e) => setDisciplineFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-black/10 rounded-md bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-            </svg>
-          </button>
+            <option value="">Discipline</option>
+            {[...new Set(drawings.map((d) => inferDiscipline(d.drawing_no, d.category)))].sort().map((disc) => (
+              <option key={disc} value={disc}>{disc}</option>
+            ))}
+          </select>
+          <select
+            value={setFilter}
+            onChange={(e) => setSetFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-black/10 rounded-md bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-500)]"
+          >
+            <option value="">Set</option>
+            {uploads.map((u) => (
+              <option key={u.id} value={u.id}>{u.filename}</option>
+            ))}
+          </select>
+          <div className="flex-1" />
+          <div className="seg">
+            <button
+              onClick={() => setActiveView("table")}
+              title="List view"
+              className={activeView === "table" ? "active" : ""}
+            >
+              List
+            </button>
+            <button
+              onClick={() => setActiveView("grid")}
+              title="Grid view"
+              className={activeView === "grid" ? "active" : ""}
+            >
+              Sheets
+            </button>
+          </div>
         </div>
       </div>
+      )}
 
-      {/* Main content area */}
+      {/* Drawing Sets list */}
+      {activeTab === "sets" && !viewingSet ? (
+        <div className="flex-1 px-6 py-6">
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 border-b border-black/[0.06]">
+                <tr>
+                  <th className="w-10 px-4 py-3"></th>
+                  <th className="w-20 px-2 py-3"></th>
+                  <th className="px-3 py-3 text-left">Name</th>
+                  <th className="px-3 py-3 text-left">Date</th>
+                  <th className="px-3 py-3 text-left">Published</th>
+                  <th className="px-3 py-3 text-left">Unpublished</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-black/[0.04]">
+                {setsWithCounts.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-gray-500">
+                      {loading
+                        ? "Loading drawing sets…"
+                        : sets.length === 0
+                        ? "No drawing sets yet. Upload drawings to create your first set."
+                        : "No drawing sets match your search."}
+                    </td>
+                  </tr>
+                ) : (
+                  setsWithCounts.map(({ set, date, published, unpublished }) => (
+                    <tr key={set.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3 align-middle">
+                        <input type="checkbox" className="rounded border-gray-300" />
+                      </td>
+                      <td className="px-2 py-3 align-middle">
+                        <button
+                          onClick={() => { setActiveTab("sets"); setViewingSetId(set.id); }}
+                          className="px-3 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+                        >
+                          View
+                        </button>
+                      </td>
+                      <td className="px-3 py-3 align-middle font-medium text-gray-900">{set.name}</td>
+                      <td className="px-3 py-3 align-middle text-gray-600">{date ? formatDate(date) : "—"}</td>
+                      <td className="px-3 py-3 align-middle text-gray-600">{published}</td>
+                      <td className="px-3 py-3 align-middle text-gray-600">{unpublished}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
       <div
-        className="flex flex-1 overflow-hidden"
+        className="flex flex-1"
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
       >
-        <div className={`flex-1 flex flex-col overflow-hidden ${isDragging ? "ring-2 ring-blue-400 ring-inset" : ""}`}>
-          <div className="flex-1 overflow-y-auto">
+        <div className={`flex-1 flex flex-col ${isDragging ? "ring-2 ring-[color:var(--brand-500)] ring-inset" : ""}`}>
+          <div className="px-6 py-6">
             {loading ? (
-              <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading…</div>
-            ) : filteredDrawings.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-64 text-center">
-                <svg className="w-12 h-12 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p className="text-sm font-medium text-gray-500">No drawings match your search</p>
-              </div>
-            ) : activeView === "grid" ? (
-              // ── Grid ──
-              <div className="p-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {filteredDrawings.map((d) => (
-                  <button
-                    key={d.id}
-                    onClick={() => setViewingDrawing(d)}
-                    className="group relative aspect-[3/4] bg-gray-100 rounded-xl overflow-hidden border-2 border-transparent hover:border-blue-300 transition-all text-left focus:outline-none"
-                  >
-                    <Thumb drawing={d} />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-3 py-2">
-                      {d.drawing_no && <p className="text-white text-xs font-bold truncate">{d.drawing_no}</p>}
-                      <p className="text-white/80 text-xs truncate">{d.title ?? `Page ${d.page_number} of ${d.filename}`}</p>
-                      {d.revision && (
-                        <span className="inline-block mt-1 px-1.5 py-0.5 bg-white/20 rounded text-white text-[10px] font-medium">Rev {d.revision}</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelected(d); }}
-                      title="Edit details"
-                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 bg-black/50 rounded text-white hover:bg-black/70 transition-all"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
-                  </button>
+              <div className="rfi-list">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <div key={i} className="drow" style={{ pointerEvents: "none" }}>
+                    <div className="sn" style={{ opacity: 0.25 }}>···</div>
+                    <div className="ttl"><span className="inline-block h-3 w-48 rounded bg-black/[0.06]" /></div>
+                    <div className="rev"><span className="inline-block h-3 w-10 rounded bg-black/[0.06]" /></div>
+                    <div className="when"><span className="inline-block h-3 w-16 rounded bg-black/[0.06]" /></div>
+                    <div className="disc"><span className="inline-block h-3 w-20 rounded bg-black/[0.06]" /></div>
+                    <div className="rfi-arrow" />
+                  </div>
                 ))}
               </div>
+            ) : filteredDrawings.length === 0 ? (
+              <div className="card card-pad flex flex-col items-center justify-center text-center" style={{ padding: "56px 24px" }}>
+                <svg className="w-12 h-12 mb-3" style={{ color: "var(--brand-500)", opacity: 0.4 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <p className="font-display text-lg text-[color:var(--ink)]">No drawings match your search</p>
+                <p className="text-sm text-gray-500 mt-1">Adjust the search or filters to see more sheets.</p>
+              </div>
+            ) : activeView === "grid" ? (
+              // ── Grid — sheet thumbnails ──
+              <div className="grid-4">
+                {filteredDrawings.map((d) => {
+                  const disc = inferDiscipline(d.drawing_no, d.category);
+                  return (
+                    <div key={d.id} className="group relative">
+                      <button
+                        onClick={() => setViewingDrawing(d)}
+                        className="sheet block w-full text-left focus:outline-none"
+                        style={{ overflow: "hidden" }}
+                      >
+                        <Thumb drawing={d} />
+                        <div className="sheet-tag">
+                          <span className="num">{d.drawing_no ?? `P.${d.page_number}`}</span>
+                          <span style={{ fontStyle: "italic", fontFamily: "var(--font-display), serif", color: "var(--brand-700)" }}>{disc}</span>
+                        </div>
+                      </button>
+                      <div style={{ fontSize: 12, fontWeight: 500, marginTop: 8, color: "var(--ink)" }} className="truncate">
+                        {d.title ?? `Page ${d.page_number} of ${d.filename}`}
+                      </div>
+                      <div className="font-mono" style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>
+                        {d.revision ? `Rev ${d.revision}` : "Rev 0"}
+                        {d.drawing_date ? ` · ${formatDate(d.drawing_date)}` : ""}
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSelected(d); }}
+                        title="Edit details"
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 rounded bg-white border border-black/10 text-gray-500 hover:text-gray-800 transition-all"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
-              // ── Table (discipline-grouped) ──
-              <div className="bg-white">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      <th className="w-10 px-3 py-3" />
-                      <th className="w-8 px-2 py-3">
-                        <input type="checkbox" className="rounded border-gray-300" />
-                      </th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-36">Drawing No.</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600">Drawing Title</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-36">Revision</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-36">Drawing Date</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-36">Received Date</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-44">Set</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-600 w-28">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {disciplineGroups.map(({ discipline, drawings: groupDrawings }) => (
-                      <>
-                        {/* Group header row */}
-                        <tr key={`group-${discipline}`} className="bg-blue-50 border-b border-gray-200">
-                          <td className="px-3 py-2.5 text-center">
-                            <button
-                              onClick={() => setCollapsedGroups((prev) => {
+              // ── List — editorial drow rows, discipline-grouped ──
+              <div className="rfi-list">
+                <div className="drow head" style={{ gridTemplateColumns: "110px 1fr 70px 110px 100px 60px" }}>
+                  <div>Sheet</div><div>Title</div><div>Rev</div><div>Updated</div><div>Discipline</div><div></div>
+                </div>
+                {disciplineGroups.map(({ discipline, drawings: groupDrawings }) => {
+                  const collapsed = collapsedGroups.has(discipline);
+                  return (
+                    <div key={`group-${discipline}`}>
+                      <button
+                        onClick={() => setCollapsedGroups((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(discipline)) next.delete(discipline);
+                          else next.add(discipline);
+                          return next;
+                        })}
+                        className="w-full flex items-center gap-2 px-5 py-2.5 text-left bg-[#F4F2EC] border-b border-black/[0.06]"
+                      >
+                        <svg className={`w-3.5 h-3.5 text-gray-500 transition-transform ${collapsed ? "" : "rotate-90"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                        <span className="font-display text-[15px] italic text-[color:var(--ink)]">{discipline}</span>
+                        <span className="font-mono text-xs text-gray-400">{groupDrawings.length}</span>
+                      </button>
+                      {!collapsed && groupDrawings.map((d) => (
+                        <div
+                          key={d.id}
+                          onClick={() => setViewingDrawing(d)}
+                          className="drow cursor-pointer"
+                        >
+                          <div className="sn">{d.drawing_no ?? `P.${d.page_number}`}</div>
+                          <div className="ttl">
+                            {d.title ?? <span className="text-gray-400">{`Page ${d.page_number} of ${d.filename}`}</span>}
+                            <span className="font-mono ml-2 text-[10px] text-gray-400 truncate">{d.filename}</span>
+                          </div>
+                          <div className="rev">Rev {d.revision ?? "0"}</div>
+                          <div className="when">{d.drawing_date ? formatDate(d.drawing_date) : (d.received_date ? formatDate(d.received_date) : "—")}</div>
+                          <div className="disc">{discipline}</div>
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(d.id)}
+                              onChange={(e) => setSelectedIds((prev) => {
                                 const next = new Set(prev);
-                                if (next.has(discipline)) next.delete(discipline);
-                                else next.add(discipline);
+                                if (e.target.checked) next.add(d.id); else next.delete(d.id);
                                 return next;
                               })}
-                              className="text-gray-500 hover:text-gray-700"
+                              className="rounded border-gray-300"
+                            />
+                            <button
+                              onClick={() => setSelected(d)}
+                              title="Edit details"
+                              className="text-gray-400 hover:text-gray-700 p-0.5"
                             >
-                              {collapsedGroups.has(discipline) ? (
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                                </svg>
-                              ) : (
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                </svg>
-                              )}
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
                             </button>
-                          </td>
-                          <td className="px-2 py-2.5">
-                            <input type="checkbox" className="rounded border-gray-300" />
-                          </td>
-                          <td colSpan={7} className="px-3 py-2.5 text-sm font-semibold text-gray-700">
-                            {discipline} ({groupDrawings.length})
-                          </td>
-                        </tr>
-                        {/* Data rows */}
-                        {!collapsedGroups.has(discipline) && groupDrawings.map((d) => (
-                          <tr
-                            key={d.id}
-                            onClick={() => setViewingDrawing(d)}
-                            className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
-                          >
-                            <td className="px-3 py-3" />
-                            <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={selectedIds.has(d.id)}
-                                onChange={(e) => setSelectedIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (e.target.checked) next.add(d.id); else next.delete(d.id);
-                                  return next;
-                                })}
-                                className="rounded border-gray-300"
-                              />
-                            </td>
-                            <td className="px-3 py-3">
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setSelected(d); }}
-                                  title="Edit details"
-                                  className="text-gray-400 hover:text-gray-600 shrink-0"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                  </svg>
-                                </button>
-                                <span className="text-blue-600 font-medium text-xs">
-                                  {d.drawing_no ?? `P.${d.page_number}`}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-3 py-3 text-gray-700 text-xs">{d.title ?? <span className="text-gray-400">—</span>}</td>
-                            <td className="px-3 py-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-gray-700 text-xs">{d.revision ?? "0"}</span>
-                                <button onClick={(e) => e.stopPropagation()} className="px-2 py-0.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50">See All</button>
-                              </div>
-                            </td>
-                            <td className="px-3 py-3 text-gray-600 text-xs">{d.drawing_date ? formatDate(d.drawing_date) : <span className="text-gray-400">—</span>}</td>
-                            <td className="px-3 py-3 text-gray-600 text-xs">{d.received_date ? formatDate(d.received_date) : <span className="text-gray-400">—</span>}</td>
-                            <td className="px-3 py-3 text-gray-600 text-xs truncate max-w-[150px]">
-                              {d.filename}
-                            </td>
-                            <td className="px-3 py-3">
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-200">
-                                Published
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </>
-                    ))}
-                  </tbody>
-                </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2058,7 +3705,7 @@ export default function DrawingsClient({
 
         {/* Detail panel */}
         {selected && (
-          <div className="w-80 shrink-0 bg-white border-l border-gray-100 flex flex-col overflow-hidden">
+          <div className="w-80 shrink-0 bg-white border-l border-gray-100 flex flex-col sticky top-0 h-screen">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
               <h3 className="text-sm font-semibold text-gray-800 truncate pr-2">
                 {selected.drawing_no ?? `Page ${selected.page_number}`}
@@ -2121,16 +3768,15 @@ export default function DrawingsClient({
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Category</label>
-                  <select
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Discipline</label>
+                  <DisciplineCombobox
                     value={editCategory}
-                    onChange={(e) => setEditCategory(e.target.value)}
+                    options={disciplineOptions}
+                    onChange={setEditCategory}
+                    onCreate={createDiscipline}
+                    placeholder="Select or type a discipline…"
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
-                    {CATEGORY_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Revision</label>
@@ -2148,6 +3794,15 @@ export default function DrawingsClient({
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
+
+              <ReportFieldsSection
+                title="Report Fields"
+                description="Extra drawing attributes surfaced as columns in 360 Reports."
+                fields={DRAWING_REPORT_FIELDS}
+                values={editReportFields}
+                onChange={(key, value) => setEditReportFields((prev) => ({ ...prev, [key]: value }))}
+                columns={2}
+              />
 
               <div className="space-y-2 pt-1">
                 <button
@@ -2177,6 +3832,7 @@ export default function DrawingsClient({
           </div>
         )}
       </div>
+      )}
 
       {/* Drag overlay */}
       {isDragging && (

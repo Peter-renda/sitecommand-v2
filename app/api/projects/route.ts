@@ -1,14 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
 import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 import { addUserToDirectory } from "@/lib/directory";
+import { sendProjectMemberInviteEmail } from "@/lib/email";
+
+/** Attach a `has_schedule` flag to each project (one query for the whole set). */
+async function withSchedules(
+  supabase: SupabaseClient,
+  projects: Array<{ id: string; [k: string]: unknown }>,
+) {
+  if (projects.length === 0) return [];
+  const { data: schedules } = await supabase
+    .from("project_schedules")
+    .select("project_id")
+    .in("project_id", projects.map((p) => p.id));
+  const scheduled = new Set((schedules ?? []).map((row: { project_id: string }) => row.project_id));
+  return projects.map((p) => ({ ...p, has_schedule: scheduled.has(p.id) }));
+}
 
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = getSupabase();
+
+  // Training sandboxes (is_training = true) never appear in the dashboard /
+  // project list — they're reached only from Training → Practice. Every branch
+  // below filters them out. (Listing the user's own sandboxes is the dedicated
+  // job of GET /api/training/projects.)
 
   // Org-level admins see all projects under their company
   const isOrgAdmin =
@@ -19,22 +40,10 @@ export async function GET() {
       .from("projects")
       .select("*")
       .eq("company_id", session.company_id)
+      .eq("is_training", false)
+      .is("archived_at", null)
       .order("created_at", { ascending: false });
-    const projects = Array.isArray(data) ? data : [];
-    if (projects.length === 0) return NextResponse.json([]);
-
-    const { data: schedules } = await supabase
-      .from("project_schedules")
-      .select("project_id")
-      .in("project_id", projects.map((p: { id: string }) => p.id));
-    const scheduledProjectIds = new Set((schedules ?? []).map((row: { project_id: string }) => row.project_id));
-
-    return NextResponse.json(
-      projects.map((project: { id: string }) => ({
-        ...project,
-        has_schedule: scheduledProjectIds.has(project.id),
-      }))
-    );
+    return NextResponse.json(await withSchedules(supabase, Array.isArray(data) ? data : []));
   }
 
   // Standard members and external collaborators: only projects explicitly assigned
@@ -50,6 +59,8 @@ export async function GET() {
     .from("projects")
     .select("*")
     .in("id", projectIds)
+    .eq("is_training", false)
+    .is("archived_at", null)
     .order("created_at", { ascending: false });
 
   // Internal users with a company_id should only see projects from their company
@@ -59,21 +70,7 @@ export async function GET() {
   }
 
   const { data } = await projectQuery;
-  const projects = Array.isArray(data) ? data : [];
-  if (projects.length === 0) return NextResponse.json([]);
-
-  const { data: schedules } = await supabase
-    .from("project_schedules")
-    .select("project_id")
-    .in("project_id", projects.map((p: { id: string }) => p.id));
-  const scheduledProjectIds = new Set((schedules ?? []).map((row: { project_id: string }) => row.project_id));
-
-  return NextResponse.json(
-    projects.map((project: { id: string }) => ({
-      ...project,
-      has_schedule: scheduledProjectIds.has(project.id),
-    }))
-  );
+  return NextResponse.json(await withSchedules(supabase, Array.isArray(data) ? data : []));
 }
 
 export async function POST(req: NextRequest) {
@@ -92,7 +89,6 @@ export async function POST(req: NextRequest) {
     project_number, sector, value, status,
     start_date, actual_start_date, completion_date,
     projected_finish_date, warranty_start_date, warranty_end_date,
-    company_id: bodyCompanyId,
     memberIds,
   } = await req.json();
   if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -132,8 +128,52 @@ export async function POST(req: NextRequest) {
         invited_by: session.id,
       }))
     );
-    await Promise.all(
+    const contactIds = await Promise.all(
       memberIds.map((uid: string) => addUserToDirectory(supabase, project.id, uid))
+    );
+
+    // Auto-fill the Project leads tile from the members added at creation so
+    // the new project doesn't start with an empty team panel. Admins can
+    // re-assign roles afterwards from the project home page.
+    const leadContactIds = contactIds.filter((id): id is string => !!id);
+    if (leadContactIds.length > 0) {
+      await supabase
+        .from("projects")
+        .update({ project_roles: { "Project Manager": leadContactIds } })
+        .eq("id", project.id);
+    }
+
+    const [{ data: invitedUsers }, { data: companyData }] = await Promise.all([
+      supabase
+        .from("users")
+        .select("email, first_name, last_name, username")
+        .in("id", memberIds),
+      supabase
+        .from("companies")
+        .select("name")
+        .eq("id", companyId)
+        .single(),
+    ]);
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const acceptInviteUrl = `${appUrl}/login`;
+    const supportUrl = `${appUrl}/support`;
+    const companyName = companyData?.name || "Your company";
+
+    await Promise.allSettled(
+      (invitedUsers ?? [])
+        .filter((u: { email?: string | null }) => !!u.email)
+        .map((u: { email: string; first_name?: string | null; last_name?: string | null; username?: string | null }) => {
+          const recipientName = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username || "there";
+          return sendProjectMemberInviteEmail(
+            u.email,
+            recipientName,
+            companyName,
+            project.name,
+            acceptInviteUrl,
+            supportUrl,
+          );
+        })
     );
   }
 

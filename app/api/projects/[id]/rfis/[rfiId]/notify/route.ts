@@ -22,15 +22,25 @@ export async function POST(
       .eq("id", rfiId)
       .eq("project_id", projectId)
       .single(),
-    supabase.from("projects").select("name").eq("id", projectId).single(),
+    supabase.from("projects").select("name, company_id").eq("id", projectId).single(),
   ]);
 
   if (!rfiRes.data) return NextResponse.json({ error: "RFI not found" }, { status: 404 });
 
   const rfi = rfiRes.data;
   const projectName = projectRes.data?.name ?? "";
+  let companyName = "SiteCommand";
+  if (projectRes.data?.company_id) {
+    const { data: company } = await supabase
+      .from("companies")
+      .select("name")
+      .eq("id", projectRes.data.company_id)
+      .maybeSingle();
+    if (company?.name) companyName = company.name;
+  }
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
   const rfiUrl = `${appUrl}/projects/${projectId}/rfis/${rfiId}`;
+  const viewOnlineUrl = rfiUrl;
 
   const distribution: { name: string; email: string | null }[] = Array.isArray(rfi.distribution_list) ? rfi.distribution_list : [];
   const assignees: { name: string; email: string | null }[] = Array.isArray(rfi.assignees) ? rfi.assignees : [];
@@ -80,6 +90,8 @@ export async function POST(
         projectName,
         rfiUrl,
         r.role,
+        companyName,
+        viewOnlineUrl,
       )
     )
   );

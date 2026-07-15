@@ -6,6 +6,8 @@ import AppHeader from "@/app/components/AppHeader";
 
 type TabKey = "all_tickets" | "recycle_bin";
 
+type TMTicket = { id: string };
+
 function EmptyTicketIcon() {
   return (
     <svg width="118" height="118" viewBox="0 0 118 118" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -29,21 +31,29 @@ function EmptyTicketIcon() {
 
 export default function TMTicketsClient({ projectId, username }: { projectId: string; username: string }) {
   const [activeTab, setActiveTab] = useState<TabKey>("all_tickets");
+  const [tickets] = useState<TMTicket[]>([]);
+  const ticketCount = tickets.length;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
           <div>
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">T&amp;M Tickets</h1>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">
+              Time &amp; Material tickets
+            </h1>
+            <p className="sec-sub mt-1.5">
+              <span className="serif-italic text-[color:var(--brand-700)]">Field-logged labor, equipment and material</span>
+              <span className="sep">·</span>
+              <span className="num" style={{ color: "var(--brand-500)" }}>{ticketCount}</span> tickets
+              <span className="sep">·</span>
+              roll up into change events
+            </p>
           </div>
-          <a
-            href={`/projects/${projectId}/tm-tickets/new`}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
-          >
+          <a href={`/projects/${projectId}/tm-tickets/new`} className="btn-primary">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
@@ -51,30 +61,22 @@ export default function TMTicketsClient({ projectId, username }: { projectId: st
           </a>
         </div>
 
-        <div className="inline-flex rounded-md border hairline overflow-hidden mb-4 bg-white">
+        <div className="seg mb-4">
           <button
             onClick={() => setActiveTab("all_tickets")}
-            className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-              activeTab === "all_tickets"
-                ? "bg-[color:var(--ink)] text-white"
-                : "bg-white text-gray-700 hover:bg-gray-50"
-            }`}
+            className={activeTab === "all_tickets" ? "active" : ""}
           >
             All Tickets
           </button>
           <button
             onClick={() => setActiveTab("recycle_bin")}
-            className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-              activeTab === "recycle_bin"
-                ? "bg-[color:var(--ink)] text-white"
-                : "bg-white text-gray-700 hover:bg-gray-50"
-            }`}
+            className={activeTab === "recycle_bin" ? "active" : ""}
           >
             Recycle Bin
           </button>
         </div>
 
-        <div className="bg-white border hairline rounded-xl">
+        <div className="card">
           <div className="flex items-center justify-center min-h-[480px]">
             <div className="text-center px-6 py-10">
               <div className="mb-6 flex justify-center">
@@ -86,21 +88,21 @@ export default function TMTicketsClient({ projectId, username }: { projectId: st
                   : "Recycle Bin is empty"}
               </p>
               {activeTab === "all_tickets" && (
-                <div className="mt-6 mx-auto max-w-xl bg-white border hairline rounded-lg px-4 py-3 text-left text-sm text-gray-700">
-                  <p className="font-semibold text-gray-900">Bulk Actions workflow</p>
-                  <p className="mt-1">
-                    Select one or more T&amp;M tickets and use <span className="font-medium">Bulk Actions</span> &gt;{" "}
-                    <span className="font-medium">Create Change Event</span> to generate a new change event from the selected tickets.
+                <div className="mt-6 mx-auto max-w-xl border hairline rounded-lg bg-[color:var(--surface-sunken)] px-4 py-3 text-left text-sm text-gray-600">
+                  <p className="mono-label">Bulk Actions workflow</p>
+                  <p className="mt-2">
+                    Select one or more T&amp;M tickets and use <span className="font-semibold text-[color:var(--ink)]">Bulk Actions</span> &gt;{" "}
+                    <span className="font-semibold text-[color:var(--ink)]">Create Change Event</span> to generate a new change event from the selected tickets.
                   </p>
-                  <p className="mt-1">
-                    You can also use <span className="font-medium">Bulk Actions</span> &gt; <span className="font-medium">Add to an Existing Change Event</span> to append ticket details to an in-flight change event.
+                  <p className="mt-1.5">
+                    You can also use <span className="font-semibold text-[color:var(--ink)]">Bulk Actions</span> &gt; <span className="font-semibold text-[color:var(--ink)]">Add to an Existing Change Event</span> to append ticket details to an in-flight change event.
                   </p>
-                  <p className="mt-1">
+                  <p className="mt-1.5">
                     Include ticket links and attachments in the change event description so reviewers can trace supporting backup.
                   </p>
                   <a
                     href={`/projects/${projectId}/change-events/workflows`}
-                    className="mt-3 inline-flex items-center px-2.5 py-1 text-xs font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors"
+                    className="btn-secondary mt-3"
                   >
                     Open workflow guides
                   </a>

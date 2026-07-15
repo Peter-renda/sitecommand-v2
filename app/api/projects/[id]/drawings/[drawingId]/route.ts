@@ -9,11 +9,11 @@ export async function PATCH(
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { drawingId } = await params;
+  const { id: projectId, drawingId } = await params;
   const supabase = getSupabase();
 
   const body = await req.json();
-  const { drawing_no, title, revision, drawing_date, received_date, category } = body;
+  const { drawing_no, title, revision, drawing_date, received_date, category, report_fields } = body;
 
   const { data, error } = await supabase
     .from("project_drawings")
@@ -24,9 +24,11 @@ export async function PATCH(
       drawing_date: drawing_date || null,
       received_date: received_date || null,
       category: category ?? null,
+      ...(report_fields !== undefined ? { report_fields } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", drawingId)
+    .eq("project_id", projectId)
     .select()
     .single();
 
@@ -41,7 +43,7 @@ export async function DELETE(
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { drawingId } = await params;
+  const { id: projectId, drawingId } = await params;
   const supabase = getSupabase();
 
   // Get the drawing to find its upload_id and per-page storage path
@@ -49,6 +51,7 @@ export async function DELETE(
     .from("project_drawings")
     .select("upload_id, storage_path")
     .eq("id", drawingId)
+    .eq("project_id", projectId)
     .single();
 
   if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
@@ -59,7 +62,8 @@ export async function DELETE(
   const { error: deleteError } = await supabase
     .from("project_drawings")
     .delete()
-    .eq("id", drawingId);
+    .eq("id", drawingId)
+    .eq("project_id", projectId);
 
   if (deleteError) return NextResponse.json({ error: deleteError.message }, { status: 500 });
 

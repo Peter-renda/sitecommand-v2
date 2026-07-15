@@ -5,6 +5,8 @@ import React, { useState, useEffect, useRef, useCallback, ChangeEvent } from "re
 import { Hand } from "lucide-react";
 import ProjectNav from "@/components/ProjectNav";
 import { Brand, Pill } from "@/components/design-system/Primitives";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { DOCUMENT_REPORT_FIELDS } from "@/lib/report-fields";
 
 type DocItem = {
   id: string;
@@ -17,6 +19,7 @@ type DocItem = {
   created_by_name: string | null;
   parent_id: string | null;
   is_private: boolean;
+  report_fields?: ReportFieldValues | null;
 };
 
 type BreadcrumbItem = { id: string | null; name: string };
@@ -1638,6 +1641,9 @@ export default function DocumentsClient({
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [renameTarget, setRenameTarget] = useState<DocItem | null>(null);
+  const [propsTarget, setPropsTarget] = useState<DocItem | null>(null);
+  const [propsFields, setPropsFields] = useState<ReportFieldValues>({});
+  const [propsSaving, setPropsSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DocItem | null>(null);
   const [moveTarget, setMoveTarget] = useState<DocItem | null>(null);
   const [allFolders, setAllFolders] = useState<{ id: string; name: string; parent_id: string | null }[]>([]);
@@ -1926,6 +1932,28 @@ export default function DocumentsClient({
     }
   }
 
+  function openProps(item: DocItem) {
+    setPropsTarget(item);
+    setPropsFields(item.report_fields ?? {});
+  }
+
+  async function handleSaveProps() {
+    if (!propsTarget) return;
+    setPropsSaving(true);
+    const res = await fetch(`/api/projects/${projectId}/documents/${propsTarget.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ report_fields: propsFields }),
+    });
+    setPropsSaving(false);
+    if (res.ok) {
+      setItems((prev) =>
+        prev.map((it) => (it.id === propsTarget.id ? { ...it, report_fields: propsFields } : it))
+      );
+      setPropsTarget(null);
+    }
+  }
+
   async function handleMove(targetParentId: string | null) {
     if (!moveTarget) return;
     const movedWasFolder = moveTarget.type === "folder";
@@ -2053,11 +2081,13 @@ export default function DocumentsClient({
 
   const allSelected = items.length > 0 && selectedIds.size === items.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
+  const folderCount = items.filter((i) => i.type === "folder").length;
+  const fileCount = items.filter((i) => i.type === "file").length;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="hover:opacity-80 transition-opacity">
           <Brand />
         </a>
@@ -2088,23 +2118,33 @@ export default function DocumentsClient({
         style={infoPanelItem ? { marginRight: "320px" } : undefined}>
         <div className={`mx-auto ${infoPanelItem ? "max-w-4xl" : "max-w-5xl"}`}>
         {/* Page title + breadcrumb + add button */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
           <div>
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Documents</h1>
-            <div className="mt-1"><Pill className="pill-open">{items.length} items</Pill></div>
-            <nav className="flex items-center gap-1 mt-1">
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Documents</h1>
+            {!loading && (
+              <p className="sec-sub mt-1.5">
+                <span className="serif-italic text-[color:var(--brand-700)]">Project file room</span>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>{folderCount}</span> folder{folderCount === 1 ? "" : "s"}
+                <span className="sep">·</span>
+                <span className="num">{fileCount}</span> file{fileCount === 1 ? "" : "s"}
+                <span className="sep">·</span>
+                <span className="num">{items.length}</span> in view
+              </p>
+            )}
+            <nav className="crumbs mt-2">
               {breadcrumb.map((crumb, i) => (
-                <span key={i} className="flex items-center gap-1">
-                  {i > 0 && <span className="text-gray-300 text-xs">/</span>}
-                  <button
+                <React.Fragment key={i}>
+                  {i > 0 && <span className="sep">/</span>}
+                  <a
                     onClick={() => navigateToBreadcrumb(i)}
-                    className={`text-xs hover:text-gray-900 transition-colors ${
-                      i === breadcrumb.length - 1 ? "text-gray-700 font-medium" : "text-gray-400"
+                    className={`cursor-pointer ${
+                      i === breadcrumb.length - 1 ? "text-[color:var(--ink)] font-medium" : ""
                     }`}
                   >
                     {crumb.name}
-                  </button>
-                </span>
+                  </a>
+                </React.Fragment>
               ))}
             </nav>
           </div>
@@ -2112,7 +2152,7 @@ export default function DocumentsClient({
           <div ref={addMenuRef} className="relative">
             <button
               onClick={() => setShowAddMenu((o) => !o)}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"
+              className="btn-primary flex items-center gap-2"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -2158,8 +2198,8 @@ export default function DocumentsClient({
 
         {/* Uploading indicator */}
         {uploading && (
-          <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl text-sm text-blue-700 flex items-center gap-2">
-            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <div className="mb-4 px-4 py-3 bg-white border border-black/[0.08] rounded-xl text-sm text-[color:var(--ink)] flex items-center gap-2">
+            <svg className="w-4 h-4 animate-spin text-[color:var(--brand-500)]" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
@@ -2183,21 +2223,26 @@ export default function DocumentsClient({
         )}
 
         {/* File list */}
+        {!loading && items.length > 0 && (
+          <h2 className="h3-warm mb-3">
+            {breadcrumb[breadcrumb.length - 1]?.name ?? "Documents"}
+          </h2>
+        )}
         {loading ? (
           <p className="text-sm text-gray-400">Loading…</p>
         ) : items.length === 0 ? (
-          <div className="bg-white border border-dashed border-gray-200 rounded-xl py-16 text-center">
-            <svg className="w-10 h-10 text-gray-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <div className="bg-white border border-dashed border-black/[0.12] rounded-xl py-16 text-center">
+            <svg className="w-10 h-10 text-black/10 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
             </svg>
-            <p className="text-sm text-gray-400">No files or folders yet</p>
-            <p className="text-xs text-gray-300 mt-1">Use the Add button to upload files or create a folder</p>
+            <p className="font-display text-lg text-[color:var(--ink)]">No files or folders yet</p>
+            <p className="text-xs text-gray-400 mt-1">Use the Add button to upload files or create a folder</p>
           </div>
         ) : (
-          <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+          <div className="bg-white border border-black/[0.08] rounded-xl overflow-hidden">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
+                <tr className="border-b border-black/[0.08] bg-[color:var(--surface-sunken)]">
                   {/* Checkbox column */}
                   <th className="w-10 px-4 py-3">
                     <input
@@ -2208,10 +2253,10 @@ export default function DocumentsClient({
                       className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
                     />
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="text-left px-4 py-3 mono-label">
                     Name
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  <th className="text-left px-4 py-3 mono-label whitespace-nowrap">
                     Created On / Latest Version
                   </th>
                   <th className="px-4 py-3 w-28"></th>
@@ -2221,8 +2266,8 @@ export default function DocumentsClient({
                 {items.map((item) => (
                   <tr
                     key={item.id}
-                    className={`border-b border-gray-50 last:border-b-0 transition-colors ${
-                      selectedIds.has(item.id) ? "bg-blue-50" : "hover:bg-gray-50"
+                    className={`border-b border-black/[0.05] last:border-b-0 transition-colors ${
+                      selectedIds.has(item.id) ? "bg-[color:var(--surface-sunken)]" : "hover:bg-[color:var(--surface-sunken)]"
                     }`}
                   >
                     {/* Checkbox */}
@@ -2241,20 +2286,15 @@ export default function DocumentsClient({
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => handleItemClick(item)}
-                          className="flex items-center gap-2.5 text-sm text-gray-900 hover:text-blue-600 transition-colors text-left min-w-0"
+                          className="flex items-center gap-2.5 text-sm text-[color:var(--ink)] hover:text-[color:var(--brand-700)] transition-colors text-left min-w-0"
                         >
                           {getFileIcon(item)}
-                          <span className="truncate">{item.name}</span>
+                          <span className={`truncate ${item.type === "folder" ? "font-medium" : ""}`}>{item.name}</span>
                         </button>
                         {item.type === "folder" && (
                           <>
                             {item.is_private && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500 shrink-0">
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                                </svg>
-                                Private
-                              </span>
+                              <span className="pill pill-warn shrink-0">Private</span>
                             )}
                           </>
                         )}
@@ -2262,7 +2302,7 @@ export default function DocumentsClient({
                     </td>
 
                     {/* Created On */}
-                    <td className="px-4 py-3 text-xs text-gray-500">
+                    <td className="px-4 py-3 text-xs text-gray-500 font-mono tabular-nums">
                       {formatDate(item.created_at, item.created_by_name)}
                     </td>
 
@@ -2355,6 +2395,25 @@ export default function DocumentsClient({
           onCancel={() => setRenameTarget(null)}
         />
       )}
+      {propsTarget && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[9999] px-4" onMouseDown={() => setPropsTarget(null)}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-5" onMouseDown={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-semibold text-gray-900 mb-1">Properties — {propsTarget.name}</h2>
+            <ReportFieldsSection
+              title="Report Fields"
+              description="Extra document attributes surfaced as columns in 360 Reports."
+              fields={DOCUMENT_REPORT_FIELDS}
+              values={propsFields}
+              onChange={(key, value) => setPropsFields((prev) => ({ ...prev, [key]: value }))}
+              columns={2}
+            />
+            <div className="flex items-center justify-end gap-3 mt-4">
+              <button type="button" onClick={() => setPropsTarget(null)} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={handleSaveProps} disabled={propsSaving} className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-700 disabled:opacity-50">{propsSaving ? "Saving..." : "Save"}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {deleteTarget && (
         <ConfirmModal
           title="Delete"
@@ -2387,6 +2446,12 @@ export default function DocumentsClient({
               className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Rename
+            </button>
+            <button
+              onMouseDown={() => { openProps(item); setOpenMenuId(null); setMenuPos(null); }}
+              className="w-full text-left px-4 py-2 text-sm text-violet-700 hover:bg-violet-50 transition-colors"
+            >
+              Properties
             </button>
             <button
               onMouseDown={() => openMoveModal(item)}

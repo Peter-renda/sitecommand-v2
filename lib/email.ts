@@ -1,17 +1,178 @@
 import { Resend } from 'resend';
 
-export async function sendInviteEmail(to: string, inviteUrl: string, companyName: string) {
+const FROM_ADDRESS = process.env.RESEND_FROM_ADDRESS || 'SiteCommand <invites@sitecommand.xyz>';
+
+type SendArgs = {
+  to: string | string[];
+  cc?: string[];
+  subject: string;
+  html: string;
+};
+
+async function sendEmail(label: string, args: SendArgs, opts: { throwOnError?: boolean } = {}): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) throw new Error("RESEND_API_KEY is not set in environment variables");
+  if (!apiKey) {
+    const msg = `[email:${label}] RESEND_API_KEY is not set — email skipped`;
+    if (opts.throwOnError) throw new Error(msg);
+    console.warn(msg);
+    return;
+  }
+
+  const recipients = Array.isArray(args.to) ? args.to : [args.to];
+  const empty = recipients.filter((r) => !r || !r.includes("@"));
+  if (recipients.length === 0 || empty.length === recipients.length) {
+    console.warn(`[email:${label}] no valid recipients — skipped`, { to: args.to });
+    return;
+  }
 
   const resend = new Resend(apiKey);
-  const { error } = await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
-    to,
-    subject: `You've been invited to join ${companyName} on SiteCommand`,
-    html: `<p>You've been invited to join <strong>${companyName}</strong> on SiteCommand.</p><p><a href="${inviteUrl}">Accept invitation</a></p><p>This link expires in 7 days.</p>`,
-  });
-  if (error) throw new Error(error.message);
+  try {
+    const { data, error } = await resend.emails.send({
+      from: FROM_ADDRESS,
+      to: args.to,
+      cc: args.cc && args.cc.length > 0 ? args.cc : undefined,
+      subject: args.subject,
+      html: args.html,
+    });
+    if (error) {
+      console.error(`[email:${label}] Resend error`, {
+        to: args.to,
+        cc: args.cc,
+        subject: args.subject,
+        from: FROM_ADDRESS,
+        error,
+      });
+      if (opts.throwOnError) throw new Error(error.message || `Resend error sending ${label}`);
+      return;
+    }
+    console.log(`[email:${label}] sent`, { id: data?.id, to: args.to });
+  } catch (err) {
+    console.error(`[email:${label}] threw`, {
+      to: args.to,
+      subject: args.subject,
+      from: FROM_ADDRESS,
+      err: err instanceof Error ? err.message : err,
+    });
+    if (opts.throwOnError) throw err;
+  }
+}
+
+// Shared invitation layout matching the Documents-tool notification style:
+// dark header bar with the company name, a gray "More details: View online"
+// strip, an orange heading, and a bordered table of the invite's fields.
+function buildInviteEmailHtml({
+  companyName,
+  inviteUrl,
+  heading,
+  columns,
+  values,
+  footerNote,
+}: {
+  companyName: string;
+  inviteUrl: string;
+  heading: string;
+  columns: string[];
+  values: string[]; // already-escaped HTML cells, aligned with columns
+  footerNote: string;
+}) {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return `
+      <div style="font-family:Helvetica,Arial,sans-serif;max-width:720px;margin:0 auto;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+          <tr>
+            <td style="background:#3b3b3b;color:#fff;padding:18px 24px;font-size:22px;font-weight:600;">
+              ${escape(companyName)}
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#d8d8d8;margin-bottom:16px;">
+          <tr>
+            <td style="padding:8px 16px;font-size:13px;color:#333;">
+              More details: <a href="${escape(inviteUrl)}" style="color:#1d6fa5;text-decoration:underline;">View online</a>
+            </td>
+          </tr>
+        </table>
+        <h2 style="color:#d76027;font-weight:400;font-size:22px;line-height:1.3;margin:0 0 16px;">
+          ${escape(heading)}
+        </h2>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#eee;color:#333;">
+              ${columns.map((c) => `<th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">${escape(c)}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              ${values.map((v) => `<td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${v}</td>`).join("")}
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin:20px 0 0;">
+          <a href="${escape(inviteUrl)}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Accept Invitation</a>
+        </p>
+        <p style="color:#888;font-size:11px;margin-top:18px;">${escape(footerNote)}</p>
+      </div>
+    `;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+export async function sendInviteEmail(to: string, inviteUrl: string, companyName: string) {
+  await sendEmail(
+    "invite",
+    {
+      to,
+      subject: `You've been invited to join ${companyName} on SiteCommand`,
+      html: buildInviteEmailHtml({
+        companyName,
+        inviteUrl,
+        heading: `You have been invited to join ${companyName} on SiteCommand.`,
+        columns: ["Company", "Invitation", "Expires"],
+        values: [
+          escapeHtml(companyName),
+          `<a href="${escapeHtml(inviteUrl)}" style="color:#1d6fa5;text-decoration:underline;">Accept invitation</a>`,
+          "In 7 days",
+        ],
+        footerNote: "You are receiving this because you were invited to join this company on SiteCommand.",
+      }),
+    },
+    { throwOnError: true },
+  );
+}
+
+export async function sendProjectMemberInviteEmail(
+  to: string,
+  recipientName: string,
+  companyName: string,
+  projectName: string,
+  acceptInviteUrl: string,
+  supportUrl: string,
+) {
+  await sendEmail(
+    "project-member-invite",
+    {
+      to,
+      subject: `${companyName} invited you to collaborate on ${projectName} in SiteCommand`,
+      html:
+        buildInviteEmailHtml({
+          companyName,
+          inviteUrl: acceptInviteUrl,
+          heading: `${companyName} has invited you to collaborate on ${projectName}.`,
+          columns: ["Project", "Invited By", "Recipient", "Expires"],
+          values: [
+            escapeHtml(projectName),
+            escapeHtml(companyName),
+            escapeHtml(recipientName || to),
+            "In 7 days",
+          ],
+          footerNote: `SiteCommand is ${companyName}'s online project management system.`,
+        }) +
+        `<p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;max-width:720px;margin:8px auto 0;">Need help? <a href="${escapeHtml(supportUrl)}">Visit SiteCommand Support</a></p>`,
+    },
+  );
 }
 
 export async function sendTaskCreatedEmail(
@@ -23,18 +184,15 @@ export async function sendTaskCreatedEmail(
   description: string | null,
   dueDate: string | null,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) throw new Error("RESEND_API_KEY is not set in environment variables");
-
-  const resend = new Resend(apiKey);
   const dueLine = dueDate ? `<p style="color:#555;font-size:13px;"><strong>Due:</strong> ${new Date(dueDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>` : "";
   const descLine = description ? `<p style="color:#555;font-size:13px;">${description}</p>` : "";
 
-  const { error } = await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
-    to,
-    subject: `New Task #${taskNumber}: ${taskTitle} — ${projectName}`,
-    html: `
+  await sendEmail(
+    "task-created",
+    {
+      to,
+      subject: `New Task #${taskNumber}: ${taskTitle} — ${projectName}`,
+      html: `
       <p style="font-size:14px;">A new task has been created on <strong>${projectName}</strong>.</p>
       <p style="font-size:16px;font-weight:600;">Task #${taskNumber}: ${taskTitle}</p>
       ${descLine}
@@ -42,8 +200,9 @@ export async function sendTaskCreatedEmail(
       <p><a href="${taskUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View Task</a></p>
       <p style="color:#aaa;font-size:11px;">You are receiving this because you are on the task distribution list.</p>
     `,
-  });
-  if (error) throw new Error(error.message);
+    },
+    { throwOnError: true },
+  );
 }
 
 export async function sendTaskEmail(
@@ -56,19 +215,16 @@ export async function sendTaskEmail(
   dueDate: string | null,
   assignees: string[],
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) throw new Error("RESEND_API_KEY is not set in environment variables");
-
-  const resend = new Resend(apiKey);
   const dueLine = dueDate ? `<p style="color:#555;font-size:13px;"><strong>Due:</strong> ${new Date(dueDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>` : "";
   const descLine = description ? `<p style="color:#555;font-size:13px;">${description}</p>` : "";
   const assigneeLine = assignees.length > 0 ? `<p style="color:#555;font-size:13px;"><strong>Assigned to:</strong> ${assignees.join(", ")}</p>` : "";
 
-  const { error } = await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
-    to,
-    subject: `Task #${taskNumber}: ${taskTitle} — ${projectName}`,
-    html: `
+  await sendEmail(
+    "task",
+    {
+      to,
+      subject: `Task #${taskNumber}: ${taskTitle} — ${projectName}`,
+      html: `
       <p style="font-size:14px;">You have been notified about a task on <strong>${projectName}</strong>.</p>
       <p style="font-size:16px;font-weight:600;">Task #${taskNumber}: ${taskTitle}</p>
       ${assigneeLine}
@@ -77,8 +233,9 @@ export async function sendTaskEmail(
       <p><a href="${taskUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View Task</a></p>
       <p style="color:#aaa;font-size:11px;">You are receiving this because you are assigned to or on the distribution list for this task.</p>
     `,
-  });
-  if (error) throw new Error(error.message);
+    },
+    { throwOnError: true },
+  );
 }
 
 export async function sendWebhookEventEmail(
@@ -87,17 +244,12 @@ export async function sendWebhookEventEmail(
   payload: Record<string, unknown>,
   webhookName: string
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return; // silent — email is optional for webhook notifications
-
-  const resend = new Resend(apiKey);
   const rows = Object.entries(payload)
     .filter(([, v]) => v !== null && v !== undefined)
     .map(([k, v]) => `<tr><td style="padding:4px 8px;color:#555;font-size:12px;">${k}</td><td style="padding:4px 8px;font-size:12px;font-family:monospace;">${String(v)}</td></tr>`)
     .join("");
 
-  await resend.emails.send({
-    from: "SiteCommand <invites@sitecommand.xyz>",
+  await sendEmail("webhook-event", {
     to,
     subject: `[SiteCommand] ${event}`,
     html: `
@@ -111,6 +263,89 @@ export async function sendWebhookEventEmail(
   });
 }
 
+async function sendRFITrackingEmail({
+  to,
+  companyName,
+  projectName,
+  rfiNumber,
+  rfiSubject,
+  rfiUrl,
+  comment,
+  event,
+  eventTime,
+  viewOnlineUrl,
+  recipientRoleNote,
+  label,
+  emailSubject,
+}: {
+  to: string;
+  companyName: string;
+  projectName: string;
+  rfiNumber: number;
+  rfiSubject: string | null;
+  rfiUrl: string;
+  comment: string | null;
+  event: string;
+  eventTime: Date;
+  viewOnlineUrl: string;
+  recipientRoleNote: string;
+  label: string;
+  emailSubject: string;
+}) {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const dateStr = `${eventTime.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "2-digit" })} at ${eventTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase()}`;
+  const rfiName = `RFI #${rfiNumber}: ${rfiSubject || "No subject"}`;
+  const rfiCell = `<a href="${escape(rfiUrl)}" style="color:#1d6fa5;text-decoration:underline;">${escape(rfiName)}</a>`;
+
+  await sendEmail(label, {
+    to,
+    subject: emailSubject,
+    html: `
+      <div style="font-family:Helvetica,Arial,sans-serif;max-width:720px;margin:0 auto;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+          <tr>
+            <td style="background:#3b3b3b;color:#fff;padding:18px 24px;font-size:22px;font-weight:600;">
+              ${escape(companyName)}
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#d8d8d8;margin-bottom:16px;">
+          <tr>
+            <td style="padding:8px 16px;font-size:13px;color:#333;">
+              More details: <a href="${escape(viewOnlineUrl)}" style="color:#1d6fa5;text-decoration:underline;">View online</a>
+            </td>
+          </tr>
+        </table>
+        <h2 style="color:#d76027;font-weight:400;font-size:22px;line-height:1.3;margin:0 0 16px;">
+          The following 1 item has changed within the RFIs Tool.
+        </h2>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#eee;color:#333;">
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;"></th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">RFI</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Current Version Comments</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Events</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(projectName)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${rfiCell}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${comment ? escape(comment) : ""}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(event)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${dateStr}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="color:#888;font-size:11px;margin-top:18px;">${escape(recipientRoleNote)}</p>
+      </div>
+    `,
+  });
+}
+
 export async function sendRFIBallInCourtEmail(
   to: string,
   recipientName: string,
@@ -119,24 +354,24 @@ export async function sendRFIBallInCourtEmail(
   rfiSubject: string | null,
   projectName: string,
   rfiUrl: string,
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return; // silent if not configured
-
-  const resend = new Resend(apiKey);
-  const subject = rfiSubject || "No subject";
-  await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
+  void recipientName;
+  await sendRFITrackingEmail({
     to,
-    subject: `The ball is in your court for RFI #${rfiNumber}: ${subject} — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;">The ball is in your court on <strong>RFI #${rfiNumber}: ${subject}</strong> for <strong>${projectName}</strong>.</p>
-      <p style="font-size:13px;color:#555;"><strong>${senderName}</strong> assigned this RFI to you.</p>
-      <p style="font-size:13px;color:#555;">This RFI requires your attention.</p>
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you are assigned to this RFI on SiteCommand.</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment: `${senderName} placed the ball in your court.`,
+    event: "Ball in court",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: "You are receiving this because the ball is in your court for this RFI on SiteCommand.",
+    label: "rfi-ball-in-court",
+    emailSubject: `The ball is in your court for RFI #${rfiNumber}: ${rfiSubject} — ${projectName}`,
   });
 }
 
@@ -151,18 +386,15 @@ export async function sendRFICreatedEmail(
   projectName: string,
   rfiUrl: string,
   role: "manager" | "assignee" | "distribution",
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return; // silent if not configured
-
-  const resend = new Resend(apiKey);
+  void recipientName;
   const subject = rfiSubject || "No subject";
-  const questionLine = rfiQuestion
-    ? `<blockquote style="border-left:3px solid #e5e7eb;margin:12px 0;padding:8px 16px;color:#555;font-size:13px;white-space:pre-wrap;">${rfiQuestion}</blockquote>`
-    : "";
   const dueLine = dueDate
-    ? `<p style="font-size:13px;color:#555;"><strong>Due:</strong> ${new Date(dueDate + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>`
+    ? `Due ${new Date(dueDate + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}. `
     : "";
+  const comment = `${dueLine}${senderName} opened this RFI.${rfiQuestion ? ` Question: ${rfiQuestion}` : ""}`;
   const roleNote =
     role === "manager"
       ? "You are receiving this because you are the RFI manager on SiteCommand."
@@ -170,19 +402,20 @@ export async function sendRFICreatedEmail(
         ? "You are receiving this because you are assigned to this RFI on SiteCommand."
         : "You are receiving this because you are on the distribution list for this RFI on SiteCommand.";
 
-  await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
+  await sendRFITrackingEmail({
     to,
-    subject: `RFI #${rfiNumber} opened: ${subject} — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;"><strong>${senderName}</strong> opened <strong>RFI #${rfiNumber}: ${subject}</strong> on <strong>${projectName}</strong>.</p>
-      ${questionLine}
-      ${dueLine}
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#888;font-size:11px;">You'll need a SiteCommand account with access to this project to open the RFI.</p>
-      <p style="color:#aaa;font-size:11px;">${roleNote}</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment,
+    event: "RFI opened",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: roleNote,
+    label: "rfi-created",
+    emailSubject: `RFI #${rfiNumber} opened: ${subject} — ${projectName}`,
   });
 }
 
@@ -194,22 +427,24 @@ export async function sendRFIClosedEmail(
   rfiSubject: string | null,
   projectName: string,
   rfiUrl: string,
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return; // silent if not configured
-
-  const resend = new Resend(apiKey);
-  const subject = rfiSubject || "No subject";
-  await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
+  void recipientName;
+  await sendRFITrackingEmail({
     to,
-    subject: `RFI #${rfiNumber} has been closed — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;"><strong>${closedByName}</strong> has closed <strong>RFI #${rfiNumber}: ${subject}</strong> on <strong>${projectName}</strong>.</p>
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you are on the distribution list, assigned to, or otherwise associated with this RFI on SiteCommand.</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment: `${closedByName} closed this RFI.`,
+    event: "RFI closed",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: "You are receiving this because you are on the distribution list, assigned to, or otherwise associated with this RFI on SiteCommand.",
+    label: "rfi-closed",
+    emailSubject: `RFI #${rfiNumber} has been closed — ${projectName}`,
   });
 }
 
@@ -221,22 +456,24 @@ export async function sendRFIReopenedEmail(
   rfiSubject: string | null,
   projectName: string,
   rfiUrl: string,
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return; // silent if not configured
-
-  const resend = new Resend(apiKey);
-  const subject = rfiSubject || "No subject";
-  await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
+  void recipientName;
+  await sendRFITrackingEmail({
     to,
-    subject: `RFI #${rfiNumber} has been reopened — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;"><strong>${reopenedByName}</strong> has reopened <strong>RFI #${rfiNumber}: ${subject}</strong> on <strong>${projectName}</strong>.</p>
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you are on the distribution list for this RFI on SiteCommand.</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment: `${reopenedByName} reopened this RFI.`,
+    event: "RFI reopened",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: "You are receiving this because you are on the distribution list for this RFI on SiteCommand.",
+    label: "rfi-reopened",
+    emailSubject: `RFI #${rfiNumber} has been reopened — ${projectName}`,
   });
 }
 
@@ -248,12 +485,7 @@ export async function sendSubmittalCreatedEmail(
   projectName: string,
   submittalUrl: string,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return;
-
-  const resend = new Resend(apiKey);
-  await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
+  await sendEmail("submittal-created", {
     to,
     subject: `Submittal #${submittalNumber}: ${submittalTitle} — ${projectName}`,
     html: `
@@ -275,10 +507,6 @@ export async function sendChangeEventRFQEmail(
   requestDetails: string | null,
   portalUrl: string,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return;
-
-  const resend = new Resend(apiKey);
   const dueLine = dueDate
     ? `<p style="font-size:13px;color:#555;"><strong>Due Date:</strong> ${new Date(dueDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>`
     : "";
@@ -286,8 +514,7 @@ export async function sendChangeEventRFQEmail(
     ? `<p style="font-size:13px;color:#555;white-space:pre-wrap;">${requestDetails}</p>`
     : "";
 
-  await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
+  await sendEmail("change-event-rfq", {
     to,
     subject: `New RFQ: ${rfqTitle} — ${projectName}`,
     html: `
@@ -311,23 +538,24 @@ export async function sendRFIResponseEmail(
   projectName: string,
   rfiUrl: string,
   responseBody: string,
+  companyName: string,
+  viewOnlineUrl: string,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return;
-
-  const resend = new Resend(apiKey);
-  const subject = rfiSubject || "No subject";
-  await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
+  void recipientName;
+  await sendRFITrackingEmail({
     to,
-    subject: `New response on RFI #${rfiNumber}: ${subject} — ${projectName}`,
-    html: `
-      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
-      <p style="font-size:14px;"><strong>${responderName}</strong> has added a response to <strong>RFI #${rfiNumber}: ${subject}</strong> on <strong>${projectName}</strong>.</p>
-      <blockquote style="border-left:3px solid #e5e7eb;margin:12px 0;padding:8px 16px;color:#555;font-size:13px;">${responseBody}</blockquote>
-      <p><a href="${rfiUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">View RFI</a></p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you are the RFI manager, assignee, or on the distribution list for this RFI on SiteCommand.</p>
-    `,
+    companyName,
+    projectName,
+    rfiNumber,
+    rfiSubject,
+    rfiUrl,
+    comment: `${responderName}: ${responseBody}`,
+    event: "Response added",
+    eventTime: new Date(),
+    viewOnlineUrl,
+    recipientRoleNote: "You are receiving this because you are the RFI manager, assignee, or on the distribution list for this RFI on SiteCommand.",
+    label: "rfi-response",
+    emailSubject: `New response on RFI #${rfiNumber}: ${rfiSubject} — ${projectName}`,
   });
 }
 
@@ -336,47 +564,107 @@ export async function sendContractorInviteEmail(
   inviteUrl: string,
   projectName: string,
   contactName: string,
+  companyName?: string,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) throw new Error("RESEND_API_KEY is not set in environment variables");
-
-  const resend = new Resend(apiKey);
-  const { error } = await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
-    to,
-    subject: `You've been invited to access ${projectName} on SiteCommand`,
-    html: `
-      <p>Hi${contactName ? ` ${contactName}` : ""},</p>
-      <p>You've been invited to access <strong>${projectName}</strong> on SiteCommand.</p>
-      <p><a href="${inviteUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Accept Invitation</a></p>
-      <p style="color:#888;font-size:12px;">This link expires in 7 days.</p>
-    `,
-  });
-  if (error) throw new Error(error.message);
+  await sendEmail(
+    "contractor-invite",
+    {
+      to,
+      subject: `You've been invited to access ${projectName} on SiteCommand`,
+      html: buildInviteEmailHtml({
+        companyName: companyName || projectName,
+        inviteUrl,
+        heading: `You have been invited to access ${projectName} on SiteCommand.`,
+        columns: ["Project", "Recipient", "Invited As", "Expires"],
+        values: [
+          escapeHtml(projectName),
+          escapeHtml(contactName || to),
+          "External Collaborator",
+          "In 7 days",
+        ],
+        footerNote: "You are receiving this because you were invited to collaborate on this project on SiteCommand.",
+      }),
+    },
+    { throwOnError: true },
+  );
 }
 
-export async function sendDocumentTrackingEmail(
-  to: string,
-  documentName: string,
-  action: string,
-  details: string,
-  changedByName: string,
-) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return; // silent — email is optional for tracking notifications
+export async function sendDocumentTrackingEmail({
+  to,
+  companyName,
+  projectName,
+  filePath,
+  fileName,
+  fileUrl,
+  event,
+  eventTime,
+  comment,
+  viewOnlineUrl,
+}: {
+  to: string;
+  companyName: string;
+  projectName: string;
+  filePath: string;
+  fileName: string;
+  fileUrl: string | null;
+  event: string;
+  eventTime: Date;
+  comment?: string | null;
+  viewOnlineUrl: string;
+}) {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const dateStr = `${eventTime.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "2-digit" })} at ${eventTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase()}`;
+  const fileCell = fileUrl
+    ? `<a href="${escape(fileUrl)}" style="color:#1d6fa5;text-decoration:underline;">${escape(fileName)}</a>`
+    : escape(fileName);
 
-  const resend = new Resend(apiKey);
-  await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
+  await sendEmail("document-tracking", {
     to,
-    subject: `Document Update: ${action} — ${documentName}`,
+    subject: `${event}: ${fileName} — ${projectName}`,
     html: `
-      <p style="font-size:14px;">A document you are tracking has been updated on SiteCommand.</p>
-      <p style="font-size:16px;font-weight:600;">${documentName}</p>
-      <p style="font-size:13px;color:#555;"><strong>Action:</strong> ${action}</p>
-      <p style="font-size:13px;color:#555;">${details}</p>
-      <p style="font-size:13px;color:#555;"><strong>By:</strong> ${changedByName}</p>
-      <p style="color:#aaa;font-size:11px;">You are receiving this because you enabled tracking on this document or folder.</p>
+      <div style="font-family:Helvetica,Arial,sans-serif;max-width:720px;margin:0 auto;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+          <tr>
+            <td style="background:#3b3b3b;color:#fff;padding:18px 24px;font-size:22px;font-weight:600;">
+              ${escape(companyName)}
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#d8d8d8;margin-bottom:16px;">
+          <tr>
+            <td style="padding:8px 16px;font-size:13px;color:#333;">
+              More details: <a href="${escape(viewOnlineUrl)}" style="color:#1d6fa5;text-decoration:underline;">View online</a>
+            </td>
+          </tr>
+        </table>
+        <h2 style="color:#d76027;font-weight:400;font-size:22px;line-height:1.3;margin:0 0 16px;">
+          The following 1 item has changed within the Documents Tool.
+        </h2>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#eee;color:#333;">
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;"></th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">File Path</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">File</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Current Version Comments</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Events</th>
+              <th style="padding:10px;border:1px solid #ccc;text-align:left;font-weight:600;">Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(projectName)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(filePath)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${fileCell}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${comment ? escape(comment) : ""}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${escape(event)}</td>
+              <td style="padding:10px;border:1px solid #ccc;vertical-align:top;">${dateStr}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="color:#888;font-size:11px;margin-top:18px;">You are receiving this because you enabled email notifications on this document or folder.</p>
+      </div>
     `,
   });
 }
@@ -391,15 +679,10 @@ export async function sendSsovNotificationEmail(
   projectName: string,
   ssovUrl: string,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return; // silent if not configured
-
-  const resend = new Resend(apiKey);
   const amountLine = committedAmount
     ? `<p style="font-size:13px;color:#555;"><strong>Committed Amount:</strong> $${committedAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>`
     : "";
-  await resend.emails.send({
-    from: 'SiteCommand <invites@sitecommand.xyz>',
+  await sendEmail("ssov-notify", {
     to,
     subject: `Action required: Subcontractor SOV for #${commitmentNumber} ${commitmentTitle} — ${projectName}`,
     html: `
@@ -436,22 +719,19 @@ export async function sendCommitmentEmail({
   commitmentUrl: string;
   isPrivate: boolean;
 }) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return;
-
-  const resend = new Resend(apiKey);
   const typeLabel = commitmentType === "purchase_order" ? "Purchase Order" : "Subcontract";
   const msgLine = message ? `<p style="color:#555;font-size:13px;">${message}</p>` : "";
   const privacyNote = isPrivate
     ? `<p style="color:#888;font-size:11px;">This contract is marked private and is only visible to admins and selected recipients.</p>`
     : "";
 
-  const { error } = await resend.emails.send({
-    from: "SiteCommand <invites@sitecommand.xyz>",
-    to,
-    cc: cc.length > 0 ? cc : undefined,
-    subject,
-    html: `
+  await sendEmail(
+    "commitment",
+    {
+      to,
+      cc,
+      subject,
+      html: `
       <p style="font-size:14px;">You have received a ${typeLabel} from <strong>${projectName}</strong>.</p>
       <p style="font-size:16px;font-weight:600;">${typeLabel} #${commitmentNumber}: ${commitmentTitle || "Untitled"}</p>
       ${msgLine}
@@ -462,8 +742,84 @@ export async function sendCommitmentEmail({
       ${privacyNote}
       <p style="color:#aaa;font-size:11px;">Recipients need appropriate project access to view this contract online. Sent via SiteCommand.</p>
     `,
+    },
+    { throwOnError: true },
+  );
+}
+
+export async function sendInvoiceAssignmentEmail({
+  to,
+  projectName,
+  invoiceFilename,
+  notes,
+  projectUrl,
+  assignedBy,
+}: {
+  to: string[];
+  projectName: string;
+  invoiceFilename: string;
+  notes: string;
+  projectUrl: string;
+  assignedBy: string;
+}) {
+  if (to.length === 0) return;
+
+  const notesBlock = notes
+    ? `<p style="color:#555;font-size:13px;white-space:pre-wrap;">${notes}</p>`
+    : "";
+
+  await sendEmail(
+    "invoice-assignment",
+    {
+      to,
+      subject: `Invoice assigned: ${invoiceFilename}`,
+      html: `
+      <p style="font-size:14px;">${assignedBy} assigned an invoice to <strong>${projectName}</strong> for you to process into a Transaction Order.</p>
+      <p style="font-size:14px;"><strong>${invoiceFilename}</strong></p>
+      ${notesBlock}
+      <p>
+        <a href="${projectUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Open in SiteCommand</a>
+      </p>
+      <p style="color:#aaa;font-size:11px;">This will also appear under "My open items" on your SiteCommand dashboard. Sent via SiteCommand.</p>
+    `,
+    },
+    { throwOnError: true },
+  );
+}
+
+export async function sendGuideAssignmentEmail({
+  to,
+  recipientName,
+  guideTitle,
+  assignedBy,
+  dueDate,
+  guidesUrl,
+}: {
+  to: string;
+  recipientName?: string;
+  guideTitle: string;
+  assignedBy: string;
+  dueDate: string | null;
+  guidesUrl: string;
+}) {
+  const dueLine = dueDate
+    ? `<p style="font-size:13px;color:#555;"><strong>Due by:</strong> ${new Date(`${dueDate}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>`
+    : "";
+
+  await sendEmail("guide-assignment", {
+    to,
+    subject: `Guide assigned: ${guideTitle}`,
+    html: `
+      <p style="font-size:14px;">Hi${recipientName ? ` ${recipientName}` : ""},</p>
+      <p style="font-size:14px;">${assignedBy} assigned you a company guide to review.</p>
+      <p style="font-size:16px;font-weight:600;">${guideTitle}</p>
+      ${dueLine}
+      <p>
+        <a href="${guidesUrl}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Open in SiteCommand</a>
+      </p>
+      <p style="color:#aaa;font-size:11px;">This will also appear in the items that need your attention on your SiteCommand dashboard. Sent via SiteCommand.</p>
+    `,
   });
-  if (error) throw new Error(error.message);
 }
 
 export async function sendTransmittalCreatedEmail({
@@ -487,10 +843,6 @@ export async function sendTransmittalCreatedEmail({
   dueBy?: string | null;
   sentDate?: string | null;
 }) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return; // silent if not configured
-
-  const resend = new Resend(apiKey);
   const subjectLine = transmittalSubject || "No subject";
   const dueLine = dueBy
     ? `<p style="font-size:13px;color:#555;"><strong>Due by:</strong> ${new Date(`${dueBy}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>`
@@ -500,8 +852,7 @@ export async function sendTransmittalCreatedEmail({
     : "";
   const viaLine = sentVia ? `<p style="font-size:13px;color:#555;"><strong>Sent via:</strong> ${sentVia}</p>` : "";
 
-  await resend.emails.send({
-    from: "SiteCommand <invites@sitecommand.xyz>",
+  await sendEmail("transmittal-created", {
     to,
     subject: `Transmittal #${transmittalNumber}: ${subjectLine} — ${projectName}`,
     html: `

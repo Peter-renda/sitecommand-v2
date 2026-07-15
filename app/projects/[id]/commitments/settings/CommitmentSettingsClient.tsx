@@ -134,15 +134,15 @@ export default function CommitmentSettingsClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center">
         <p className="text-sm text-gray-400">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F9FAFB]">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600">
           SiteCommand
         </a>

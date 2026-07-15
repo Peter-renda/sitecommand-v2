@@ -781,6 +781,33 @@ Effect: all new commitments created after saving will have the SSOV tab enabled 
 - `exportCSV()` exports all currently visible items (post-filter/sort).
 - `exportPDF()` builds an HTML table and prints via hidden iframe.
 
+## Commitments – Unified ERP Sync Button
+
+### Overview
+The Commitments list page exposes a **single** Sync button that auto-detects the company's connected accounting ERP and pushes every active commitment to it. There are no longer per-platform sync buttons (the old per-row "Sync to Sage" action and the two **Sync to QuickBooks** / **Sync to Sage 300 CRE** buttons on the individual commitment detail header were removed).
+
+### Workflow
+1. Open the Commitments tool → **Contracts** tab.
+2. Click **Sync** (top-right actions; label reads "Sync to QuickBooks" / "Sync to Sage 300 CRE" once the connected platform is known, otherwise "Sync to ERP").
+3. Every active commitment is pushed to the detected ERP; a bottom toast reports the result.
+
+### Implementation Notes (SiteCommand)
+- `CommitmentsClient.tsx`: on mount fetches `GET /api/integrations/erp/status` → `erpConnected` (`"quickbooks" | "sage300cre" | "multiple" | null`, `undefined` while loading).
+- `handleSyncAll()` short-circuits with a toast when nothing/multiple ERPs are connected; otherwise loops the active `items` sequentially, POSTing each to `/api/integrations/quickbooks/sync` or `/api/integrations/sage300cre/sync` (`{ recordType: "commitments", recordId }`), updating each row's `erp_status` (pending → synced/not_synced) and summarizing successes/failures in `syncNotice`.
+- The commitment **detail** page (`CommitmentDetailClient.tsx`) no longer renders any ERP sync buttons; prime contracts keep their own per-record QBO/Sage buttons.
+
+## Create a Subcontract – Required Fields & SOV Columns
+
+### Required Fields (subcontracts only)
+Creating a subcontract requires all of: **Title**, **Contract Company**, **Default Retainage** (a valid number), a **Description**, and **at least one Schedule of Values line item** (group headers don't count). Purchase orders are unaffected.
+
+### SOV Columns
+- The **Billed to Date** and **Amount Remaining** columns are hidden on the subcontract create form (they are always $0 / full amount on a brand-new record). Purchase orders still show them.
+
+### Implementation Notes (SiteCommand)
+- `new/NewCommitmentClient.tsx`: required fields carry a `required` asterisk (gated on `commitmentType === "subcontract"`); `handleSave()` validates them up front and shows a red banner listing what's missing (scrolls to top) before any POST. `htmlHasText()` strips tags/`&nbsp;` to detect an empty rich-text Description.
+- `SovTable` takes a `showBilledColumns` prop (`commitmentType !== "subcontract"`) that conditionally renders the two columns in the header, body rows, footer totals, and adjusts the empty-state / group-header `colSpan`s.
+
 ## Import a Subcontractor Schedule of Values from a CSV
 
 ### Required Permissions
@@ -1247,6 +1274,35 @@ Change event line items cannot be added to a commitment when:
 - Migration: `101_commitment_ssov_approved_at.sql` adds `commitments.ssov_approved_at` TIMESTAMPTZ.
 - SiteCommand uses a single **invoice contact** on the commitment (`subcontractor_contact`) rather than a distribution list; notifications are sent to that contact only.
 
+## Emails – "New Emails" Triage Deck (AI Link Suggestions)
+
+### Overview
+The project Emails page shows a **New Emails** box above the linked-threads table. It is a card deck of the user's inbox conversations that they have **neither linked to the project nor declined**. One card shows at a time (with the next cards peeking out behind); each card displays the email (subject, sender, date, preview) and a **Suggested actions** section where Gemini proposes executable follow-ups grounded in project records — e.g. "Add to RFI #4 — Window head detail" or 'Create task "Order roof curbs"'. The user ticks the actions they want, clicks **Link to Project** (label becomes **Link + N Actions**), the email is linked, the actions run, and the next card pops up. **Decline** hides the conversation from that user's deck for that project permanently.
+
+### Behavior
+- Candidates come from the user's own connected Outlook/Gmail inbox (same `fetchActiveInbox` as the link modal), deduped to one card per conversation (most recent message wins), excluding conversations already in `project_email_threads` for the project and conversations in `project_email_triage_dismissals` for this user+project. Capped to the **30 newest** threads per load.
+- Suggestions load lazily per card and are cached client-side by conversation id. The suggest endpoint fetches the full thread text from the user's mailbox when possible (falls back to the inbox preview), then asks Gemini `gemini-2.5-flash` (structured output) for at most 4 actions of two executable types:
+  - `rfi_comment` — the email is relevant to a specific project RFI; on link, the email text is inserted as an `rfi_responses` row (body prefixed `Linked email from … : "subject"`, ≤2000 chars) and an `rfi_change_history` entry ("Added Response from linked email") is written.
+  - `create_task` — the email contains an action item; on link, a task is created (`status: "initiated"`, AI title/description, optional YYYY-MM-DD due date, no assignees).
+- Empty suggestions are a normal state — the card still offers plain Link/Decline. Missing `GEMINI_API_KEY` degrades to no suggestions.
+- The link endpoint **re-validates every action server-side** (RFI must belong to the project; task title required) — AI suggestions are advisory only. Action failures don't roll back the link; per-action results come back and the UI shows an amber notice listing the failed action labels.
+- Linking through the deck also persists the thread's messages (`persistThreadMessages`) best-effort, same as the modal flow. Declined threads can still be linked manually via the **Link Emails to Project** modal.
+- Manual flipping: prev/next chevrons cycle the deck (wrap-around) without acting on a card; per-card checkbox state is kept while flipping.
+
+### API
+- `GET /api/projects/[id]/emails/triage` — candidate list `{ connected, messages }`; `connected: false` (200) when no email connection so the UI hides the box.
+- `POST /api/projects/[id]/emails/triage/suggest` — body `{ conversationId, subject?, fromName?, fromAddress?, preview?, receivedAt? }` → `{ suggestions: TriageSuggestion[] }` (`maxDuration = 60`).
+- `POST /api/projects/[id]/emails/triage/link` — body `{ conversationId, subject, participants, latestMessagePreview, latestReceivedAt, messageCount, actions[] }` → upserts the thread (same shape as `POST /emails`), executes ≤6 actions sequentially (task numbers allocated without racing), returns `{ thread, results: [{ id, ok, error? }] }` (`maxDuration = 60`).
+- `POST /api/projects/[id]/emails/triage/decline` — body `{ conversationId }` → upserts a dismissal row.
+- All four require a session **and** `canAccessProject` (stricter than the older email routes, which only check the session).
+
+### Schema
+- `project_email_triage_dismissals` (migration `162_project_email_triage_dismissals.sql`): `project_id`, `user_id`, `graph_conversation_id`, `dismissed_at`, `UNIQUE(project_id, user_id, graph_conversation_id)`. Per-user because inboxes are personal — a decline only hides the thread for that user on that project.
+
+### Implementation Notes (SiteCommand)
+- Suggestion engine: `lib/email-triage.ts` → `suggestEmailTriageActions(supabase, projectId, email)`. Context = project RFIs (id/number/subject/question/status, RFI numbers resolved server-side back to ids), submittals (context only — no comment mechanism exists), and open tasks (to avoid duplicate task suggestions).
+- UI: `TriageDeck` component in `EmailsClient.tsx`, mounted between the connection banner and the thread table (only when an email account is connected). State: `deck`, `index`, `suggestionsByConv`, `checkedByConv`, `busy`, `notice`, `actedCount`. Cards animate in via the global `animate-scale-in`; threads linked elsewhere (e.g. the modal) drop out of the deck via the parent's `linkedConvIds`. After the last card is actioned the box shows "All caught up"; if the deck is empty on load and nothing was actioned, the section renders nothing.
+
 ## Specifications – Spec Book PDF Storage
 
 ### Overview
@@ -1330,3 +1386,468 @@ The RFIs tool restricts every mutation that changes RFI state to users with **Ad
 - `DELETE /api/projects/[id]/rfis/[rfiId]/responses/[responseId]`: admin OR RFI creator OR response author. The route reads `rfis.created_by` and `rfi_responses.created_by` to evaluate the gate.
 - Client gates: `RFIDetailClient.tsx` derives `isAdmin = toolLevel === "admin"`, `isCreator = rfi.created_by === userId`, and `canManage = isAdmin || isCreator`. The header buttons, three-dot actions menu, Mark Official checkbox, Delete-Response button, and Related-Item add/remove all use `canManage`, so the RFI creator keeps the full management surface on records they own. `RFIsClient.tsx` keeps `isAdmin` for the New RFI button, the row Edit icon, the row selection checkboxes, and the bulk-edit toolbar (the list view does not have per-row creator context).
 - `app/projects/[id]/rfis/page.tsx` resolves `getToolLevel(..., "rfis")` and passes it to `RFIsClient`. The detail page does the same and forwards both `toolLevel` and `userId` to `RFIDetailClient`.
+
+## Transaction Orders – Assign Invoice Workflow
+
+### Overview
+A user with **Admin** tool level on Transaction Orders can route an invoice PDF to another project so its Project Manager (and any other directory contacts they pick) can convert it into a Transaction Order. Assigned invoices appear:
+- on the target project's **Transaction Orders** page in an **Assigned Invoices** section, and
+- on each recipient's dashboard under **My open items** as an "assigned invoice".
+
+Recipients are also notified by email at assignment time.
+
+### UI
+- Button: **Assign Invoice** (gray outline) is rendered left of **New Transaction Order** on the Transaction Orders page when `toolLevel === "admin"`. Page-level computation lives in `app/projects/[id]/transaction-orders/page.tsx`.
+- Modal: `AssignInvoiceModal` inside `TransactionOrdersClient.tsx`:
+  - Project selector (loads `/api/projects` — already scoped to projects the user can access; for Company Super Admin / Admin this is every company project).
+  - On project change, autoloads the project's **Project Manager** contact rows (`GET /api/projects/[id]/project-manager`) and the project directory.
+  - **Additional recipients**: checkbox list of directory contacts (excluding the PM contacts and distribution_group entries; only contacts with an email show).
+  - Invoice PDF picker + optional notes.
+- Assignments list on the target project: status pill (Open / Completed), filename link to signed PDF, assigner + date, recipient names, and per-assignment **Mark Complete** (any recipient, the assigner, or a TO admin) and **Delete** (TO admin or assigner).
+
+### API
+- `GET /api/projects/[id]/project-manager` — returns `{ projectManagers: [{ contactId, name, email }] }` resolved from `projects.project_roles["Project Manager"]` → `directory_contacts`. Requires `admin` on `transaction-orders` for the target project (don't leak PM identity to unrelated viewers).
+- `GET /api/projects/[id]/transaction-orders/assignments/upload-url?filename=…` — signed PUT URL into `project-drawings/{projectId}/_assignments/{ts}-{filename}`. Requires `admin` on Transaction Orders for the target project.
+- `GET /api/projects/[id]/transaction-orders/assignments` — list assignments for a project (signed download URLs included). Visible to anyone with at least `read_only` on Transaction Orders.
+- `POST /api/projects/[id]/transaction-orders/assignments` — admin-only on target project. Body: `{ filename, storagePath, notes?, recipients: [{ contactId, name, email, role }] }`. The route validates the storagePath is under `{projectId}/_assignments/`, backfills `userId` on recipients by matching `users.email`, persists the row, then fires `sendInvoiceAssignmentEmail` (non-fatal on failure).
+- `PATCH /api/projects/[id]/transaction-orders/assignments/[assignmentId]` — `{ status: "open" | "completed" }`. Allowed for: TO admin on the target project, the original assigner, or any current recipient (matched by `userId` or `email`). Sets `completed_at` / `completed_by` when moving to `completed`.
+- `DELETE /api/projects/[id]/transaction-orders/assignments/[assignmentId]` — TO admin or assigner only. Best-effort removes the storage file.
+
+### Storage / Schema
+- Table `transaction_order_assignments` (migration `132_transaction_order_assignments.sql`):
+  - `id`, `project_id` (target), `assigned_by`, `invoice_filename`, `invoice_storage_path`, `notes`, `recipients JSONB`, `status` (default `open`), `created_at`, `completed_at`, `completed_by`.
+  - `recipients` shape: `[{ contactId, userId | null, email, name, role }]`. `userId` is resolved at create time from `users.email` so the dashboard query can match efficiently.
+- Storage path: `project-drawings/{projectId}/_assignments/{ts}-{safeFilename}` (existing bucket, no new bucket needed).
+
+### Dashboard Open Items
+- `app/api/dashboard/my-tasks/route.ts` adds a new `OpenItem` type: `transaction_order_assignment`.
+- The route queries `transaction_order_assignments` where `status = 'open'` and filters in-memory to rows whose `recipients` include the current user (by `userId === session.id` or `email === session.email`).
+- `app/dashboard/DashboardClient.tsx`:
+  - `MyOpenItem.type` includes `transaction_order_assignment`.
+  - `openItemHref` routes to `${projectBase}/transaction-orders`.
+  - The pill label special-cases the long type to render as **"assigned invoice"**.
+
+### Email
+- `sendInvoiceAssignmentEmail({ to, projectName, invoiceFilename, notes, projectUrl, assignedBy })` in `lib/email.ts`. Uses Resend; no-ops without `RESEND_API_KEY`. The `to` is the full recipient list (CC is not used here since everyone in `to` is an intended recipient, not a copy).
+
+## Permit Applications – AI-Assisted Form Filling
+
+### Overview
+A project-level tool for completing permit application PDFs. The user uploads a blank permit form and gives it a title; Gemini scans the form for every fillable field and proposes a value for each by searching project data (address, city, state, contacts, phone numbers, etc.); the user reviews and edits the proposed values; and on approval the filled PDF is downloaded and saved under a **Completed Permit Applications** section.
+
+### Tool-Level Permissions
+- **Read Only** – can view the Completed Permit Applications list.
+- **Standard / Admin** – can upload, scan, review, and approve permit applications.
+- Delete is allowed for a Permit Applications **Admin** or the user who created the record.
+- The tool slug is `permit-applications`; the page redirects to the project home when the resolved tool level is `none`.
+
+### Workflow
+1. Open the project's **Permit Applications** tool.
+2. Enter a **Title** and click **Upload Permit Application** to choose a PDF (the title defaults to the filename when left blank).
+3. Gemini scans the form, then the PDF itself is rendered under **Review & Edit on the Form** with each proposed value sitting in a **yellow editable box** exactly where it will appear on the saved PDF. Every box is editable in place; checkboxes toggle on click.
+4. Click **Approve & Download Permit Application** — the completed PDF downloads and is added to **Completed Permit Applications** (title is a hyperlink that opens the PDF in a new tab).
+
+### In-PDF Editing Preview
+- After a scan, `PdfFieldEditor` renders every page of the uploaded PDF with `pdfjs-dist` (legacy build, worker at `public/pdf.worker.min.mjs`) and overlays an editable yellow box on each field returned by the scan.
+- Box positions come from the scan response: flat fields carry `drawX`/`drawY`/`drawW`/`drawMode` (text-layout coordinates); AcroForm fields carry a `rect` (the widget rectangle). All coordinates are normalized 0–1, so overlays are positioned with a `ResizeObserver`-measured page width and stay correct at any display size.
+- Editing a box calls back into `PermitApplicationsClient` (`updateField`), so the value the user sees on the form is exactly what `fillPermitApplication` writes on approve — the preview is faithful.
+- AcroForm scans return **every** form field as a positioned PermitField (filled or empty), so the user always edits on the rendered form — there is no separate "other fields" list under the PDF.
+
+### Filling Behavior
+- When the PDF has interactive **AcroForm** fields, `extractAcroFormPlacements()` walks `form.getFields()` and reads each widget's rectangle via pdf-lib's widget API (no `T`/`Parent` chain heuristics), producing one placement per field name with a guaranteed position. Gemini sees a numbered list of those fields (`Field N | name="..." | type=...`) plus the PDF as visual context, and returns `{ fieldNum, label, value }` for the ones it can fill. The processor emits one PermitField per placement so unfilled fields still appear on the form for the user to fill manually.
+- When the PDF has **no** AcroForm fields (a flat/scanned form), `extractTextLayout()` reads every text item and its exact coordinates with `pdfjs-dist`; Gemini receives a **numbered list** of those items and returns, per fill action, a `fieldNum` (integer index — impossible to hallucinate), a `value`, and a `drawMode` (`fill` = right of label, `fill_below` = below label, `check` = X to the left of an option). `resolveDrawPosition()` converts the chosen item + drawMode into deterministic draw coordinates.
+- `fillPermitApplication()` writes values into the AcroForm and flattens, then draws flat-PDF text and checkbox "X"s directly onto the original pages, honoring `drawW` for text width.
+- The appended summary page is only a **last-resort fallback** — used for any field with no resolvable position and no AcroForm mapping.
+
+### Implementation Notes (SiteCommand)
+- Processor: `lib/permit-application-processor.ts` — `extractAcroFields()` (pdf-lib AcroForm inspection, used to detect flat vs AcroForm), `extractAcroFormPlacements()` (per-field widget rectangles via `field.acroField.getWidgets()`), `extractTextLayout()` (pdfjs text + coordinates), `scanPermitApplication()` (Gemini `gemini-2.5-flash`: AcroForm numbered-field+vision path or flat numbered-field path), `resolveDrawPosition()`, `fillPermitApplication()` (AcroForm fill + flatten → coordinate overlay → summary-page fallback), `normalizePermitFields()` (validate the field payload coming back from the client).
+- Both scan paths use a structured-output schema (`responseSchema` + `responseMimeType: "application/json"`). The AcroForm path additionally passes the PDF to Gemini as inline base64 so it can map field names to visual labels. `scan` and `approve` routes set `maxDuration = 120`.
+- Requires `GEMINI_API_KEY` (same key used by Transaction Orders and other AI features).
+- API routes under `app/api/projects/[id]/permit-applications/`:
+  - `GET /` — list completed permit applications with fresh 1-hour signed URLs (read_only+).
+  - `POST /scan` — multipart `file`; reads AcroForm fields, builds project context, runs Gemini; returns `{ fields, hasAcroForm }` where each field carries its draw position (standard+). Nothing is persisted.
+  - `POST /approve` — multipart `file` + `title` + `fields`; fills the PDF, uploads it, inserts the record, and streams the filled PDF back for download (standard+).
+  - `DELETE /[permitId]` — admin or record creator; removes the row and the stored PDF.
+- Project context fed to Gemini (`buildProjectContext` in `scan/route.ts`): project fields (name/address/city/state/zip/county/number/sector/value/dates), company name, directory contacts (name/email/phone/company/job title/address/license), contacts tagged with the **Project Manager** role, recent **RFIs** (number/subject/question/status/drawingRef), recent **submittals** (number/title/type/status/costCode/description), the project's **drawings** list (drawing_no/title/revision/date), **specifications** list (spec_number/title), and the last 10 **daily logs** (date/weather/notes/crewCount).
+- Storage: completed PDFs live in the existing `project-drawings` bucket under `{projectId}/_permit-completed/...`.
+- Database: `project_permit_applications` (migration `140_permit_applications.sql`) — `title`, `source_filename`, `final_filename`, `final_storage_path`, `fields` JSONB, `created_by`, `created_at`.
+- UI: `app/projects/[id]/permit-applications/PermitApplicationsClient.tsx` (page shell, upload, completed list) and `PdfFieldEditor.tsx` (in-PDF rendering + yellow editable overlays).
+
+## Tasks – AI "To Do" Recommendations
+
+### Overview
+The Tasks page has a **To Do** section above the tasks table that surfaces AI-recommended action items. A daily cron at ~4am ET generates recommendations per project so the team sees a fresh list when they log on. Recommendations are grounded in the project's recent signals — linked **emails**, where the project sits in its **schedule** (with typical/known construction lead times), open RFIs/submittals, change events, meetings, daily logs, and punch list — and surface time-sensitive work (long-lead procurement, submittals needing approval before fabrication, inspections to book ahead, email action items, etc.).
+
+### User Actions (per recommendation)
+- **Accept** — spawns a real task (status `initiated`, title/category/due date carried over, rationale becomes the description) and removes the card.
+- **Ignore** — dismisses permanently (never resurfaces; deduped against on future runs).
+- **Later** (snooze) — resurfaces after **1 day**, **1 week**, or **2 weeks**.
+- **Refresh** — manually triggers a generation pass (same logic as the cron) instead of waiting for the morning.
+
+### Tool-Level Permissions
+- Any user who can access the project (`canAccessProject`) can view and act on recommendations, matching the existing Tasks tool (which gates on project access, not a per-tool level).
+
+### Generation & Dedupe
+- Shared generator: `lib/todo-recommendations.ts` → `generateTodoRecommendations(supabase, projectId)`. Builds a lean project context (generic row serialization for RFIs, submittals, meetings, daily logs, schedules, change events/orders, commitments, punch list, transmittals + a dedicated fuller email block) and calls Gemini `gemini-2.5-flash` with a structured-output schema (`{ items: [{ title, rationale, source, category, priority, suggestedDueDate }] }`).
+- **Dedupe**: each title is normalized into a `dedupe_key` (lowercase, alphanumeric, collapsed whitespace); `UNIQUE(project_id, dedupe_key)` plus an in-generator check against ALL existing rows (any status) means a recommendation already seen/accepted/ignored is never re-suggested.
+- **Caps**: stops generating once a project has `MAX_ACTIVE_RECOMMENDATIONS` (12) actionable items; inserts at most `MAX_NEW_PER_RUN` (6) per pass. Existing open tasks and prior recommendations are passed to the model so it won't duplicate them.
+
+### Schedule (Cron)
+- `vercel.json` cron `/api/cron/todo-recommendations` at `0 8 * * *` (~4am ET / before the workday). Secured with `CRON_SECRET`. Iterates `projects` where `status = 'active'` and calls the shared generator; resilient to per-project failures. Requires `GEMINI_API_KEY`.
+
+### API
+- `GET /api/projects/[id]/todo-recommendations` — active list (`status = 'pending'` AND not currently snoozed: `snoozed_until` null or ≤ now), sorted high→medium→low then newest first.
+- `POST /api/projects/[id]/todo-recommendations` — manual generation pass, returns the refreshed active list (`maxDuration = 120`).
+- `PATCH /api/projects/[id]/todo-recommendations/[recId]` — body `{ action: "accept" | "ignore" | "snooze", snooze?: "1d" | "1w" | "2w" }`. Accept creates the task and links `accepted_task_id`; rejects if the recommendation is no longer `pending` (409).
+
+### Schema
+- `project_todo_recommendations` (migration `152_project_todo_recommendations.sql`): `title`, `rationale`, `source`, `category`, `priority` (high/medium/low), `suggested_due_date`, `status` (pending/accepted/ignored), `snoozed_until` (future = hidden until then), `dedupe_key` (UNIQUE per project), `accepted_task_id`, `acted_by`/`acted_at`, `generated_at`.
+
+### UI (SiteCommand)
+- `TasksClient.tsx`: `TodoSection` + `TodoCard` render above the stat strip. Each card shows priority badge, title, category, rationale, source label, and suggested due date, with Accept / Later (snooze dropdown) / Ignore controls. State: `recommendations`, `recsLoading`, `recsRefreshing`, `recBusyId`; handlers `handleRefreshRecs` and `actOnRec`. The section hides while the first load is in flight and renders an empty hint (with Refresh) when there are no items.
+
+## Assist – "Looking Ahead" Daily Briefing
+
+### Overview
+The Assist page has a **Looking Ahead** section (above the chat box) that surfaces a daily briefing of **things to know / remember** given where the project currently stands. A daily cron (~3am ET) studies the project — drawings/plans, specs, contracts/commitments, recent emails, schedule position, open RFIs/submittals, meetings, daily logs, change events/orders, punch list, transmittals — and writes a few grounded factual bullets the team should keep top of mind.
+
+These are **facts to commit to memory, not action items** (actionable to-dos live in the Tasks "To Do" section). Example notes: "The stormwater plans show 1,240 LF of 24\" RCP on site" or "Per the supplier's May 3 email, structure C15 will be ~2 weeks late."
+
+### User Actions (per note)
+- **Pin / Unpin** — keep an important fact at the top of the list (pinned notes sort first).
+- **Dismiss** — hide permanently (deduped against on future runs, never resurfaces).
+- **Later** (snooze) — resurfaces after **1 day**, **1 week**, or **2 weeks**.
+- **Refresh** — manually triggers a generation pass (same logic as the cron) instead of waiting for the morning.
+
+### Tool-Level Permissions
+- Any user who can access the project (`canAccessProject`) can view and act on notes — same gate as the rest of the Assist page (no per-tool level).
+
+### Generation & Dedupe
+- Shared generator: `lib/looking-ahead.ts` → `generateLookingAheadNotes(supabase, projectId)`. Builds a lean project context (generic row serialization for drawings, specs, commitments, RFIs, submittals, meetings, daily logs, schedules, change events/orders, punch list, transmittals + a dedicated fuller email block) and calls Gemini `gemini-2.5-flash` with a structured-output schema (`{ items: [{ headline, detail, source, category, priority }] }`).
+- **Dedupe**: each headline is normalized into a `dedupe_key` (lowercase, alphanumeric, collapsed whitespace); `UNIQUE(project_id, dedupe_key)` plus an in-generator check against ALL existing rows (any status) means a note already seen/pinned/dismissed is never re-surfaced.
+- **Caps**: stops generating once a project has `MAX_ACTIVE_NOTES` (10) actionable notes; inserts at most `MAX_NEW_PER_RUN` (6) per pass. Previously surfaced headlines are passed to the model so it won't repeat them. The system prompt explicitly forbids action-item phrasing ("call the supplier") and requires facts ("structure C15 is ~2 weeks late") grounded in the provided data.
+
+### Schedule (Cron)
+- `vercel.json` cron `/api/cron/looking-ahead` at `0 7 * * *` (~3am ET / before the workday and before the To Do cron at 8 UTC). Secured with `CRON_SECRET`. Iterates `projects` where `status = 'active'` and calls the shared generator; resilient to per-project failures. Requires `GEMINI_API_KEY`.
+
+### API
+- `GET /api/projects/[id]/looking-ahead` — active list (`status = 'pending'` AND not currently snoozed: `snoozed_until` null or ≤ now), sorted pinned-first then high→medium→low then newest first.
+- `POST /api/projects/[id]/looking-ahead` — manual generation pass, returns the refreshed active list under `notes` (`maxDuration = 120`).
+- `PATCH /api/projects/[id]/looking-ahead/[noteId]` — body `{ action: "pin" | "unpin" | "dismiss" | "snooze", snooze?: "1d" | "1w" | "2w" }`. Rejects if the note is no longer `pending` (409).
+
+### Schema
+- `project_looking_ahead_notes` (migration `153_project_looking_ahead_notes.sql`): `headline`, `detail`, `source`, `category`, `priority` (high/medium/low), `status` (pending/dismissed), `pinned` (bool), `snoozed_until` (future = hidden until then), `dedupe_key` (UNIQUE per project), `acted_by`/`acted_at`, `generated_at`.
+
+### UI (SiteCommand)
+- `AssistClient.tsx`: a `LookingAheadCard` component plus a **Looking Ahead** `<section>`. Each card shows priority badge, headline, category, detail, source label, and a Pinned marker, with Pin/Unpin · Later (snooze dropdown) · Dismiss controls. State: `notes`, `notesLoading`, `notesRefreshing`, `noteBusyId`; handlers `refreshNotes` and `actOnNote`. The section renders an empty hint (with Refresh) when there are no notes. Pin/unpin updates in place; dismiss/snooze optimistically removes the card and reverts on failure.
+
+## Assist – Page Layout (Navigation Tree)
+
+### Overview
+The Assist page uses a left **navigation tree** (same sticky `border-l-2` active-item style as the Project Admin settings page) to jump between three stacked sections. `ASSIST_SECTIONS` in `AssistClient.tsx` defines the order, and an `IntersectionObserver` (matching the AdminClient pattern) highlights the section currently in view; `jumpToSection` smooth-scrolls on click.
+
+### Sections (top → bottom)
+1. **Discover** (`id="discover"`) — the "What would you like to know about this project?" ask box **and** the question History live together **in the same tile** (one `card`): the chat scroll area + input on top, a `History` sub-panel beneath a divider in the same card.
+2. **Recurring Workflows** (`id="recurring-workflows"`) — the create form + saved workflow list.
+3. **Looking Ahead** (`id="looking-ahead"`) — the daily-briefing notes (see section above).
+
+### Recurring Workflows – Output Document Type
+- Each recurring workflow chooses an output **Document type**: **PDF** (default) or **Word**, selected in the create form (`wfDocumentType` state) and shown as a pill on each workflow row.
+- Persisted in `assist_recurring_workflows.document_type` (migration `156_assist_recurring_workflow_document_type.sql`, `CHECK IN ('pdf','word')`, default `'pdf'`). The reports `file_type` CHECK is widened to also allow `'word'`.
+- API: `POST /api/projects/[id]/assist/recurring-workflows` validates `documentType` against `ALLOWED_DOCUMENT_TYPES` and stores it; `GET` returns it as `documentType`.
+- Cron (`/api/cron/assist-recurring-workflows`) reads `document_type` and writes the report artifact accordingly: a `.doc` (msword-MIME HTML data URL, `file_type='word'`) for Word, or the existing markdown data URL (`file_type='pdf'`) for PDF.
+
+## Project Admin – Super-Admin-Only Settings
+
+### Permission Model
+- **Every** project setting on the Project Admin page is editable by **Company Super Admins only**. The single exception is **team member management** (add/remove), which remains available to any Company Admin (`super_admin` or `admin`) because both resolve to `project_admin` via `getProjectRole`.
+- In `AdminClient.tsx`: `isSuperAdmin = role === "super_admin"` gates all form fields (General Information, Project Location, Building Code, ERP Integration, Advanced, Dates, and the Report Fields block — wrapped in a `<fieldset disabled={!isSuperAdmin}>`). `isAdmin = admin || super_admin` is now used only for the Project Members add/remove controls. The **Save Changes** button + "Admin controls" pill render only for super admins; a regular admin sees a note that they may only manage team members.
+- Server enforcement: `PATCH /api/projects/[id]/admin` requires `company_role === "super_admin"` for all fields. The building-code mutation endpoints (`POST` documents, `PATCH`/`DELETE` a document, `POST suggest`, `GET upload-url`) were tightened from admin-or-super to **super-admin-only** to match the page (viewing via `GET` still uses `canAccessProject`).
+- The ERP Integration and Advanced sections each carry a permanent note under the title stating that only Company Super Admins can change those settings.
+
+### Labor Productivity Toggle
+- New **Labor Productivity for Budget, Change Events, and Change Orders** checkbox in the **Advanced** section — a project-financials capability flag (see "Enable Labor Productivity Cost Features").
+- Persisted in `projects.labor_productivity` (migration `159_project_labor_productivity.sql`, BOOLEAN default false). Added to the admin `GET` select, the `PATCH` allowed list, and the `laborProductivity` state in `AdminClient.tsx`.
+
+### Copy Directory From
+- The **Copy Directory From** control in the Advanced section is a real dropdown of **all other company projects, active and archived** (current project excluded), plus a **Copy Directory** button. Super-admin-only.
+- API `/api/projects/[id]/copy-directory`:
+  - `GET` — lists sibling company projects as `{ projects: [{ id, name, archived }] }` (archived flag from `projects.archived_at`).
+  - `POST` `{ sourceProjectId }` — copies `directory_contacts` from the source project into the current one, **deduping by email** (emailless contacts deduped by a type/group/name/company signature). Non-destructive: only inserts, never deletes, so it is safe to re-run. Returns `{ copied }`.
+  - Both endpoints require `super_admin` and verify both projects belong to the caller's company.
+
+## QuickBooks Online (QBO) Integration
+
+### Overview
+Per-company OAuth connection to QuickBooks Online (and Intuit Enterprise Suite tenants). Push-sync of commitments (subcontract → **Bill**, purchase order → **PurchaseOrder**), prime contracts (→ AR **Invoice**), and AP/AR billing from SOV amounts, with vendor/customer auto-creation and idempotent updates. Read-only pulls: active Vendor/Customer lists. Docs: `docs/quickbooks-online-setup-guide.md` (user setup walkthrough), `docs/quickbooks-online-integration.md` (runtime reference), `docs/quickbooks-online-data-mapping.md` (field crosswalk).
+
+### Environments (Sandbox vs Production)
+- Per-company **Environment** selector on Settings → Integrations (stored as `QBO_ENVIRONMENT` row in `company_integrations`; values `sandbox` | `production`, validated in the PATCH route). Falls back to the `QBO_ENVIRONMENT` env var, default production. `QBO_API_BASE` env overrides both.
+- Sandbox requires Intuit **Development** keys; production requires **Production** keys. OAuth authorize/token URLs are identical across environments — only the REST base differs (`sandbox-quickbooks.api.intuit.com` vs `quickbooks.api.intuit.com`).
+- UI shows a blue **Sandbox** badge next to the Connected pill when sandbox is selected.
+
+### Connection Flow
+- `GET /api/integrations/quickbooks/connect` (super_admin/site_admin) → Intuit consent → `GET /api/integrations/quickbooks/callback` → tokens upserted to `company_integrations` (`QBO_REALM_ID`, `QBO_ACCESS_TOKEN`, `QBO_REFRESH_TOKEN`).
+- **CSRF**: connect sets a 10-min httpOnly `qbo_oauth_state` nonce cookie and embeds the nonce in OAuth `state`; callback rejects on mismatch (`qbo_invalid_state`) and always clears the cookie.
+- **Redirect URI**: `getIntuitRedirectUri()` precedence `INTUIT_REDIRECT_URI` > `NEXT_PUBLIC_APP_URL` + callback path > request-derived. Must byte-for-byte match the URI registered in the Intuit portal. The settings GET (`?integration=quickbooks`) returns the computed value as derived field `QBO_REDIRECT_URI` so the UI shows exactly what the server sends. Post-OAuth browser redirects use `getAppOrigin()` (prefers `NEXT_PUBLIC_APP_URL`) so users land on the canonical domain.
+- `POST /api/integrations/quickbooks/disconnect` (super_admin) — best-effort revokes the refresh token via Intuit's revoke endpoint (`revokeQBOToken` in `lib/quickbooks.ts`), then deletes the realm/token rows; keeps Client ID/Secret + environment. UI **Disconnect** button next to Reconnect.
+
+### Credential Resolution
+- App creds (`getQBOAppCredentials(companyId)`): `company_integrations` → `platform_settings` → env. All call sites (sync, cron, vendors, customers) pass `companyId` so token refresh uses the same app the tokens were issued by.
+- Tokens auto-refresh on 401 (one retry) and persist back to `company_integrations`.
+
+### Sync Surfaces
+- Manual: **Sync to QuickBooks** button on the prime contract detail header → `POST /api/integrations/quickbooks/sync` `{ recordType: commitments|prime_contracts|ap_invoice|ar_invoice, recordId }`. (Commitments no longer have per-record QBO/Sage buttons — they sync via the single auto-detecting **Sync** button on the Commitments list page; see "Commitments – Unified ERP Sync Button".)
+- Cron: `GET /api/cron/quickbooks-sync` daily 17:00 UTC (vercel.json), `CRON_SECRET`-gated; pushes dirty rows (updated_at > last_synced_at), capped 25/type/company.
+- Idempotency: `qbo_id`/`qbo_sync_token`/`last_synced_at` (+ `qbo_ap_invoice_*`, `qbo_ar_invoice_*`) from migration `113_qbo_idempotency_columns.sql`; updates re-fetch the live SyncToken and POST `?operation=update` with `sparse: true`; deleted-on-QBO records are recreated.
+- Posting config (per-company keys or env): `QBO_AP_EXPENSE_ACCOUNT`, `QBO_DEFAULT_ITEM`, `QBO_BUDGET_CODE_MAP` (JSON code → account/class/item), `QBO_RETAINAGE_RECEIVABLE_ACCOUNT`, `QBO_RETAINAGE_PAYABLE_ACCOUNT`, `QBO_PROJECT_TRACKING` (`none` disables the project-Class line fallback; default on), `QBO_DOC_NUMBER_PREFIX` (`project` → `{project_number}-{number}` DocNumbers, any other value = literal prefix, 21-char cap). All refs post by **Id**, never name; sync fails fast when no valid account/item resolves.
+- Mapping completeness (see `docs/quickbooks-online-data-mapping.md` §7): auto-created Vendors/Customers are **enriched** from the matching directory contact (`lookupDirectoryPartyDetails` — company/email/phone/fax/website/address); `payment_terms` → `SalesTermRef` on exact active-Term match (else kept in PrivateNote); PO `ship_to` → `ShipAddr`, `delivery_date` → `DueDate`, `ship_via`/`bill_to` → PrivateNote; lump-sum fallback posts the **revised** amount (original + approved COs) on both commitments and prime contracts; AR invoices bill **stored materials** as a dedicated line; void/terminated records → Bill **delete** / PO **POStatus=Closed** / Invoice **void** (`QBOResult.action`: `deleted`/`closed`/`voided`/`skipped`; routes clear `qbo_id` + feedback columns on delete/skip and set `last_synced_at` so the cron stops retrying).
+- Accounting feedback (migration `161_erp_accounting_feedback_columns.sql`): every sync parses `TotalAmt`/`Balance` (+ PO `POStatus`) from the response into `qbo_total_amount`/`qbo_balance`/`qbo_payment_status` (`paid`/`partially_paid`/`unpaid`, or lowercased POStatus), plus `qbo_ap_invoice_*` / `qbo_ar_invoice_*` and `qbo_vendor_id`/`qbo_customer_id`. `POST /api/integrations/quickbooks/refresh` `{ recordType, recordId }` re-reads on demand (`fetchQBOEntityFinancials`); the cron also runs a payment-refresh pass (25 stalest synced records per table per company, ordered by `qbo_payments_refreshed_at`). Surfaced in an **Accounting** section on the commitment + prime-contract detail pages with a "Refresh payment status" button.
+- Required record fields: commitments need **Contract Company** (QBO vendor), prime contracts need **Owner/Client** (QBO customer). Blank values fail fast with `validation: true` on the QBOResult → the sync route returns **422** with an actionable message (vs 502 for QBO-side errors). Vendor/customer resolution failures (`findOrCreateVendorId`/`findOrCreateCustomerId` return `QBORefLookup`) include QBO's underlying fault in the error string.
+- Record-fetch failures in the sync route are no longer masked as 404: PGRST116 (zero rows) → 404, any other DB error → 500 with the message (e.g. missing migration-113 columns).
+- Logs: every attempt → `erp_sync_logs` (`integration='quickbooks'`); per-record via `GET /api/integrations/quickbooks/logs`.
+
+### Verification
+- Offline check: `npx tsx scripts/qbo-integration-check.ts` — mocked-fetch assertions for env routing, minorversion separators, 401 refresh+retry+persist, subcontract→Bill create payload (vendor enrichment, terms, project Class, financial feedback), idempotent revised-amount update, AR retainage + stored-materials lines, redirect-URI precedence, PO ship-to mapping, void/close/delete handling, DocNumber project prefix. Run after touching `lib/quickbooks.ts`.
+
+## Sage 300 CRE Integration (via Agave)
+
+### Overview
+Per-company integration that syncs commitments (subcontract/PO → **Purchase Order**), prime contracts (→ **AR Invoice**), and AP/AR billing from SOV amounts to **Sage 300 CRE** (Construction & Real Estate, formerly Timberline). Sage 300 CRE is an **on-premise** Windows system with **no native cloud REST API**, so SiteCommand reaches it through **Agave** (`https://api.agaveapi.com`) — a unified connector that runs an agent on the customer's Sage server and exposes a normalized cloud REST API. Docs: `docs/sage-300-cre-integration.md`.
+
+> The `SageNADev/Sage300-SDK` repo is the *Sage 300 (Accpac) Web SDK* — a UI-screen toolkit for a **different** product (not CRE) with no external data API. Agave is the real connectivity layer for on-premise Sage 300 CRE. The existing `lib/sage-intacct.ts` is **Sage Intacct**, yet another separate Sage product — hence this integration uses the distinct `sage300cre` namespace.
+
+### Auth model (Agave)
+- App creds (resolve company → platform → env, like QBO): `SAGE300CRE_CLIENT_ID`, `SAGE300CRE_CLIENT_SECRET` → sent as `Client-Id` / `Client-Secret` headers.
+- Per-company connection: `SAGE300CRE_ACCOUNT_TOKEN` (in `company_integrations`) → `Account-Token` header. Constant `API-Version: 2021-11-21`.
+- `isSage300CreConnected` = app creds + account token. Helpers in `lib/sage300cre.ts`.
+
+### Connect flow (Agave Link)
+- `POST /api/integrations/sage300cre/connect` (super_admin/site_admin) → Agave `POST /link/token/create` → returns a `linkToken`.
+- The user runs Agave Link (selects "Sage 300 CRE"), gets a `public_token`, then `POST /api/integrations/sage300cre/exchange` `{ publicToken }` → Agave `POST /link/token/exchange` → stores `SAGE300CRE_ACCOUNT_TOKEN`.
+- `POST /api/integrations/sage300cre/disconnect` clears the account token (keeps app creds). Manual Account-Token paste is supported as a fallback in the UI.
+- UI: `Sage300CreSection` (company) + `Sage300CreAppSection` (site_admin) in `IntegrationsClient.tsx`.
+
+### Sync surfaces
+- Manual: **Sync to Sage 300 CRE** button on the prime contract detail header (next to the QuickBooks button) → `POST /api/integrations/sage300cre/sync` `{ recordType: commitments|prime_contracts|ap_invoice|ar_invoice, recordId }`. (Commitments sync via the single auto-detecting **Sync** button on the Commitments list page — see "Commitments – Unified ERP Sync Button".)
+- Cron: `GET /api/cron/sage300cre-sync` daily 18:00 UTC (vercel.json, staggered after QBO), `CRON_SECRET`-gated; pushes dirty rows (`updated_at > sage300cre_synced_at`), capped 25/type/company.
+- Mapping: commitment → `POST/PUT /purchase-orders` (revised amount, `due_date` from delivery/estimated completion); ap_invoice → `/ap-invoices` (`retention_amount` = billed × default retainage %); prime/ar_invoice → `/ar-invoices` (`due_date` from estimated completion; per-line retainage rolls up to `retention_amount`). Vendors/customers resolved **by name** via `GET /vendors|/customers` — sync fails fast (no auto-create) when the party isn't already in Sage 300 CRE (the ERP is the system of record). AR is connector-dependent; unsupported resources surface as logged errors.
+- Job costing: the project resolves to a Sage **job** (`GET /jobs`, project number first then name → `resolveSage300CreJobId`) and SOV budget codes resolve to Sage **cost codes** (`GET /cost-codes`, exact code then name). Resolved ids post as header + per-line `job_id` / `cost_code_id`; unresolved values are omitted (budget code stays folded into the line description). Lines with consistent qty × unit cost also carry `quantity`/`unit_cost`/`unit_of_measure`. Jobs/cost codes are never auto-created.
+- Accounting feedback (migration `161_erp_accounting_feedback_columns.sql`): sync responses parse `amount`/`amount_paid`/`balance`/`status` (bare or `data`-wrapped) into `sage300cre_status` + `sage300cre_vendor_id` on commitments (header PO is non-posting → status only), `sage300cre_ap_invoice_total_amount`/`_amount_paid`/`_balance`/`_status` for AP invoices, and the header + `sage300cre_ar_invoice_*` quartets on prime contracts (+ `sage300cre_customer_id`). `POST /api/integrations/sage300cre/refresh` re-reads on demand (`fetchSage300CreRecordFinancials`); the cron runs a payment-refresh pass (25 stalest per table per company by `sage300cre_payments_refreshed_at`). Shown in the **Accounting** section of the detail pages.
+- Idempotency: `sage300cre_id`/`sage300cre_synced_at` (+ `sage300cre_ap_invoice_*`, `sage300cre_ar_invoice_*`) from migration `160_sage300cre_idempotency_columns.sql`. Agave has no SyncToken — updates `PUT /{resource}/{id}`; a 404 (deleted on Sage) falls back to create. Columns sit alongside the `qbo_*` ones so a record can sync to both ERPs independently.
+- Logs: every attempt → `erp_sync_logs` (`integration='sage300cre'`); per-record via `GET /api/integrations/sage300cre/logs`.
+
+### Verification
+- Offline check: `npx tsx scripts/sage300cre-integration-check.ts` — mocked-fetch assertions for Agave headers/base URL, link create+exchange, vendor resolution + "not found" guard, Purchase Order create payload (job + cost-code resolution, quantity detail, due date), idempotent PUT + 404→recreate fallback, AR invoice revised-amount + due date, AP retention + financial feedback parsing, AR retention rollup, **job-to-date cost pull**. Run after touching `lib/sage300cre.ts`.
+
+## ERP Two-Way Sync — Pull Job to Date Costs into the Budget
+
+### Overview
+The Budget tool's ERP button is **Resync with ERP** (formerly the placeholder "Resend to ERP"). It is the **pull** side of the integration: it reads job-to-date (actual) costs from the company's connected accounting ERP and writes them into each budget line item's **Job to Date Costs** column, matched by **budget code** (the budget line's `cost_code` — the same key used everywhere else to join budget ↔ commitments, see `committed-costs/route.ts`). The pushes (commitments/prime contracts/AP-AR invoices → ERP) are unchanged; this adds the reverse direction for budget actuals.
+
+### One ERP at a time
+- A company may connect **either** QuickBooks Online **or** Sage 300 CRE, not both. Enforced at:
+  - **QBO connect** (`/api/integrations/quickbooks/connect`): redirects with `error=qbo_other_erp_connected` if Sage 300 CRE is connected.
+  - **Sage connect** (`/api/integrations/sage300cre/connect`): 422 if QBO is connected.
+  - **Resync** (`/api/integrations/erp/resync-budget`): 422 if both are connected (pre-existing dual connections), and 422 if neither is.
+- `GET /api/integrations/erp/status` returns `{ quickbooks, sage300cre, connected: "quickbooks"|"sage300cre"|"multiple"|null }` so the Budget UI can label/disable the button.
+
+### Where the number comes from
+- **QuickBooks** (`fetchQBOJobToDateCosts` in `lib/quickbooks.ts`): two paths coexist, decided per code from **`QBO_BUDGET_CODE_MAP`**:
+  - **Items-based (recommended, GC-standard)** — when the map entry sets `item`, the code is pulled via `pullByItem`: resolves the project to a QBO **Project / Customer** id (per-project override first, then `findCustomerIdByName` as a fallback — Projects-first via `IsProject = true`, then plain Customers, then `':<name>'` sub-customer suffix), reads `reports/ProfitAndLossDetail?customer=…&accounting_method=Accrual&columns=tx_date,name,memo,item_name,subt_nat_amount`, walks leaf rows aggregating by `item_name`, and attributes each Item's total back to the code mapped to it. The per-project override (`projects.qbo_customer_id`, migration `163_project_qbo_customer_mapping.sql`) is pinned via the **Project Admin → ERP Integration → QuickBooks Project / Customer** picker (loads from `GET /api/integrations/quickbooks/projects` via `fetchQBOProjectsAndCustomers`; Projects sort first, then sub-customers, then plain customers). One QBO Item per budget code is the canonical GC pattern (e.g. `02-310.C` → QBO Item `02-310.C`).
+  - **Account-based (legacy)** — when the entry sets only `account`, the code is pulled via `pullByAccount`: P&L summary scoped to the project's **Class** (`reports/ProfitAndLoss?...&classid=…`, class resolved read-only via `findClassIdByName`), sums each leaf account row, and attributes back. Kept for CoAs with one account per cost code; no matching Class → empty + warning (never company-wide totals).
+  - Both paths can run in the same resync (per-code), and shared targets (one Item or Account mapped to >1 code) are skipped as ambiguous.
+- **Sage 300 CRE** (`fetchSage300CreJobToDateCosts` in `lib/sage300cre.ts`): native job costing. Resolves the project to a Sage **job** (`resolveSage300CreJobId`), reads that job's **cost codes** (`GET /cost-codes?job_id=…`), and pulls each code's actual amount (probes `actual_cost`/`actual_amount`/`cost_to_date`/… — field name is connector-dependent). Matches Sage cost code → budget code by code then name. No job, or no actuals from the connector → empty result + warning.
+
+### API
+- `POST /api/integrations/erp/resync-budget` — body `{ projectId }`. Auth: a member of the company that **owns** the project (ERP data is company-scoped; external collaborators are rejected). Detects the single connected ERP, loads distinct budget `cost_code`s, pulls costs, and updates `budget_line_items.job_to_date_costs` per matching code. Returns `{ ok, erp, matched, updated, warning? }`. Every run writes an `erp_sync_logs` row (`record_type='budget_job_to_date'`, `integration='quickbooks'|'sage300cre'`).
+
+### UI (SiteCommand)
+- `BudgetClient.tsx`: **Resync with ERP** button (top-right actions). `ErpConfirmModal` reads `/api/integrations/erp/status`, names the connected ERP, warns when none/both are connected, runs the pull, then refetches `/api/projects/[id]/budget` so updated Job to Date Costs render immediately. The Job to Date Costs column tooltip notes it is pulled via Resync with ERP.
+- Settings → Integrations → QuickBooks Online has a **Step 3 — Budget code map** editor (`QuickBooksSection` in `IntegrationsClient.tsx`): a table of budget code → QBO **Item** (recommended, primary column) / QBO Account (legacy) / Class (optional), Add row / Remove / Save. Both columns are `datalist`-backed pickers populated from `GET /api/integrations/quickbooks/items` (active Products & Services, via `fetchQBOItems`) and `/api/integrations/quickbooks/accounts` (active Expense/COGS/Other Expense, via `fetchQBOAccounts`). Server-side validation requires either Item or Account per row (Class alone is rejected). The settings PATCH whitelists `QBO_BUDGET_CODE_MAP` and validates the JSON shape (`{ "<code>": { account?, class?, item? } }`) before upserting.
+
+### Verification
+- Both offline checks cover the pull: `fetchQBOJobToDateCosts` (P&L report parse, Class scoping, account→code reverse-map, unmapped codes skipped) and `fetchSage300CreJobToDateCosts` (job-scoped cost-code actuals, code/name match, unmatched skipped).
+
+## Training – Guides (Company Documents + Employee Assignments)
+
+### Overview
+The **Training → Guides** section (left-nav tree, alongside Practice and Videos) lets a **Company Super Admin** upload guide/reference documents that everyone in the company can read, and assign them to specific employees with due dates. Uploaded documents automatically form an ordered **Table of Contents**.
+
+### Tool-Level Permissions
+- **Company Super Admin** (`company_role === "super_admin"`): upload, rename, reorder, delete guides; assign/unassign employees and set due dates.
+- **Any other company member** (has `company_id`): read-only — browse the Table of Contents, open documents, and view/complete their own assignments.
+- All data is **company-scoped** (`training_guides.company_id`). Mutations re-verify the guide belongs to the caller's company; assignments can only target users in the same `org_members`.
+
+### Table of Contents
+- The Guides page renders a numbered, ordered list of every uploaded guide (`sort_order` ascending, then `created_at`). New uploads append to the end (`sort_order = max + 1`).
+- Super Admins reorder with up/down controls (a `PATCH … { move: "up" | "down" }` that swaps `sort_order` with the adjacent guide), and can rename / edit the description inline.
+
+### Word Document → Plain Text
+- Browsers download a `.docx` instead of showing it, so on upload a **Word document's plain text is extracted** (mammoth `extractRawText`) and stored next to the original in the `training-guides` bucket as a `.txt` file. The guide's "open" link then serves that file (`content-type: text/plain`, signed URL) so it opens as **plain, readable text in a new tab** (no HTML rendering).
+- Only **Office Open XML (`.docx`)** converts (`isConvertibleWordDoc`). Legacy binary `.doc` and any non-Word upload (PDF, etc.) open via the original file. PDFs already render inline in the browser.
+- Conversion is best-effort: if mammoth fails or yields no content, `content_text_path` stays null and the guide opens the original `.docx` (download). Helper: `lib/training-guides.ts` (`convertDocxToText`). `mammoth` is in `serverExternalPackages` (next.config).
+
+### Assignments
+- Assign modal (Super Admin): pick employees from `GET /api/company/members`, set a due date, and assign. Current assignees are listed with a Remove control. Upsert on `(guide_id, user_id)` so re-assigning refreshes the due date and re-opens the item.
+- The assignee sees an **"Assigned to you"** section on the Guides page with due dates, **overdue** highlighting, and a **Mark complete / Reopen** toggle. Completing is allowed for the assignee or a Super Admin of the owning company.
+
+### Assignment Notifications (email + dashboard)
+- **Email**: `POST /api/training/guides/[guideId]/assignments` sends `sendGuideAssignmentEmail` (`lib/email.ts`, Resend) to each assigned employee with an email — guide title, who assigned it, the due date, and a link to `/training/guides`. Fire-and-forget / non-fatal (no-ops without `RESEND_API_KEY`); the assignment persists regardless.
+- **Dashboard "needs your attention"**: assigned guides surface as an open item on the portfolio dashboard. `app/api/dashboard/my-tasks/route.ts` adds the `training_guide_assignment` open-item type — it queries `training_guide_assignments` for the current user where `status = 'assigned'` (company-scoped, `project_id = ""`, `project_name = "Company guides"`). `DashboardClient.tsx` routes it to `/training/guides` (via `openItemHref`), labels it **"assigned guide"**, and `lib/dashboard-preferences.ts` registers it (`OPEN_ITEM_TYPES` / labels / default-on) so it shows in the attention list and the Dashboard Settings toggles. Empty `project_id`s are filtered out of the project-name lookup so the UUID `in` query doesn't break.
+
+### Storage / Schema (migrations 165–166)
+- Private `training-guides` bucket (250 MB limit, signed URLs). Upload path: `{companyId}/{ts}-{safeFilename}`; extracted text: `{originalPath}.txt`.
+- `training_guides`: `company_id`, `title`, `description`, `storage_path`, `content_text_path` (Word→plain-text rendition, null otherwise), `filename`, `file_type`, `sort_order`, `created_by`. (Added as `content_html_path` in migration 166; renamed to `content_text_path` in migration 168 when the rendition switched from HTML to plain text.)
+- `training_guide_assignments`: `guide_id`, `user_id`, `assigned_by`, `due_date`, `status` (`assigned`/`completed`), `completed_at`, `UNIQUE(guide_id, user_id)`.
+
+### API
+- `GET /api/training/guides` — `{ guides, myAssignments, canManage }`. Each guide's `url` is a signed link to the HTML rendition when present, else the original. Any session with a `company_id`.
+- `POST /api/training/guides` — Super Admin; body `{ title, description?, storagePath, filename, fileType? }`. Validates `storagePath` is under `{companyId}/`, converts `.docx` → HTML, inserts the row.
+- `GET /api/training/guides/upload-url?filename=…` — Super Admin; signed PUT URL into the bucket.
+- `PATCH/DELETE /api/training/guides/[guideId]` — Super Admin; rename/reorder, or delete (removes the row + original + HTML files).
+- `GET/POST /api/training/guides/[guideId]/assignments` — Super Admin; list / create assignments (`{ userIds, dueDate? }`).
+- `PATCH/DELETE /api/training/guides/assignments/[assignmentId]` — mark complete (assignee or Super Admin) / unassign (Super Admin).
+
+### UI (SiteCommand)
+- `app/training/TrainingNav.tsx` — Guides node links to `/training/guides`.
+- `app/training/guides/page.tsx` (passes `canManage`/`hasCompany`) + `GuidesClient.tsx` (TOC, "Assigned to you", upload form, the `AssignModal`, and the `BestPracticesSection`).
+
+## Training – Lessons (Seven-Track PM Curriculum)
+
+### Overview
+**Training → Lessons** is a hand-authored curriculum that teaches new project managers **how to run SiteCommand's workflows** (RFIs, Submittals, Buyout, Change Events, Commitments, Cost & Billing, Field Ops, Closeout, plus Budget, Scheduling, Permits, Quality, Safety, Risk), **the construction concepts those workflows assume** (reading drawings/specs, RCP, MEP, CSI, lifecycle, contract types, retainage), and five deeper tracks built from the PM learning curriculum: **Building the Work** (means & methods in build sequence), **Site & Civil** (site analysis, grading, E&S/SWPPP, stormwater/LID, utilities, streets/parking, ADA routes, landscape, wetlands, ESAs, entitlements, design-side PM), **MEP Systems** (every system as schedule logic — the universal activity chain, first/second fix, fire suppression, plumbing, HVAC airside/hydronics, BMS, electrical distribution, low voltage, fire alarm & security, MEP scheduling, startup/Cx), **Contracts & Commercial** (delivery methods, AIA documents, key clauses, subcontract administration, liens/bonds, claims), and **Professional Skills** (financial literacy, estimating, leadership, communication, codes, ethics). It is distinct from Best Practice Templates (company-specific policy that feeds the AI) and from Practice (the hands-on sandbox) — Lessons is the read-and-learn curriculum that prepares a user for both.
+
+### Content Model
+- Lesson content is **static and curated**, not user-editable or database-stored. Types + helpers + the original 16 core lessons live in `lib/training-lessons.ts`; the newer content is split by track into `lib/training-lessons-process.ts` (workflow/concept additions), `-technical.ts`, `-sitework.ts`, `-mep.ts`, `-commercial.ts`, `-foundations.ts` — each importing only *types* from the main file (no runtime cycle) and aggregated there into `LESSONS`. Each `Lesson` has an `id`, a `track` (`"workflow" | "concept" | "technical" | "sitework" | "mep" | "commercial" | "foundations"`), a `category` (groups lessons within a track), `title`, `summary`, estimated `minutes`, optional `keyTerms`, a `body` of ordered content blocks (`heading` + `paragraphs`/`bullets`/`ordered`), optional `relatedLessonIds` (cross-links, rendered as chips), and optional `links` (e.g. a "Practice this in your training sandbox" link to `/training/practice`).
+- 70 lessons ship today: 14 **Workflows**, 10 **Concepts**, 11 **Building the Work** (sitework → foundations/concrete → steel/framing → envelope → MEP/fire → finishes/elevators-low-voltage → testing & commissioning), 12 **Site & Civil**, 11 **MEP Systems** (the pattern → wet systems → HVAC → power & signal → running the MEP job), 6 **Contracts & Commercial**, 6 **Professional Skills**. Id prefixes by track: `wf-`, `cn-`, `tech-`, `sc-`, `mep-`, `com-`, `pf-`.
+- Helpers: `getLesson(id)`, `lessonsByTrack(track)`, `lessonCategories(track)`, `TRACK_LABELS`.
+
+### Simulation Tie-In (Recommended Lessons per Day)
+- `TrainingDay` in `lib/training-schedule.ts` carries optional `lessonIds` — every scheduled PM day (Days 1-7, 14, 28, 42, 56, 70) lists 3-4 lessons matched to that day's task batch (e.g. Day 14 "Foundations & Site Utilities" → grading plans, sitework, foundations, concrete).
+- `TrainingDayPanel` resolves them via `getLesson` (unknown ids silently dropped) and renders a green **📖 Recommended lessons** card under the task list, deep-linking each to `/training/lessons?lesson=<id>` in a new tab.
+- `LessonsClient` reads the `?lesson=` query param on mount (from `window.location`, avoiding a Suspense boundary) and preselects that lesson + its track.
+
+### Progress Tracking
+- Any logged-in user (company membership not required) can browse lessons and mark them complete — per-user, not company-scoped.
+- Schema: `training_lesson_progress` (migration `173_training_lesson_progress.sql`) — `user_id`, `lesson_id` (free-text key matching `Lesson.id`, not a foreign key since lessons aren't DB rows), `completed_at`, `UNIQUE(user_id, lesson_id)`.
+- API: `GET /api/training/lessons/progress` → `{ completedIds }`. `POST /api/training/lessons/progress` body `{ lessonId, completed }` → upserts or deletes the row, returns the refreshed `{ completedIds }`.
+
+### UI (SiteCommand)
+- `app/training/TrainingNav.tsx` — **Lessons** node links to `/training/lessons`.
+- `app/training/lessons/page.tsx` (session gate only) + `LessonsClient.tsx` — a docs-browser layout: left pane has a 2-column grid of seven track tabs (Workflows / Concepts / Building the Work / Site & Civil / MEP Systems / Contracts & Commercial / Professional Skills) plus a category-grouped lesson list with per-lesson completion checkmarks and an overall progress bar; right pane renders the selected lesson (key terms callout, body blocks, related-lesson chips, external links, Mark Complete toggle, prev/next navigation within the active track).
+
+## Training – Best Practice Templates (Company Standards that feed the AI)
+
+### Overview
+On **Training → Company Guides**, below the document Table of Contents, a **Best Practice Templates** section lets a **Company Super Admin** document the company's standards for each step of the process (Submittals, Specs, Buyout, RFIs, Closeout, …) as titled free-text entries. These are both (a) human-readable standards everyone in the company can browse, and (b) **authoritative policy injected into the AI features**.
+
+### AI Integration (the key behavior)
+- The same standards are fed into **Assist**, **Looking Ahead**, and **To Do recommendations** as a `=== COMPANY BEST PRACTICES & STANDARDS ===` context block, framed as authoritative company policy.
+- When a standard states a **deadline / lead time** (e.g. "all buyout within 90 days of contract", "electrical submittals within 30 days of contract"), the AI is instructed to **apply it to the relevant project records and derive the concrete target date** from the applicable contract/record date:
+  - **To Do** creates the actionable item with a `suggestedDueDate` computed from the rule (e.g. buyout due = subcontract execution date + 90 days) and cites the standard in the rationale. This is the primary "add those tasks" surface.
+  - **Looking Ahead** surfaces the same as a **fact to remember** ("Per company standard, electrical submittals are due within 30 days of contract; the electrical subcontract was executed 2026-05-01, so the target is 2026-05-31") — consistent with Looking Ahead being facts, not action items.
+  - **Assist** applies the standards when answering and cites which standard it used.
+
+### Tool-Level Permissions
+- **Company Super Admin**: add / edit / reorder / delete best-practice entries.
+- **Any other company member**: read-only.
+- Company-scoped (`training_best_practices.company_id`); mutations re-verify the entry belongs to the caller's company.
+
+### Schema / Implementation (migration 167)
+- `training_best_practices`: `company_id`, `title`, `content` (free text — the standards/rules), `sort_order`, `created_by`. Reorder swaps `sort_order` with the adjacent entry (`PATCH … { move: "up" | "down" }`).
+- Shared accessor: `lib/company-best-practices.ts` → `getCompanyBestPracticesText(supabase, companyId)` (returns the formatted block, or `""` when none) and `getProjectBestPracticesText(supabase, projectId)` (resolves the owning company first). Bounded to 20k chars / 4k per entry so it never dominates the AI context.
+- Injection points (each adds `company_id` to its project select, then prepends the block to the prompt/context):
+  - `lib/looking-ahead.ts` (`generateLookingAheadNotes`) — daily cron + manual refresh.
+  - `lib/todo-recommendations.ts` (`generateTodoRecommendations`) — daily cron + manual refresh.
+  - `app/api/projects/[id]/assist/route.ts` (POST) — Assist Q&A.
+- API: `GET/POST /api/training/best-practices` (list / create — create is Super Admin), `PATCH/DELETE /api/training/best-practices/[bpId]` (edit/reorder/delete — Super Admin).
+- UI: `BestPracticesSection` in `GuidesClient.tsx` — quick-start topic chips, inline add/edit (title + multiline content), reorder, delete; read-only list for members. A note explains the entries feed Assist / Looking Ahead / To Do.
+
+## Training – Project Simulation (SiteCommand Training Sandbox)
+
+### Overview
+**Training → Practice** is a launcher for hands-on **SiteCommand Training** sandboxes. The user picks a **role** (Superintendent / Project Manager / Project Accounting) and a **project type** (multifamily, education, data center, …), clicks **Launch training project**, and a real-but-sandboxed SiteCommand project is created and **opened in a new tab**. The user then runs the whole job using the actual SiteCommand tools.
+
+This replaces the previous text-based, day-by-day **grading game** (scoring frequency + speed). Those settings were removed from the setup; the old game engine (`simulation_games`/`simulation_days`/`simulation_actions`/`simulation_score_reports` tables, `/api/training/games/*`, `lib/simulation.ts`) is left in place but is no longer used by the Practice flow.
+
+### Sandbox = a real, training-flagged project
+- A sandbox is an ordinary `projects` row with `is_training = true` (migration `168_training_sandbox_projects.sql`, which also adds `training_role`, `training_project_type`, `training_owner_id`, and a `training_day` counter for the upcoming day/email feed).
+- On launch the user is inserted into `project_memberships` as `project_admin`, so `getToolLevel` resolves to **admin** on every tool and the whole workspace is usable — even for users with no company (access then rests solely on that membership row).
+- PM sandboxes seed a directory + handoff/buyout emails at launch (see "Project Manager Day-1 Seeding"), and a **per-"day" inbox feed** delivers new emails from the owner, vendors, and accounting as `training_day` advances (see "Day-Scheduled Inbox Feed").
+
+### Branding
+- Every tool page of a sandbox shows a persistent amber **SiteCommand Training** banner (`app/projects/[id]/components/TrainingBanner.tsx`), rendered from `app/projects/[id]/layout.tsx` when the project's `is_training` is true. It links back to `/training/practice` to exit.
+
+### Hiding sandboxes from the real app
+- `GET /api/projects` filters `is_training = false` (both the org-admin and member branches), so sandboxes never appear in the dashboard project tiles or the projects list.
+- `GET /api/dashboard/my-tasks` drops tasks/open-items belonging to training projects (resolved via the project-name lookup, now also selecting `is_training`).
+- Known minor leaks not yet filtered: global search and the Project Admin **Copy Directory From** dropdown can still surface sandbox projects (harmless — sandboxes are empty and owned by the user).
+
+### Auto-save / "Save progress"
+- The sandbox's tool records already persist per-action, so there is no unsaved client buffer to flush. "Save progress" is therefore a Google-Docs-style **checkpoint + reassurance**: it bumps `projects.training_last_saved_at` (migration `169_training_last_saved_at.sql`) and drives an **All changes saved · <relative time>** indicator.
+- The `TrainingBanner` (client component) auto-saves on a **60s heartbeat**, on **tab hide** and **page close** (`navigator.sendBeacon`, which carries session cookies through unload), and on demand via the **Save progress** button in the banner's top-right corner. Failed saves show "Couldn't save — retry" and the button retries.
+- `training_last_saved_at` is set at create time and surfaced as **Last saved …** on each Practice list row.
+
+### API
+- `GET /api/training/projects` — list the current user's sandboxes (`is_training` + `training_owner_id = me`, non-archived); includes `training_last_saved_at`.
+- `POST /api/training/projects` — body `{ role, projectType }`; validates against `simulation-constants`, creates the project (`name: "Training: <Type>"`, `sector` = type label, `company_id` = the user's company or null, `training_last_saved_at = now`), adds the `project_admin` membership (rolls back the project if that insert fails), returns `{ id }`. Any logged-in user may launch one.
+- `POST /api/training/projects/[projectId]/save` — owner-only, training-only; sets `training_last_saved_at = now`, returns `{ savedAt }`. Accepts `navigator.sendBeacon` (no body required).
+- `DELETE /api/training/projects/[projectId]` — owner-only, training-projects-only; cascade-deletes the sandbox.
+
+### UI (SiteCommand)
+- `app/training/practice/PracticeClient.tsx` — role cards + project-type select + **Launch training project ↗** (opens a blank tab synchronously to dodge popup blockers, then points it at `/projects/{id}`), plus a **Your training projects** list with open-in-new-tab + delete. Reuses `ROLES` / `PROJECT_TYPES` / `roleLabel` / `projectTypeLabel` from `lib/simulation-constants.ts`.
+
+### Project Manager Day-1 Seeding
+When a sandbox is launched as **Project Manager** (`role === "project_manager"`), the project is seeded so it feels live the moment it opens. (Superintendent / Project Accounting sandboxes are unaffected for now.) Reuses existing tables — **no migration**.
+- **Directory** — the GC's internal team is inserted into `directory_contacts` (type `user`, with name/phone/`company`/`job_title`, **no email** and no `permission`): **Preconstruction Manager, Estimator, President, Vice President, Project Executive, Superintendent, Assistant Superintendent**. The company name resolves to the launcher's company (else fictional "Summit Builders"). Contacts carry no email by design (migration `169_training_directory_no_emails.sql` backfills older sandboxes); the handoff email's sender still uses a generated `first.last@<companyslug>.com` address.
+- **Emails** — a Day-1 **project handoff email** from the preconstruction manager (David Okafor) to the PM (the launcher's real name/email) is written straight into `project_email_threads` + `project_email_messages` (no external mailbox). Body carries the IFC drawing set (by discipline), the project manual / specifications, and kickoff info: Notice to Proceed (= project `start_date`), substantial completion (NTP + per-type duration), owner, architect, delivery method, contract value, long-lead items. Per-type flavor (value/size/scope/duration) comes from `TYPE_BRIEF`.
+  - **Attachments (bid drawings + addenda)** — the IFC Drawings section links the real bid drawing set (`DRAWINGS`) and a dedicated "Bid Addenda" section links the addenda (`ADDENDA`), both defined in `lib/training-seed.ts` and served as static assets from `public/training/` (`208570-bid-drawings-part-1.pdf`, `208570-bid-drawings-part-2-1.pdf`, `208570-bid-drawings-part-2-2.pdf`, `208570-addendum-no-1.pdf`, `208570-addendum-no-2-final.pdf`). Links are absolute (`appBaseUrl()` → `NEXT_PUBLIC_APP_URL`/`NEXT_PUBLIC_BASE_URL`, falling back to `http://localhost:3000`) so they're stable in the stored body and open from the in-iframe email view in a new tab. To add/swap attachments (e.g. more drawing parts), drop the PDF in `public/training/` and append to `DRAWINGS` / `ADDENDA`.
+- **Reading seeded email without a connection**: `GET /api/projects/[id]/emails/[threadId]/messages` short-circuits when `projects.is_training` — it returns the **stored** copy (`getStoredThreadMessages`) and skips the live Gmail/Outlook fetch. For training it now reports `accountEmail = session.email` (not null) so the reply composer treats the trainee's seeded outreach as "sent by me" and targets the sub. The Emails thread table already renders independently of a provider connection, so the handoff shows up with no mailbox linked.
+- **Real-mailbox isolation (Emails page)** — a sandbox's Emails page never touches the user's real email connection, even when they have Gmail/Outlook connected for real projects. `app/projects/[id]/emails/page.tsx` reads `projects.is_training` and passes `isTraining` to `EmailsClient`, which then: skips the `/api/emails/connection` fetch, hides the connection banner (a blue "simulated inbox" notice renders instead), hides the **Link Emails to Project** button/modal, and hides the New Emails **TriageDeck**. Server-side guards back this up: `GET /api/projects/[id]/emails/triage` returns `{ connected: false }` for training projects before touching the connection, and `POST /api/projects/[id]/emails` (thread linking) rejects training projects with a 400.
+- **Composing new emails to the fake people** — in a sandbox the **Compose** button always shows and the **To** field is a dropdown of project Directory contacts that have an email (type ≠ `distribution_group`); CC is hidden. Sending POSTs to the training-only `POST /api/projects/[id]/emails/compose` (`maxDuration = 60`, session + `canAccessProject`, 400 on non-training projects): it validates the recipient is a Directory contact (`lookupTrainingCounterparty`), creates a new local thread (`graph_conversation_id: training-compose-{ts}-{rand}`), stores the trainee's message, and synthesizes the recipient's reply via the same Gemini generator (`lateFirstResponse: false`; canned brief-ack fallback), then updates the thread summary. The client reloads the thread list on success so the new conversation (with the generated reply) appears immediately.
+- **Subcontractors + buyout emails (the "slow" sub)** — every PM sandbox also seeds a subcontractor roster and a set of buyout email threads (`lib/training-emails.ts` → `TRAINING_SUBS`, content builders; seeded by `seedBuyoutEmails` in `lib/training-seed.ts`). The full roster (8 trades, with email + phone) goes into `directory_contacts` (type `user`); the first `BUYOUT_THREAD_COUNT` (5 early trades) each get a buyout thread (trainee → sub). The non-slow subs come with a prompt seeded bid response; **exactly one sub — picked at random per project — is the "slow" sub**, whose thread is seeded with *no* response (and an older, conspicuously stale outreach). The trainee chases them by phone (the directory number) or by following up in the thread.
+  - **Following up generates the sub's reply**: `POST /api/projects/[id]/emails/[threadId]/reply` branches on `is_training` (no live mailbox) → `handleTrainingReply` stores the trainee's reply locally and synthesizes the counterparty's response — **realistically via Gemini** (`lib/training-email-reply.ts` → `generateTrainingCounterpartyReply`, `gemini-2.5-flash` structured output), grounded in the counterparty's Directory persona (company/title/phone, plus trade + bid when they're a `TRAINING_SUBS` member), the project name/type, and the full stored thread. Without `GEMINI_API_KEY` (or on any API failure) it falls back to the canned `buildCounterpartyReply`. The **first** time a counterparty answers a thread (the slow sub finally replying after being chased) the tone is **apologetic** about the delay (`lateFirstResponse` prompt hint / canned apologetic path); any later reply is a normal in-character response. "First response" is detected as "no prior message from anyone but the trainee". No migration / no new column: the slow sub is simply the seeded thread without a response. The reply route sets `maxDuration = 60` for the Gemini call.
+- **Day-by-day task panel** — `app/projects/[id]/components/TrainingDayPanel.tsx`, mounted from `app/projects/[id]/layout.tsx` when `is_training` **and** the role is a `SimRole`. A right-edge panel titled **Day {n}** that surfaces the tasks scheduled for the trainee's current in-sim day (`projects.training_day`), with checkable tasks (each shows a category chip, collaborators, and the deliverable), a phase/timeframe sub-header, and a **Complete Day {n} →** button that advances to the **very next day** (`training_day + 1`). **Day 1** also pins the role-specific **Company Onboarding** PDF link at the top.
+  - **Schedule data** lives in `lib/training-schedule.ts` (client-safe) — `getTrainingSchedule(role)` returns an ordered `TrainingDay[]` (`{ day, phase, timeframe, tasks[] }`). Only **Project Manager** is wired up today; the PM schedule is the end-to-end build task list. **Task batches land on specific days** (Days 1-7 pre-construction/buyout, then Days 14, 28, 42, 56, 70 for the construction phases); **the trainee advances one day at a time**, so the many in-between days carry no new tasks and render a quiet "No new tasks scheduled for today" state (phase context + recurring cadence still show). Helpers: `getScheduledDay(schedule, day)` returns the exact-day batch (null on in-between days); `resolveDayIndex` / `phaseForDay` "stick" to the most recent batch for phase context; `clampTrainingDay` pins a stored value onto the calendar (first..last); `firstScheduledDay` / `lastScheduledDay` bound it.
+  - **Advancing** — `PATCH /api/training/projects/[projectId]` (owner-only, training-only) sets `training_day` to `currentDay + 1` and bumps `training_last_saved_at`. The PATCH `.select()`s the persisted value back and 500s if zero rows were updated, so a write that didn't actually save surfaces instead of advancing the UI on a false success. The panel moves to the next day only after that confirmed success; advancing stops at the last scheduled day (closeout). The **Job Review** still fires once per phase, when completing a day crosses into a new phase (e.g. Day 13 → 14) — not on every empty day.
+  - **Day reconciliation (resume on reopen)** — the panel seeds `currentDay` from the server-rendered `initialDay` (`projects.training_day` read in the project layout), then on mount does a one-time `GET /api/training/projects/[projectId]` (`cache: "no-store"`, `force-dynamic`) and bumps `currentDay` **forward** to the authoritative server day if it's higher. This guarantees a reopened sandbox resumes on the saved day even if the server-render served a stale `initialDay`; it never pulls a legitimate in-session advance backward (only ever increases). Without this, a stale render could strand the trainee back on Day 1.
+  - **Coach** narrates only on days that carry a task batch — the in-between (empty) days surface no coach pill/popup (`TrainingCoach` gates on `getScheduledDay`).
+  - **State** — task check-offs persist per project in `localStorage` (one JSON map `sc-training-tasks-{projectId}` keyed `"{day}-{index}"`), as does the collapsed flag and the Day-1 onboarding-read flag, all via `useSyncExternalStore` (SSR-safe). Collapses to a vertical tab flush against the right edge; `z-40` so it sits below modals and clears the bottom-right Assist FAB.
+- Seeding helper: `lib/training-seed.ts` → `seedTrainingProjectManager(supabase, { projectId, ownerUserId, projectType, startDate, companyId })`, called (awaited, best-effort) from `POST /api/training/projects` after the membership insert. Everything cascades away on sandbox delete (all three tables are `ON DELETE CASCADE` on `project_id`).
+
+### Day-Scheduled Inbox Feed (Owner / Vendor / Accounting / Scenario Emails)
+As the trainee advances the in-sim day, new emails "arrive" in the sandbox inbox from the people a real PM hears from constantly. **No migration** — deliveries write ordinary `project_email_threads` + `project_email_messages` rows, exactly like the seeded handoff/buyout emails, so they read back without a mailbox connection and replying works through the existing training reply path (`handleTrainingReply` synthesizes a brief acknowledgement, since the counterparty already spoke first in these threads).
+- **Content** lives in `lib/training-inbox.ts` (client-safe, pure content): `INBOX_SENDERS` (14 personas: the owner's rep Elaine Whitfield of Meridian Development Partners; internal Accounting Manager Janet Kim; four vendors — switchgear, elevator, roofing supplier, HVAC equipment; plus the lesson-scenario senders: utility rep Marcus Reed of Piedmont Power & Light, City of Riverton inspections coordinator Angela Torres and Deputy Fire Marshal Sandra Okoye, civil engineer of record Priya Sharma of Harlan Civil Group, testing agency field manager Owen Blake of Meridian Testing Labs, project architect Laura Chen of Halford Studio Architects, controls integrator Alan Reyes of Corebridge Controls, and the roster fire-protection sub Aisha Coleman — `seedContact: false` because `inboxSenderEmail` matches her `subEmailFor` Directory row) and `TRAINING_INBOX_EMAILS`, a day-keyed schedule of 31 emails across the 70-day PM calendar. Owner mail covers kickoff asks, an EV-charging ROM request, board-meeting schedule pressure, and an early-access/FF&E request; vendor mail covers a 42-week switchgear quote with a 30-day price hold, an elevator submittal fab-slot deadline, a roofing price-increase notice, and an RTU delivery slip with a partial-ship decision; accounting mail includes **in-body HTML invoices** to code + approve (surveying, materials testing, and an equipment-rental invoice with a deliberate rate overbilling + damage-waiver error the trainee should dispute), the monthly billing calendar, a held payment over a missing Bedrock Concrete lien waiver (ties to the seeded sub), and closeout/retainage billing prep.
+- **Lesson-driven scenario mail** (17 emails, each annotated in-source with the Training → Lessons ids it exercises): the utility's service application asking for a load letter + panel/load-center locations & ampacities (day 5) and its energization checklist/temp-to-perm gate (36); the owner asking about the erosion control plan after a lender site visit (9), a parking-restripe/ADA/entitlement ask (50), and a run-the-HVAC-early beneficial-use request (53); permit conditions + special-inspections statement from the building department (11); the civil engineer's grading release with LOD/tree-save/bioretention protection + a rim/spot-grade conflict (13) and the site closeout list — basin conversion, as-builts, NPDES notice of termination (64); the testing agency's failed trench-compaction lifts (19), unsuitable-soils/differing-site-condition stop-work recommendation (21), and low 7-day concrete breaks (26); the architect's split elevator submittal return + envelope mock-up gate (33); the sprinkler sub asking to hang branch pipe ahead of coordination sign-off (40); accounting flagging the mechanical sub's 80%-billed vs ~55%-installed ductwork pencil-draw adjustment (46); the controls integrator's points-list review + compression warning (48); the fire marshal's acceptance-test requirements + ERRC test demand (59); and the state elevator inspection backlog (62).
+- **Delivery**: `deliverTrainingInboxThroughDay(supabase, { projectId, day })` in `lib/training-seed.ts`, called best-effort from the day-advance `PATCH /api/training/projects/[projectId]` after the `training_day` write. It inserts every scheduled email with `day ≤ current` that doesn't already exist — idempotent via deterministic `graph_conversation_id`s (`training-inbox-{slug}`) and self-healing (a missed batch lands on the next advance). Multiple emails in one catch-up get `sent_at` staggered by a minute for stable thread ordering. Delivery also **self-heals the Directory**: any missing external sender contacts (for the mail being delivered) are inserted at that point, so sandboxes launched before a sender existed still get phone lookup + reply-persona grounding.
+- **Directory**: Janet Kim is part of the seeded GC `TEAM` (internal — no email in the directory, consistent with migration 169); the external senders (owner rep, vendors, utility/AHJ/design-team scenario contacts) are seeded into `directory_contacts` with email + phone at launch (filtered on `!internal && seedContact !== false`) so the trainee can reach out to them.
+- **Day panel hint**: `TrainingDayPanel` imports `inboxEmailsForDay` and shows a blue "📬 New email(s) in your inbox — From {senders}" card linking to the project Emails page on days mail lands.
+
+### Phase Job Reviews — Saved Reviews + PDF
+At each phase boundary the trainee gets a milestone **Job Review** (AI narrative + highlights + per-missed-task catch-up). Reviews are persisted per `(project, phase)` in `training_phase_reviews` (migration `171`) and surfaced when a sandbox row is expanded on **Training → Practice** (`ReviewsPanel` in `PracticeClient.tsx`).
+- **Open as PDF** — each saved review in the expanded list carries a **PDF ↗** hyperlink (alongside the interactive review link) that opens the Job Review as a stored PDF in a new tab: `GET /api/training/projects/[projectId]/reviews/[reviewId]/pdf` (owner-only). The route serves the stored PDF via a fresh 1-hour signed URL, **generating + storing it on first open** if it doesn't exist yet (so old reviews, and reviews whose pre-render failed, still produce a PDF on demand), then 302-redirects to it.
+- **Rendering** — `lib/training-review-pdf.ts` → `buildPhaseReviewPdf(data)` lays out the review with **pdf-lib** (no headless browser): header (phase, project, completed/missed/% summary, closed-out banner), performance-review narrative + highlights, completed tasks, and missed/auto-completed tasks (with the catch-up resolution when closed out). Text is sanitized to WinAnsi (Helvetica) and wrapped/paginated manually. `storePhaseReviewPdf(supabase, projectId, reviewId, data)` builds the bytes, uploads to the existing **`project-drawings`** bucket at `{projectId}/_phase-reviews/{phase-slug}.pdf` (`upsert: true`), and records the path in `training_phase_reviews.pdf_storage_path` (migration `172`).
+- **When the PDF is written** — `POST …/phase-review` pre-renders + stores the PDF after upserting the review (best-effort, so the link is ready without a first-click wait); `PATCH …/reviews` (close-out) **re-renders** it so the PDF reflects the caught-up (auto-completed) state; the `…/pdf` route lazily generates-and-stores as the fallback. All three reuse `storePhaseReviewPdf`. The stored file cascades away on sandbox delete (review row → bucket file is left, but the path/row is gone).
+
+### Coach Narrator (ElevenLabs Audio)
+A spoken "coach" walks the trainee through the project. The moment a sandbox opens — and again at the start of every in-sim day — a popup card invites them to **"Get started with a message from your coach"**; clicking **Play message** fetches an ElevenLabs-narrated MP3 of that day's briefing and plays it alongside the transcript. Day 1 is the full welcome monologue (orientation, the "no safety net" reality, the project network); every later scheduled day is a short, phase-aware briefing. Scoped to **Project Manager** sandboxes (the only narrated role today), reusing existing tables/buckets — **no migration**.
+
+- **Scripts** — `lib/training-narration.ts` (client-safe) is the single source of truth. `buildTrainingNarration(role, day, { userName, projectName })` returns `{ title, text }`: the welcome script (with the trainee's first name + a cleaned project name — strips a leading `Training: ` prefix) on day one, then a hand-authored briefing per scheduled PM day (Days 2-7, 14, 28, 42, 56, 70), with a schedule-derived fallback (`getTrainingSchedule` phase/timeframe + top tasks) for any unauthored day. Both the Coach component (transcript) and the API route (TTS) build from this one module, so spoken audio and on-screen text always match.
+- **API** — `POST /api/projects/[id]/training/narration` body `{ day }` (`maxDuration = 60`). Requires a session + `canAccessProject`; the project must be `is_training`. Resolves the raw `day` to the active scheduled day (`resolveDayIndex`), looks up the trainee's first name (`users`) and the project name, builds the script, then synthesizes via ElevenLabs **text-to-speech** (`https://api.elevenlabs.io/v1/text-to-speech/{voiceId}`, MP3). Key resolution mirrors the STT route: `company_integrations` → `platform_settings` → `ELEVENLABS_API_KEY` env. Voice/model are overridable via `ELEVENLABS_VOICE_ID` (default Adam `pNInz6obpgDQGcFmaJgB`) and `ELEVENLABS_TTS_MODEL_ID` (default `eleven_multilingual_v2`).
+  - **Caching** — the MP3 is uploaded once to the existing `project-drawings` bucket at `{projectId}/_narration/pm-day-{day}-{hash}.mp3` (`hash` = first 12 hex of `sha256(text | voice | model)`), so changing the script/voice/model regenerates but replays/re-opens reuse the cached file. The route returns a 1-hour signed URL.
+  - **Graceful degradation** — when no key is configured, or TTS/upload fails, the route still returns `{ title, text, audio: false }` (200) so the coach shows a readable transcript instead of erroring.
+- **UI** — `app/projects/[id]/components/TrainingCoach.tsx`, mounted from `app/projects/[id]/layout.tsx` next to the Day panel (same `is_training` + `SimRole` gate; renders nothing for roles without a schedule). A bottom-left card (clears the right-edge Day panel and the bottom-right Assist FAB). Auto-opens for any **unheard** active day; once acknowledged ("Got it" / Dismiss) the day is recorded so it won't nag, and a persistent **🎧 Message from coach** launcher pill replays the current message on demand. Controls: Play/Pause, Replay, and a scrollable transcript.
+  - **Day sync** — the active scheduled day is read from `localStorage["sc-training-active-day-{projectId}"]`, which `TrainingDayPanel` now writes (via the shared `sc-training-day-change` event) on mount and on every advance, so completing a day surfaces the next coach message live. Heard days persist in `sc-training-coach-heard-{projectId}` (JSON array), read via `useSyncExternalStore` like the panel's other flags. Falls back to the server-provided `initialDay` before the panel writes.
+
+### Interactive Text Meetings (Day-Panel Hyperlinked Tasks)
+Scheduled tasks that carry a defined meeting are **hyperlinked in the Day panel** — clicking opens `/training/meeting?project={id}&meeting={meetingId}` in a new tab, where the trainee attends the meeting as a text conversation. The fake attendees (GC precon personas) talk in turn; whenever the floor is handed to the PM, the page prompts the trainee to respond via text, and the attendees continue (LLM-generated). The meeting **sticks to its agenda**: if the trainee asks something off-script, the attendees answer the aside in character and steer back to the current agenda item. Only the **Day-1 PM bid-review meeting** ("Meet with preconstruction team to review bid results and develop short-list of vendors by trade") is defined today; future meetings are added to `TRAINING_MEETINGS`. All text for now — voice (ElevenLabs) and an Outlook-style meeting calendar are planned follow-ups.
+
+- **Content** — `lib/training-meetings.ts` (client-safe): `TrainingMeeting` type (`id`, `role`, `day`, `taskMatch` — the exact `TrainingTask.task` string it hyperlinks — `title`, `objective`, `deliverable`, `speakers` with per-persona `style` hints, `agenda` items with grounding `points`, `checkpoints`, and deterministic `opening` turns), plus helpers `getTrainingMeeting(id)`, `meetingForTask(role, day, task)`, `meetingSpeaker(meeting, key)`, and `bidTabText()`. The Day-1 meeting (`pm-day1-bid-review`) is run by David Okafor (Precon Manager, facilitator) with Rachel Nguyen (Estimator, owns the numbers) and Marcus Bennett (Project Executive, strategy/risk); its **bid tab** grounds every trade in the seeded `TRAINING_SUBS` roster bids (imported, so meeting numbers always agree with the seeded buyout emails) plus fictional competitors — including deliberate wrinkles (Steel and Glazing apparent-lows with scope gaps, thin electrical coverage, a 45-day roofing price hold) so the short-list discussion has substance.
+- **Checkpoints (planted "tests")** — each meeting carries `MeetingCheckpoint[]`: hidden issues the PM is expected to catch (`id`, `title`, `expectation`, an LLM-only `plant` instruction saying how attendees surface the clue *without resolving it*, `plantAgendaIndex`, an optional `fallbackLine` appended to the canned fallback turn so the clue still surfaces without Gemini, and `keywords` for the degraded scoring heuristic). The Day-1 meeting has five: the **30-day slab-pour milestone** (dropped in passing by Marcus — the only clue not already on the bid tab), the Steel scope gap, the roofing 45-day price hold, the switchgear long-lead release, and the glazing apparent-low risk. The turn route injects the plants into the system prompt under a "HIDDEN TESTS" block (surface naturally, never resolve, never hint it's a test).
+- **Turn API** — `POST /api/projects/[id]/training/meetings/[meetingId]` (`maxDuration = 60`; session + `canAccessProject`; project must be `is_training` and `training_role` must match the meeting's role). Body `{ transcript: [{ speaker, text }], agendaIndex }` → `{ turns, agendaIndex, done }`. An **empty transcript returns the deterministic opening** (no LLM call); otherwise the last transcript turn must be the PM's (`speaker: "user"`, 400 otherwise) and Gemini `gemini-2.5-flash` (structured output: turns with a speaker-key enum, `agendaIndex`, `done`) produces 1-3 attendee turns that always end by handing the floor back to the PM until the final agenda item wraps (`done: true`, facilitator closes with a recap). The returned `agendaIndex` only ever moves forward and is bounded to the real item range. **Fallback** without `GEMINI_API_KEY` (or on any failure): a canned facilitator turn advances the agenda one item per PM message (appending any `fallbackLine` plants for that item), so the meeting still runs end to end.
+- **Minutes + scoring** — when the meeting adjourns, the client POSTs the transcript to `…/meetings/[meetingId]/minutes`, which generates **formal minutes** (summary, decisions, action items) and **scores every checkpoint** (caught/missed + a one-sentence note) via `lib/training-meeting-minutes.ts` (Gemini structured output; scoring counts only what the PM actually said — attendees mentioning a risk doesn't count. Degraded fallback assembles minutes deterministically and scores by keyword match on the PM's turns). Result upserts to `training_meeting_minutes` (migration `174`, `UNIQUE(project_id, meeting_id)`, transcript snapshot included so minutes survive across browsers). `GET` on the same route returns the saved row; `GET …/meetings/minutes` (static segment wins over `[meetingId]`) lists all saved minutes for the project. Restart-and-recomplete regenerates via the upsert.
+- **UI** — `app/training/meeting/page.tsx` (server gate mirroring `/training/review`: owner-only, training-flagged, role-matched; unknown meeting/project → redirect) + `TrainingMeetingClient.tsx`. Live view: header card (title, Day n, attendee chips + "You · Project Manager", objective/deliverable), an **agenda tracker** (numbered items; ✓ done, amber "Now" for the current item), the transcript (attendee bubbles left with name/title + per-speaker accent, PM bubbles right in dark), and a textarea (Enter to send / Shift+Enter newline) with Restart-meeting and Leave-meeting controls. Live state (`transcript`/`agendaIndex`/`done`) persists in `localStorage["sc-training-meeting-{projectId}-{meetingId}"]` so a reload resumes mid-meeting. **After completion the same hyperlink shows the saved minutes**: on mount the client checks `GET …/minutes` first and, when a row exists, renders the minutes view — a **Meeting effectiveness** score card (`X/N caught` badge, per-checkpoint ✓/✕ rows with the scoring note, plus the missed checkpoints' "what to catch" expectation), the minutes (summary / decisions / action items), and a collapsed full transcript.
+- **Job Review link** — `TrainingReviewClient.tsx` fetches the project's saved-minutes list and renders a **Meeting minutes** section (`MeetingMinutesSection`) for the meetings scheduled in the reviewed phase: each row hyperlinks to the meeting page ("open minutes ↗", or "join meeting ↗" + a "not held" pill when never completed) with the `X/N caught` score badge. The section renders in both the ready and error states, so minutes stay reachable even when the AI review can't generate.
+- **Task auto-check** — when the meeting adjourns, the client checks the matching task off in the Day panel's store (`sc-training-tasks-{projectId}`, key `{day}-{taskIndex}` resolved by matching `taskMatch` against the schedule); the project tab picks it up via the cross-tab `storage` event.
+- **Day panel** — `TrainingDayPanel.tsx` calls `meetingForTask(role, currentDay, task)` per task and renders matches as a blue hyperlink ("(join meeting ↗)", new tab) instead of plain text.

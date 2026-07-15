@@ -51,6 +51,7 @@ export const TEMPLATE_TOOLS: string[] = [
   "Commitments",
   "Change Orders",
   "Change Events",
+  "Transaction Orders",
   "RFIs",
   "Submittals",
   "Transmittals",
@@ -62,6 +63,9 @@ export const TEMPLATE_TOOLS: string[] = [
   "Photos",
   "Drawings",
   "Specifications",
+  "Permit Applications",
+  "Zoning Analysis",
+  "Site Plan",
   "Documents",
   "Directory",
   "Cover Letters",
@@ -74,11 +78,36 @@ export const TEMPLATE_TOOLS: string[] = [
 ];
 
 /** Built-in defaults for company user types when no override is stored yet. */
-const COMPANY_DEFAULTS: Record<CompanyUserType, PermissionLevel> = {
+export const COMPANY_DEFAULTS: Record<CompanyUserType, PermissionLevel> = {
   super_admin: "admin",
   admin: "admin",
   member: "standard",
 };
+
+/** Resolves the default permission level for a given company role. */
+export function companyRoleDefaultLevel(role: string | null | undefined): PermissionLevel {
+  if (role && role in COMPANY_DEFAULTS) {
+    return COMPANY_DEFAULTS[role as CompanyUserType];
+  }
+  return "standard";
+}
+
+/**
+ * Effective company-member level for a given tool slug, applying the
+ * per-tool override if one is set and falling back to the role default
+ * otherwise.
+ */
+export function effectiveCompanyMemberLevel(
+  toolLevels: Record<string, string> | null | undefined,
+  companyRole: string | null | undefined,
+  slug: string
+): PermissionLevel {
+  if (toolLevels && slug in toolLevels) {
+    const v = toolLevels[slug];
+    if (isPermissionLevel(v)) return v;
+  }
+  return companyRoleDefaultLevel(companyRole);
+}
 
 /** Returns the built-in default level for a (category, type, tool). */
 export function defaultLevelFor(
@@ -110,6 +139,7 @@ export const TOOL_NAME_TO_SLUG: Record<string, string> = {
   "Commitments": "commitments",
   "Change Orders": "change-orders",
   "Change Events": "change-events",
+  "Transaction Orders": "transaction-orders",
   "RFIs": "rfis",
   "Submittals": "submittals",
   "Transmittals": "transmittals",
@@ -121,6 +151,9 @@ export const TOOL_NAME_TO_SLUG: Record<string, string> = {
   "Photos": "photos",
   "Drawings": "drawings",
   "Specifications": "specifications",
+  "Permit Applications": "permit-applications",
+  "Zoning Analysis": "zoning-analysis",
+  "Site Plan": "site-plan",
   "Documents": "documents",
   "Directory": "directory",
   "Cover Letters": "cover-letters",
@@ -179,6 +212,7 @@ export const PERMISSION_TEMPLATES: Record<PermissionTemplateName, TemplateRow[]>
     },
     { tool: "Change Orders", level: "read_only" },
     { tool: "Change Events", level: "none" },
+    { tool: "Transaction Orders", level: "none" },
     { tool: "RFIs", level: "read_only" },
     { tool: "Submittals", level: "read_only" },
     { tool: "Transmittals", level: "none" },
@@ -190,6 +224,9 @@ export const PERMISSION_TEMPLATES: Record<PermissionTemplateName, TemplateRow[]>
     { tool: "Photos", level: "read_only" },
     { tool: "Drawings", level: "read_only" },
     { tool: "Specifications", level: "read_only" },
+    { tool: "Permit Applications", level: "read_only" },
+    { tool: "Zoning Analysis", level: "none" },
+    { tool: "Site Plan", level: "none" },
     { tool: "Documents", level: "standard" },
     { tool: "Directory", level: "none" },
     { tool: "Cover Letters", level: "none" },
@@ -212,6 +249,7 @@ export const PERMISSION_TEMPLATES: Record<PermissionTemplateName, TemplateRow[]>
     { tool: "Commitments", level: "none" },
     { tool: "Change Orders", level: "standard" },
     { tool: "Change Events", level: "none" },
+    { tool: "Transaction Orders", level: "none" },
     { tool: "RFIs", level: "standard" },
     {
       tool: "Submittals",
@@ -231,6 +269,9 @@ export const PERMISSION_TEMPLATES: Record<PermissionTemplateName, TemplateRow[]>
       granularPermissions: ["Upload Drawings", "Upload and review Drawings"],
     },
     { tool: "Specifications", level: "read_only" },
+    { tool: "Permit Applications", level: "read_only" },
+    { tool: "Zoning Analysis", level: "none" },
+    { tool: "Site Plan", level: "none" },
     { tool: "Documents", level: "standard" },
     { tool: "Directory", level: "none" },
     { tool: "Cover Letters", level: "none" },
@@ -253,6 +294,7 @@ export const PERMISSION_TEMPLATES: Record<PermissionTemplateName, TemplateRow[]>
     { tool: "Commitments", level: "none" },
     { tool: "Change Orders", level: "standard" },
     { tool: "Change Events", level: "none" },
+    { tool: "Transaction Orders", level: "none" },
     { tool: "RFIs", level: "standard" },
     {
       tool: "Submittals",
@@ -268,6 +310,9 @@ export const PERMISSION_TEMPLATES: Record<PermissionTemplateName, TemplateRow[]>
     { tool: "Photos", level: "standard" },
     { tool: "Drawings", level: "read_only" },
     { tool: "Specifications", level: "read_only" },
+    { tool: "Permit Applications", level: "read_only" },
+    { tool: "Zoning Analysis", level: "none" },
+    { tool: "Site Plan", level: "none" },
     { tool: "Documents", level: "standard" },
     { tool: "Directory", level: "none" },
     { tool: "Cover Letters", level: "none" },

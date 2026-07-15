@@ -120,6 +120,33 @@ function fmtQty(val: number | null | undefined) {
   return val.toLocaleString("en-US", { minimumFractionDigits: 2 });
 }
 
+// Map a change-event status to a design-system pill class
+function statusPillClass(status: string | null | undefined) {
+  const s = String(status ?? "").trim().toLowerCase();
+  if (s === "open") return "pill-open";
+  if (s === "pending") return "pill-warn";
+  if (s === "closed" || s === "void") return "pill-post";
+  return "pill-info";
+}
+
+// Map a change-event status to an idx-italic status modifier
+function statusIdxClass(status: string | null | undefined) {
+  const s = String(status ?? "").trim().toLowerCase();
+  if (s === "open") return "status-open";
+  if (s === "closed" || s === "void") return "status-closed";
+  if (s === "pending") return "status-draft";
+  return "status-answered";
+}
+
+function StatusPill({ status }: { status: string | null | undefined }) {
+  const label = String(status ?? "").trim() || "—";
+  return (
+    <span className={`pill ${statusPillClass(status)}`}>
+      {label.charAt(0).toUpperCase() + label.slice(1)}
+    </span>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function ChangeEventsClient({
@@ -456,7 +483,7 @@ export default function ChangeEventsClient({
   function TH({ children, right }: { children?: string | number; right?: boolean }) {
     return (
       <th
-        className={`px-2 py-2 text-xs font-medium text-gray-500 whitespace-nowrap ${right ? "text-right" : "text-left"}`}
+        className={`px-2 py-2 mono-label whitespace-nowrap ${right ? "text-right" : "text-left"}`}
       >
         {children}
       </th>
@@ -466,11 +493,11 @@ export default function ChangeEventsClient({
   // ── Number cell ────────────────────────────────────────────────────────────
   function NumCell({ val, blue, qty }: { val: number | null | undefined; blue?: boolean; qty?: boolean }) {
     if (val === null || val === undefined || val === 0) {
-      return <td className="px-2 py-2 text-right text-xs text-gray-400 whitespace-nowrap">{qty ? "0.00" : "$0.00"}</td>;
+      return <td className="px-2 py-2 text-right text-xs font-mono tabular-nums text-gray-300 whitespace-nowrap">{qty ? "0.00" : "$0.00"}</td>;
     }
     return (
       <td
-        className={`px-2 py-2 text-right text-xs whitespace-nowrap ${blue ? "text-blue-600 font-medium" : "text-gray-700"}`}
+        className={`px-2 py-2 text-right text-xs font-mono tabular-nums whitespace-nowrap ${blue ? "text-[color:var(--brand-700)] font-medium" : "text-[color:var(--ink)]"}`}
       >
         {qty ? fmtQty(val) : fmt(val)}
       </td>
@@ -483,12 +510,12 @@ export default function ChangeEventsClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* ── Page Header ─────────────────────────────────────────────────────── */}
-      <div className="px-6 pt-8 pb-4 bg-gray-50">
+      <div className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 bg-[#F9FAFB]">
         <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Change Events</h1>
         {events.length > 0 && (
           <p className="sec-sub mt-1.5">
@@ -501,45 +528,63 @@ export default function ChangeEventsClient({
             <span className="num">{events.length}</span> total
           </p>
         )}
+        {events.length > 0 && (() => {
+          const openCount = events.filter((e) => e.status?.toLowerCase() === "open").length;
+          const pendingCount = events.filter((e) => e.status?.toLowerCase() === "pending").length;
+          const totalRevRom = events.reduce((s, e) => s + (e.rev_rom ?? 0), 0);
+          const totalCostRom = events.reduce((s, e) => s + (e.cost_rom ?? 0), 0);
+          return (
+            <div className="stats mt-4">
+              <div className="stat">
+                <p className="lbl">Total Events</p>
+                <p className="val">{events.length}</p>
+                <p className="delta">Tracked on this project</p>
+              </div>
+              <div className={`stat ${openCount > 0 ? "alert" : ""}`}>
+                <p className="lbl">Open</p>
+                <p className="val">{openCount}</p>
+                <p className="delta">{pendingCount} pending review</p>
+              </div>
+              <div className="stat">
+                <p className="lbl">Revenue ROM</p>
+                <p className="val tabular-nums">{fmt(totalRevRom) || "$0.00"}</p>
+                <p className="delta">Rolled-up rough order of magnitude</p>
+              </div>
+              <div className={`stat ${totalCostRom > totalRevRom ? "warn" : "calm"}`}>
+                <p className="lbl">Cost ROM</p>
+                <p className="val tabular-nums">{fmt(totalCostRom) || "$0.00"}</p>
+                <p className="delta">{totalCostRom > totalRevRom ? "Cost exceeds revenue" : "Within revenue"}</p>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
-      <div className="flex items-center justify-between px-6 py-2 border-b border-gray-200 bg-white shrink-0">
+      <div className="flex items-center justify-between gap-2 flex-wrap px-4 sm:px-6 py-2 border-b border-black/[0.06] bg-[#F9FAFB] shrink-0">
         {/* Left: tabs */}
-        <div className="flex items-center">
+        <div className="seg">
           {(["detail", "summary", "rfqs", "recycle_bin"] as Tab[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab
-                  ? "border-gray-900 text-gray-900"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {tab === "recycle_bin"
-                ? "Recycle Bin"
-                : tab === "rfqs"
-                ? "RFQs"
-                : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            <button key={tab} onClick={() => setActiveTab(tab)} className={activeTab === tab ? "active" : ""}>
+              {tab === "recycle_bin" ? "Recycle Bin" : tab === "rfqs" ? "RFQs" : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
 
         {/* Right: Export + Create */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <div ref={exportRef} className="relative">
             <button
               onClick={() => setExportOpen((v) => !v)}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-xs border hairline rounded text-gray-700 bg-white hover:bg-[color:var(--surface-sunken)] transition-colors whitespace-nowrap"
             >
               Export <ChevronDown className="w-3 h-3" />
             </button>
             {exportOpen && (
-              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg z-20 w-40 py-1">
+              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 w-40 py-1">
                 {["Export as PDF", "Export as CSV", "Export as Excel"].map((opt) => (
                   <button
                     key={opt}
-                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-[color:var(--surface-sunken)]"
                     onClick={() => setExportOpen(false)}
                   >
                     {opt}
@@ -558,7 +603,7 @@ export default function ChangeEventsClient({
           )}
           <button
             onClick={() => router.push(`/projects/${projectId}/change-events/workflows`)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors font-medium"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs border hairline text-gray-700 bg-white rounded hover:bg-[color:var(--surface-sunken)] transition-colors font-medium"
           >
             Workflow Guides
           </button>
@@ -567,11 +612,11 @@ export default function ChangeEventsClient({
 
       {/* ── Banner ──────────────────────────────────────────────────────────── */}
       {showBanner && (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 border-b border-blue-100 shrink-0">
-          <Info className="w-4 h-4 text-blue-500 shrink-0" />
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-[color:var(--surface-sunken)] border-b border-black/[0.06] shrink-0">
+          <Info className="w-4 h-4 text-[color:var(--brand-500)] shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-blue-800">Change Events + Budget Changes</p>
-            <p className="text-xs text-blue-600">
+            <p className="text-xs font-semibold text-[color:var(--ink)]">Change Events + Budget Changes</p>
+            <p className="text-xs text-gray-500">
               Configure Budget ROM (In Scope, Out of Scope, TBD Scope), auto-link budget changes to change
               events, and use Financial Impact workflows to track cost and revenue impact.
             </p>
@@ -580,13 +625,13 @@ export default function ChangeEventsClient({
             href="https://v2.support.procore.com/process-guides/about-change-events/"
             target="_blank"
             rel="noreferrer"
-            className="px-3 py-1 text-xs border border-blue-300 text-blue-700 rounded hover:bg-blue-100 transition-colors shrink-0"
+            className="px-3 py-1 text-xs border hairline text-gray-700 bg-white rounded hover:bg-[color:var(--surface-sunken)] transition-colors shrink-0"
           >
             Learn More
           </a>
           <button
             onClick={() => setShowBanner(false)}
-            className="text-blue-400 hover:text-blue-600 transition-colors shrink-0"
+            className="text-gray-400 hover:text-[color:var(--ink)] transition-colors shrink-0"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -594,7 +639,7 @@ export default function ChangeEventsClient({
       )}
 
       {/* ── Filter bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 bg-white shrink-0">
+      <div className="flex items-center gap-2 flex-wrap px-4 sm:px-4 py-2 border-b border-black/[0.06] bg-[#F9FAFB] shrink-0">
         {/* Bulk Actions dropdown – write-access users only */}
         {canWrite && <div ref={quickActionsRef} className="relative">
           <button
@@ -604,10 +649,10 @@ export default function ChangeEventsClient({
               setHoveredAction(null);
               setHoveredSubItem(null);
             }}
-            className={`flex items-center gap-1 px-3 py-1 text-xs border rounded transition-colors ${
+            className={`flex items-center gap-1 px-3 py-1 text-xs border rounded transition-colors whitespace-nowrap ${
               hasSelection
-                ? "border-gray-300 text-gray-700 hover:bg-gray-50 bg-white"
-                : "border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed"
+                ? "hairline text-gray-700 hover:bg-[color:var(--surface-sunken)] bg-white"
+                : "border-gray-200 text-gray-400 bg-[color:var(--surface-sunken)] cursor-not-allowed"
             }`}
           >
             Bulk Actions <ChevronDown className="w-3 h-3" />
@@ -1059,7 +1104,7 @@ export default function ChangeEventsClient({
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             placeholder="Search"
-            className="border border-gray-300 rounded pl-7 pr-3 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-gray-300 w-44"
+            className="border hairline rounded pl-7 pr-3 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[color:var(--brand-300)] w-44"
           />
         </div>
 
@@ -1067,16 +1112,16 @@ export default function ChangeEventsClient({
         <div ref={filterRef} className="relative">
           <button
             onClick={() => setFilterOpen((v) => !v)}
-            className="flex items-center gap-1 px-3 py-1 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1 px-3 py-1 text-xs border hairline rounded text-gray-700 bg-white hover:bg-[color:var(--surface-sunken)] transition-colors whitespace-nowrap"
           >
             Add Filter <ChevronDown className="w-3 h-3" />
           </button>
           {filterOpen && (
-            <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg z-20 w-48 py-1">
+            <div className="absolute left-0 top-full mt-1 bg-white border border-gray-100 rounded-lg shadow-lg z-20 w-48 py-1">
               {["Number", "Title", "Status", "Vendor", "Budget Code", "Date Created"].map((f) => (
                 <button
                   key={f}
-                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-[color:var(--surface-sunken)]"
                   onClick={() => setFilterOpen(false)}
                 >
                   {f}
@@ -1135,9 +1180,9 @@ export default function ChangeEventsClient({
       </div>
 
       {/* ── Table ────────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-x-auto">
+      <div className="flex-1 overflow-x-auto min-w-0 max-w-full">
         {loading ? (
-          <div className="text-center py-20 text-gray-400 text-sm">Loading change events…</div>
+          <div className="text-center py-20 text-gray-400 text-sm italic">Loading change events…</div>
         ) : activeTab === "summary" ? (
           /* ── Summary Tab ──────────────────────────────────────────────────── */
           <table className="w-full text-xs border-collapse">
@@ -1167,7 +1212,7 @@ export default function ChangeEventsClient({
             <tbody>
               {pageEvents.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="text-center py-20 text-gray-400">
+                  <td colSpan={15} className="text-center py-20 text-gray-400 italic">
                     No change events found.
                   </td>
                 </tr>
@@ -1175,7 +1220,7 @@ export default function ChangeEventsClient({
                 pageEvents.map((ev) => (
                   <tr
                     key={ev.id}
-                    className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                    className="border-b border-gray-100 hover:bg-[color:var(--surface-sunken)] transition-colors"
                   >
                     {/* Edit button – write access only */}
                     <td className="px-1 py-2 whitespace-nowrap">
@@ -1198,11 +1243,13 @@ export default function ChangeEventsClient({
                       </button>
                     </td>
                     {/* # */}
-                    <td className="px-2 py-2 text-xs text-gray-700 whitespace-nowrap">
-                      {String(ev.number).padStart(3, "0")}
+                    <td className="px-2 py-2 whitespace-nowrap">
+                      <span className={`idx-italic ${statusIdxClass(ev.status)}`}>
+                        {String(ev.number).padStart(3, "0")}
+                      </span>
                     </td>
                     {/* Title */}
-                    <td className="px-2 py-2 text-xs text-gray-900 min-w-[180px]">
+                    <td className="px-2 py-2 text-xs text-[color:var(--ink)] min-w-[180px]">
                       {ev.title}
                     </td>
                     {/* Scope */}
@@ -1218,8 +1265,8 @@ export default function ChangeEventsClient({
                       {ev.change_reason ?? ""}
                     </td>
                     {/* Status */}
-                    <td className="px-2 py-2 text-xs text-gray-700 whitespace-nowrap">
-                      {ev.status}
+                    <td className="px-2 py-2 whitespace-nowrap">
+                      <StatusPill status={ev.status} />
                     </td>
                     {/* Origin */}
                     <td className="px-2 py-2 text-xs text-gray-700 whitespace-nowrap">
@@ -1254,21 +1301,21 @@ export default function ChangeEventsClient({
               return (
                 <tfoot>
                   <tr className="border-t-2 border-gray-300 bg-white font-semibold">
-                    <td colSpan={9} className="px-2 py-2 text-xs text-right text-gray-600">
+                    <td colSpan={9} className="px-2 py-2 mono-label text-right">
                       Totals
                     </td>
                     {pageTotals.map((t, i) => (
-                      <td key={i} className="px-2 py-2 text-right text-xs text-gray-900 whitespace-nowrap">
+                      <td key={i} className="px-2 py-2 text-right text-xs font-mono tabular-nums text-[color:var(--ink)] whitespace-nowrap">
                         {fmt(t)}
                       </td>
                     ))}
                   </tr>
-                  <tr className="border-t border-gray-200 bg-gray-50 font-semibold">
-                    <td colSpan={9} className="px-2 py-2 text-xs text-right text-gray-600">
+                  <tr className="border-t border-gray-200 bg-[color:var(--surface-sunken)] font-semibold">
+                    <td colSpan={9} className="px-2 py-2 mono-label text-right">
                       Report Grand Totals
                     </td>
                     {grandTotals.map((t, i) => (
-                      <td key={i} className="px-2 py-2 text-right text-xs text-gray-900 whitespace-nowrap">
+                      <td key={i} className="px-2 py-2 text-right text-xs font-mono tabular-nums text-[color:var(--ink)] whitespace-nowrap">
                         {fmt(t)}
                       </td>
                     ))}
@@ -1278,7 +1325,7 @@ export default function ChangeEventsClient({
             })()}
           </table>
         ) : activeTab !== "detail" ? (
-          <div className="text-center py-20 text-gray-400 text-sm">
+          <div className="text-center py-20 text-gray-400 text-sm italic">
             {activeTab === "recycle_bin" ? "Recycle Bin is empty." : "No data to display for this view."}
           </div>
         ) : (
@@ -1303,11 +1350,11 @@ export default function ChangeEventsClient({
                   </button>
                 </th>
                 {/* Revenue group */}
-                <th colSpan={5} className="px-2 py-1 text-center text-xs font-semibold text-gray-600 border-b border-gray-200">
+                <th colSpan={5} className="px-2 py-1 text-center mono-label border-b border-gray-200">
                   Revenue
                 </th>
                 {/* Cost group */}
-                <th colSpan={8} className="px-2 py-1 text-center text-xs font-semibold text-gray-600 border-b border-gray-200">
+                <th colSpan={8} className="px-2 py-1 text-center mono-label border-b border-gray-200">
                   Cost
                 </th>
               </tr>
@@ -1368,7 +1415,7 @@ export default function ChangeEventsClient({
             <tbody>
               {pageEvents.length === 0 ? (
                 <tr>
-                  <td colSpan={detailTableColSpan} className="text-center py-20 text-gray-400">
+                  <td colSpan={detailTableColSpan} className="text-center py-20 text-gray-400 italic">
                     No change events found.
                   </td>
                 </tr>
@@ -1381,7 +1428,7 @@ export default function ChangeEventsClient({
                       {/* ── Event row ─────────────────────────────────────── */}
                       <tr
                         className={`border-b border-gray-100 transition-colors ${
-                          selected ? "bg-blue-50" : "hover:bg-gray-50"
+                          selected ? "bg-[color:var(--brand-100)]" : "hover:bg-[color:var(--surface-sunken)]"
                         }`}
                       >
                         {/* Expand toggle */}
@@ -1422,9 +1469,15 @@ export default function ChangeEventsClient({
                             onClick={() =>
                               router.push(`/projects/${projectId}/change-events/${ev.id}`)
                             }
-                            className="text-blue-600 hover:underline text-left"
+                            className="flex items-center gap-2 text-left group"
                           >
-                            Change Event #{String(ev.number).padStart(3, "0")}: {ev.title}
+                            <span className={`idx-italic ${statusIdxClass(ev.status)} shrink-0`}>
+                              {String(ev.number).padStart(3, "0")}
+                            </span>
+                            <span className="text-xs text-[color:var(--ink)] group-hover:text-[color:var(--brand-700)] transition-colors">
+                              {ev.title}
+                            </span>
+                            <StatusPill status={ev.status} />
                           </button>
                         </td>
                         {showExpandedDetailColumns && (
@@ -1456,7 +1509,7 @@ export default function ChangeEventsClient({
                       {/* ── Expanded line items ────────────────────────────── */}
                       {expanded &&
                         (ev.line_items.length === 0 ? (
-                          <tr key={`${ev.id}-empty`} className="bg-gray-50 border-b border-gray-100">
+                          <tr key={`${ev.id}-empty`} className="bg-[color:var(--surface-sunken)] border-b border-gray-100">
                             <td colSpan={detailTableColSpan} className="px-8 py-3 text-xs text-gray-400 italic">
                               No line items on this change event.
                             </td>
@@ -1465,7 +1518,7 @@ export default function ChangeEventsClient({
                           ev.line_items.map((li) => (
                             <tr
                               key={li.id}
-                              className="bg-gray-50 border-b border-gray-100 hover:bg-gray-100 transition-colors"
+                              className="bg-[color:var(--surface-sunken)] border-b border-gray-100 hover:bg-[color:var(--brand-100)]/40 transition-colors"
                             >
                               {/* Indent spacer */}
                               <td className="w-6 px-1 py-1.5" />
@@ -1528,7 +1581,7 @@ export default function ChangeEventsClient({
                                       <span className="text-gray-500 text-xs">{li.vendor}</span>
                                     )}
                                     {li.contract_number && (
-                                      <span className="text-blue-500 text-xs">{li.contract_number}</span>
+                                      <span className="text-[color:var(--brand-700)] text-xs font-mono">{li.contract_number}</span>
                                     )}
                                     {li.schedule_impact && (
                                       <span className="text-gray-400 text-xs italic">
@@ -1541,11 +1594,11 @@ export default function ChangeEventsClient({
                               {/* Revenue */}
                               <NumCell val={li.rev_unit_qty} qty />
                               <NumCell val={li.rev_unit_cost} />
-                              <td className="px-2 py-1.5 text-right text-xs whitespace-nowrap">
+                              <td className="px-2 py-1.5 text-right text-xs font-mono tabular-nums whitespace-nowrap">
                                 {canWrite ? (
                                   <button
                                     onClick={(e) => openRomPopup(e, li, ev.id)}
-                                    className="text-blue-600 hover:underline font-medium cursor-pointer"
+                                    className="text-[color:var(--brand-700)] hover:underline font-medium cursor-pointer"
                                     title="Click to edit"
                                   >
                                     {li.rev_rom != null && li.rev_rom !== 0
@@ -1553,7 +1606,7 @@ export default function ChangeEventsClient({
                                       : "$0.00"}
                                   </button>
                                 ) : (
-                                  <span className="font-medium text-gray-900">
+                                  <span className="font-medium text-[color:var(--ink)]">
                                     {li.rev_rom != null && li.rev_rom !== 0
                                       ? li.rev_rom.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 })
                                       : "$0.00"}
@@ -1584,7 +1637,7 @@ export default function ChangeEventsClient({
             {pageEvents.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-gray-300 bg-white font-semibold">
-                  <td colSpan={detailHeaderColSpan} className="px-2 py-2 text-xs text-right text-gray-600">
+                  <td colSpan={detailHeaderColSpan} className="px-2 py-2 mono-label text-right">
                     Totals
                   </td>
                   {(
@@ -1609,7 +1662,7 @@ export default function ChangeEventsClient({
                       0
                     );
                     return (
-                      <td key={key} className="px-2 py-2 text-right text-xs text-gray-900 whitespace-nowrap">
+                      <td key={key} className="px-2 py-2 text-right text-xs font-mono tabular-nums text-[color:var(--ink)] whitespace-nowrap">
                         {key === "rev_unit_qty" || key === "cost_unit_qty" ? fmtQty(total) : fmt(total)}
                       </td>
                     );
@@ -1660,7 +1713,7 @@ export default function ChangeEventsClient({
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
           onClick={(e) => { if (e.target === e.currentTarget) setPcoPickerOpen(false); }}
         >
-          <div className="bg-white rounded-lg shadow-xl w-[480px] max-h-[80vh] flex flex-col">
+          <div className="bg-white rounded-lg shadow-xl w-[min(480px,92vw)] max-h-[80vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
               <h2 className="text-sm font-semibold text-gray-900">Select a Prime Contract</h2>
@@ -1718,7 +1771,7 @@ export default function ChangeEventsClient({
       {romPopup && (
         <div
           ref={popupRef}
-          className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-xl w-[360px] p-4"
+          className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-xl w-[min(360px,92vw)] p-4"
           style={{ top: romPopup.top, left: romPopup.left }}
         >
           <div className="flex items-center justify-between mb-3">
@@ -1778,7 +1831,7 @@ export default function ChangeEventsClient({
           {/* Revenue section */}
           <div className="mb-3">
             <p className="text-xs font-semibold text-blue-600 mb-1.5">Revenue</p>
-            <div className="grid grid-cols-3 gap-2 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
               <div>
                 <label className="block text-xs text-gray-500 mb-0.5">Unit Qty</label>
                 <input
@@ -1811,7 +1864,7 @@ export default function ChangeEventsClient({
           {/* Cost section */}
           <div className="mb-4">
             <p className="text-xs font-semibold text-gray-600 mb-1.5">Cost</p>
-            <div className="grid grid-cols-3 gap-2 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
               <div>
                 <label className="block text-xs text-gray-500 mb-0.5">Unit Qty</label>
                 <input

@@ -19,7 +19,7 @@ export default async function MemberDetailPage({
 
   const { data: membership } = await supabase
     .from("org_members")
-    .select("role, allowed_tools, users(id, username, email)")
+    .select("role, users(id, username, email)")
     .eq("user_id", userId)
     .eq("org_id", session.company_id)
     .maybeSingle();
@@ -39,7 +39,6 @@ export default async function MemberDetailPage({
         email: user.email,
         company_role: membership.role,
       }}
-      initialAllowedTools={membership.allowed_tools ?? null}
       isSuperAdmin={isSuperAdmin}
       currentUserId={session.id}
     />

@@ -16,6 +16,7 @@ type Task = {
   distribution_list: DistributionContact[];
   assignees: DistributionContact[];
   due_date: string | null;
+  is_private: boolean;
   created_at: string;
 };
 
@@ -157,6 +158,7 @@ export default function TaskDetailClient({
   const [description, setDescription] = useState("");
   const [distributionList, setDistributionList] = useState<DistributionContact[]>([]);
   const [assignees, setAssignees] = useState<DistributionContact[]>([]);
+  const [isPrivate, setIsPrivate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -178,6 +180,7 @@ export default function TaskDetailClient({
       setDescription(taskData.description ?? "");
       setDistributionList(taskData.distribution_list ?? []);
       setAssignees(taskData.assignees ?? []);
+      setIsPrivate(Boolean(taskData.is_private));
       setLoading(false);
     });
   }, [projectId, taskId]);
@@ -190,6 +193,7 @@ export default function TaskDetailClient({
     setDescription(source.description ?? "");
     setDistributionList(source.distribution_list ?? []);
     setAssignees(source.assignees ?? []);
+    setIsPrivate(Boolean(source.is_private));
   }
 
   async function handleSave() {
@@ -206,6 +210,7 @@ export default function TaskDetailClient({
         description: description.trim() || null,
         distribution_list: distributionList,
         assignees,
+        is_private: isPrivate,
       }),
     });
     if (res.ok) {
@@ -229,9 +234,9 @@ export default function TaskDetailClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -308,7 +313,17 @@ export default function TaskDetailClient({
                   className="w-full px-3 py-2 border border-gray-200 rounded-md text-2xl font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white"
                 />
               ) : (
-                <h1 className="font-display text-[24px] leading-tight text-[color:var(--ink)]">{task.title}</h1>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="font-display text-[24px] leading-tight text-[color:var(--ink)]">{task.title}</h1>
+                  {isPrivate && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-xs font-medium">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c.828 0 1.5-.672 1.5-1.5S12.828 8 12 8s-1.5.672-1.5 1.5S11.172 11 12 11zm6-4V6a6 6 0 10-12 0v1a2 2 0 00-2 2v9a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2z" />
+                      </svg>
+                      Private
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
@@ -356,7 +371,7 @@ export default function TaskDetailClient({
                 {/* Editable fields */}
                 <div className="bg-white border border-gray-100 rounded-xl p-5">
                   <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Details</h2>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
                       <select
@@ -409,6 +424,24 @@ export default function TaskDetailClient({
                       </div>
                     )}
                   </div>
+                  {isEditing && (
+                    <div className="mt-4">
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isPrivate}
+                          onChange={(e) => setIsPrivate(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+                        />
+                        <span className="text-sm">
+                          <span className="font-medium text-gray-900">Private</span>
+                          <span className="block text-xs text-gray-500 mt-0.5">
+                            Only make visible to Assignees, Distribution List members, and Task Creator.
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                  )}
                 </div>
 
                 {/* Description */}
@@ -446,12 +479,37 @@ export default function TaskDetailClient({
               {/* Right column: photo */}
               <div className="space-y-5">
 
-                {/* Photo */}
-                {task.photo_url && (
-                  <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-                    <img src={task.photo_url} alt="Task photo" className="w-full h-44 object-cover" />
-                  </div>
-                )}
+                {/* Attachment */}
+                {task.photo_url && (() => {
+                  const url = task.photo_url;
+                  const cleanPath = url.split("?")[0].toLowerCase();
+                  const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|avif|heic|heif)$/.test(cleanPath);
+                  const filename = decodeURIComponent(cleanPath.split("/").pop() ?? "attachment");
+                  return (
+                    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+                      {isImage ? (
+                        <a href={url} target="_blank" rel="noreferrer">
+                          <img src={url} alt="Task attachment" className="w-full h-44 object-cover" />
+                        </a>
+                      ) : (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors"
+                        >
+                          <svg className="w-8 h-8 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                          </svg>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Attachment</p>
+                            <p className="text-sm text-gray-700 truncate">{filename}</p>
+                          </div>
+                        </a>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </>

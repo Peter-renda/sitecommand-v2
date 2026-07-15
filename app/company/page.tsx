@@ -48,7 +48,7 @@ export default async function CompanyPage() {
 
   const { data: projects } = await supabase
     .from("projects")
-    .select("id, name, status, created_at")
+    .select("id, name, status, created_at, archived_at")
     .eq("company_id", session.company_id)
     .order("created_at", { ascending: false });
 
@@ -59,7 +59,7 @@ export default async function CompanyPage() {
       company={company ?? null}
       members={(members ?? []) as { id: string; username: string; email: string; company_role: string; created_at: string }[]}
       invites={(invites ?? []) as { id: string; email: string; invited_role: string; created_at: string; expires_at: string }[]}
-      projects={(projects ?? []) as { id: string; name: string; status: string | null; created_at: string }[]}
+      projects={(projects ?? []) as { id: string; name: string; status: string | null; created_at: string; archived_at: string | null }[]}
       currentUserId={session.id}
       isSuperAdmin={isSuperAdmin}
     />

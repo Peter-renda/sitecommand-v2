@@ -47,6 +47,27 @@ type Contract = {
   draft_change_orders: number;
   invoiced: number;
   payments_received: number;
+  // ERP accounting feedback (pulled back from QuickBooks / Sage 300 CRE)
+  qbo_id: string | null;
+  qbo_ar_invoice_id: string | null;
+  qbo_total_amount: number | null;
+  qbo_balance: number | null;
+  qbo_payment_status: string | null;
+  qbo_ar_invoice_total_amount: number | null;
+  qbo_ar_invoice_balance: number | null;
+  qbo_ar_invoice_payment_status: string | null;
+  qbo_payments_refreshed_at: string | null;
+  sage300cre_id: string | null;
+  sage300cre_ar_invoice_id: string | null;
+  sage300cre_total_amount: number | null;
+  sage300cre_amount_paid: number | null;
+  sage300cre_balance: number | null;
+  sage300cre_status: string | null;
+  sage300cre_ar_invoice_total_amount: number | null;
+  sage300cre_ar_invoice_amount_paid: number | null;
+  sage300cre_ar_invoice_balance: number | null;
+  sage300cre_ar_invoice_status: string | null;
+  sage300cre_payments_refreshed_at: string | null;
   sov_items: SovItem[];
 };
 
@@ -119,6 +140,36 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  paid: "Paid",
+  partially_paid: "Partially Paid",
+  unpaid: "Unpaid",
+  open: "Open",
+  closed: "Closed",
+};
+
+const PAYMENT_STATUS_COLORS: Record<string, string> = {
+  paid: "bg-green-100 text-green-700",
+  partially_paid: "bg-amber-100 text-amber-700",
+  unpaid: "bg-gray-100 text-gray-600",
+  open: "bg-blue-50 text-blue-600",
+  closed: "bg-gray-100 text-gray-500",
+};
+
+function PaymentStatusPill({ status }: { status: string | null }) {
+  if (!status) return <span className="text-gray-400">—</span>;
+  const key = status.toLowerCase();
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_COLORS[key] ?? "bg-gray-100 text-gray-600"}`}>
+      {PAYMENT_STATUS_LABELS[key] ?? status}
+    </span>
+  );
+}
+
+function fmtOrDash(n: number | null): React.ReactNode {
+  return n == null ? <span className="text-gray-400">—</span> : <span className="tabular-nums">{fmt(Number(n))}</span>;
+}
+
 function ContractSummaryTile({
   original,
   approvedCO,
@@ -174,7 +225,7 @@ function ContractSummaryTile({
       {open && (
         <div className="space-y-5">
           {rows.map((row, ri) => (
-            <div key={ri} className="grid grid-cols-4 gap-x-8">
+            <div key={ri} className="grid grid-cols-2 sm:grid-cols-4 gap-x-8">
               {row.map((item) => (
                 <div key={item.label}>
                   <p className="text-xs font-semibold text-gray-800 mb-0.5">{item.label}</p>
@@ -241,6 +292,11 @@ export default function PrimeContractDetailClient({
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [qbSyncing, setQbSyncing] = useState(false);
+  const [qbSyncMsg, setQbSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [s3Syncing, setS3Syncing] = useState(false);
+  const [s3SyncMsg, setS3SyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [payRefreshing, setPayRefreshing] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
 
@@ -275,6 +331,81 @@ export default function PrimeContractDetailClient({
       .catch(() => {})
       .finally(() => setHistoryLoading(false));
   }, [tab, historyLoaded, historyLoading, projectId, contractId]);
+
+  async function handleSyncToQBO() {
+    setQbSyncing(true);
+    setQbSyncMsg(null);
+    setContract((c) => (c ? { ...c, erp_status: "pending" } : c));
+    try {
+      const res = await fetch("/api/integrations/quickbooks/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordType: "prime_contracts", recordId: contractId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setContract((c) => (c ? { ...c, erp_status: "not_synced" } : c));
+        setQbSyncMsg({ ok: false, text: data.error ?? "Sync failed" });
+      } else {
+        setContract((c) => (c ? { ...c, erp_status: "synced" } : c));
+        setQbSyncMsg({ ok: true, text: "Synced to QuickBooks Online." });
+      }
+    } catch {
+      setContract((c) => (c ? { ...c, erp_status: "not_synced" } : c));
+      setQbSyncMsg({ ok: false, text: "Network error while syncing." });
+    } finally {
+      setQbSyncing(false);
+    }
+  }
+
+  async function handleSyncToSage300Cre() {
+    setS3Syncing(true);
+    setS3SyncMsg(null);
+    setContract((c) => (c ? { ...c, erp_status: "pending" } : c));
+    try {
+      const res = await fetch("/api/integrations/sage300cre/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordType: "prime_contracts", recordId: contractId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setContract((c) => (c ? { ...c, erp_status: "not_synced" } : c));
+        setS3SyncMsg({ ok: false, text: data.error ?? "Sync failed" });
+      } else {
+        setContract((c) => (c ? { ...c, erp_status: "synced" } : c));
+        setS3SyncMsg({ ok: true, text: "Synced to Sage 300 CRE." });
+      }
+    } catch {
+      setContract((c) => (c ? { ...c, erp_status: "not_synced" } : c));
+      setS3SyncMsg({ ok: false, text: "Network error while syncing." });
+    } finally {
+      setS3Syncing(false);
+    }
+  }
+
+  async function handleRefreshPayments() {
+    if (!contract) return;
+    setPayRefreshing(true);
+    try {
+      const targets: string[] = [];
+      if (contract.qbo_id || contract.qbo_ar_invoice_id) targets.push("quickbooks");
+      if (contract.sage300cre_id || contract.sage300cre_ar_invoice_id) targets.push("sage300cre");
+      await Promise.all(
+        targets.map((integration) =>
+          fetch(`/api/integrations/${integration}/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ recordType: "prime_contracts", recordId: contractId }),
+          })
+        )
+      );
+      const data = await fetch(`/api/projects/${projectId}/prime-contracts/${contractId}`).then((r) => r.json());
+      if (!data.error) setContract(data);
+    } finally {
+      setPayRefreshing(false);
+    }
+  }
 
   // Track active sidebar section based on scroll position
   useEffect(() => {
@@ -324,7 +455,7 @@ export default function PrimeContractDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading…</div>
@@ -334,7 +465,7 @@ export default function PrimeContractDetailClient({
 
   if (error || !contract) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
         <AppHeader username={username} />
         <ProjectNav projectId={projectId} />
         <div className="flex-1 flex items-center justify-center text-red-500 text-sm">{error ?? "Contract not found."}</div>
@@ -446,7 +577,7 @@ export default function PrimeContractDetailClient({
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
@@ -557,6 +688,28 @@ export default function PrimeContractDetailClient({
             <div ref={contentRef} className="flex-1 overflow-y-auto">
               {/* Export / Edit Contract actions */}
               <div className="flex justify-end gap-2 px-8 pt-4 pb-2 bg-gray-50">
+                <button
+                  onClick={handleSyncToQBO}
+                  disabled={qbSyncing}
+                  title="Push this prime contract to QuickBooks Online"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#2CA01C] rounded hover:bg-[#237d16] transition-colors disabled:opacity-50"
+                >
+                  <svg className={`w-3 h-3 ${qbSyncing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  {qbSyncing ? "Syncing…" : "Sync to QuickBooks"}
+                </button>
+                <button
+                  onClick={handleSyncToSage300Cre}
+                  disabled={s3Syncing}
+                  title="Push this prime contract to Sage 300 CRE"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  <svg className={`w-3 h-3 ${s3Syncing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  {s3Syncing ? "Syncing…" : "Sync to Sage 300 CRE"}
+                </button>
                 <button className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors">
                   Export <ChevronDown className="w-3 h-3" />
                 </button>
@@ -567,6 +720,18 @@ export default function PrimeContractDetailClient({
                   Edit Contract
                 </button>
               </div>
+              {qbSyncMsg && (
+                <div className={`mx-8 mb-2 px-3 py-2 text-xs rounded flex items-center justify-between ${qbSyncMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                  <span>{qbSyncMsg.text}</span>
+                  <button onClick={() => setQbSyncMsg(null)} className="opacity-60 hover:opacity-100 ml-3">✕</button>
+                </div>
+              )}
+              {s3SyncMsg && (
+                <div className={`mx-8 mb-2 px-3 py-2 text-xs rounded flex items-center justify-between ${s3SyncMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                  <span>{s3SyncMsg.text}</span>
+                  <button onClick={() => setS3SyncMsg(null)} className="opacity-60 hover:opacity-100 ml-3">✕</button>
+                </div>
+              )}
 
               {/* General Information */}
               <div id="general-info" className="scroll-mt-2 bg-white border-b border-gray-200 px-8 py-6">
@@ -587,7 +752,7 @@ export default function PrimeContractDetailClient({
                     Created by — on {fmtDate(contract.start_date || null)}
                   </p>
                 )}
-                {generalInfoOpen && <div className="grid grid-cols-3 gap-x-8 gap-y-5 mb-6">
+                {generalInfoOpen && <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-8 gap-y-5 mb-6">
                   <Field label="Contract #" value={contract.contract_number} />
                   <Field label="Owner / Client" value={contract.owner_client} />
                   <Field label="Title" value={contract.title} />
@@ -637,6 +802,66 @@ export default function PrimeContractDetailClient({
                 pctPaid={pctPaid}
               />
 
+              {/* Accounting (ERP feedback) */}
+              {(contract.qbo_id || contract.qbo_ar_invoice_id || contract.sage300cre_id || contract.sage300cre_ar_invoice_id) && (
+                <div id="accounting" className="scroll-mt-2 bg-white border-b border-gray-200 px-8 py-6">
+                  <div className="flex items-center justify-between mb-5">
+                    <h2 className="text-sm font-semibold text-gray-900">Accounting</h2>
+                    <button
+                      onClick={handleRefreshPayments}
+                      disabled={payRefreshing}
+                      className="px-3 py-1 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                    >
+                      {payRefreshing ? "Refreshing…" : "Refresh payment status"}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-4">
+                    Pulled from the connected accounting system
+                    {(contract.qbo_payments_refreshed_at || contract.sage300cre_payments_refreshed_at) && (
+                      <> · last refreshed {new Date(contract.qbo_payments_refreshed_at ?? contract.sage300cre_payments_refreshed_at!).toLocaleString()}</>
+                    )}
+                  </p>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {(contract.qbo_id || contract.qbo_ar_invoice_id) && (
+                      <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
+                        <p className="text-xs font-semibold text-gray-700 mb-3">QuickBooks Online</p>
+                        <div className="grid grid-cols-3 gap-4">
+                          <Field label="Invoice Total" value={fmtOrDash(contract.qbo_total_amount)} />
+                          <Field label="Open Balance" value={fmtOrDash(contract.qbo_balance)} />
+                          <Field label="Payment Status" value={<PaymentStatusPill status={contract.qbo_payment_status} />} />
+                        </div>
+                        {contract.qbo_ar_invoice_id && (
+                          <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-gray-200">
+                            <Field label="Pay App Total" value={fmtOrDash(contract.qbo_ar_invoice_total_amount)} />
+                            <Field label="Pay App Balance" value={fmtOrDash(contract.qbo_ar_invoice_balance)} />
+                            <Field label="Pay App Status" value={<PaymentStatusPill status={contract.qbo_ar_invoice_payment_status} />} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {(contract.sage300cre_id || contract.sage300cre_ar_invoice_id) && (
+                      <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
+                        <p className="text-xs font-semibold text-gray-700 mb-3">Sage 300 CRE</p>
+                        <div className="grid grid-cols-4 gap-4">
+                          <Field label="Invoice Total" value={fmtOrDash(contract.sage300cre_total_amount)} />
+                          <Field label="Amount Paid" value={fmtOrDash(contract.sage300cre_amount_paid)} />
+                          <Field label="Balance" value={fmtOrDash(contract.sage300cre_balance)} />
+                          <Field label="Status" value={<PaymentStatusPill status={contract.sage300cre_status} />} />
+                        </div>
+                        {contract.sage300cre_ar_invoice_id && (
+                          <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-200">
+                            <Field label="Pay App Total" value={fmtOrDash(contract.sage300cre_ar_invoice_total_amount)} />
+                            <Field label="Pay App Paid" value={fmtOrDash(contract.sage300cre_ar_invoice_amount_paid)} />
+                            <Field label="Pay App Balance" value={fmtOrDash(contract.sage300cre_ar_invoice_balance)} />
+                            <Field label="Pay App Status" value={<PaymentStatusPill status={contract.sage300cre_ar_invoice_status} />} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Schedule of Values */}
               <SovSection sovItems={sovItems} />
 
@@ -668,7 +893,7 @@ export default function PrimeContractDetailClient({
                   {datesOpen ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
                   <h2 className="text-sm font-semibold text-gray-900">Contract Dates</h2>
                 </button>
-                {datesOpen && <div className="grid grid-cols-3 gap-x-8 gap-y-5">
+                {datesOpen && <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-8 gap-y-5">
                   <Field label="Start Date" value={fmtDate(contract.start_date)} />
                   <Field label="Estimated Completion" value={fmtDate(contract.estimated_completion_date)} />
                   <Field label="Actual Completion" value={fmtDate(contract.actual_completion_date)} />

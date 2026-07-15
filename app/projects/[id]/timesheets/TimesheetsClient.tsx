@@ -36,6 +36,20 @@ type Timesheet = {
 const TIMESHEET_STATUSES = ["draft", "submitted", "reviewed", "approved", "completed"];
 const ENTRY_STATUSES = ["draft", "submitted", "reviewed", "approved", "completed"];
 
+const STATUS_PILL: Record<string, string> = {
+  draft: "pill-warn",
+  submitted: "pill-open",
+  reviewed: "pill-open",
+  approved: "pill-post",
+  completed: "pill-post",
+};
+
+function StatusPill({ status }: { status: string }) {
+  const cls = STATUS_PILL[status] ?? "pill-post";
+  const label = status ? status.charAt(0).toUpperCase() + status.slice(1) : "—";
+  return <span className={`pill ${cls}`}>{label}</span>;
+}
+
 function toDateInputValue(value: Date) {
   return value.toISOString().slice(0, 10);
 }
@@ -127,6 +141,19 @@ export default function TimesheetsClient({
     () => filteredTimesheets.find((sheet) => sheet.id === selectedTimesheetId) ?? filteredTimesheets[0] ?? null,
     [filteredTimesheets, selectedTimesheetId],
   );
+
+  const stats = useMemo(() => {
+    const entries = filteredTimesheets.flatMap((sheet) => sheet.entries || []);
+    const totalHours = entries.reduce((sum, entry) => sum + (entry.total_hours ?? 0), 0);
+    const crew = new Set(
+      entries.filter((entry) => entry.resource_type === "employee").map((entry) => entry.resource_name),
+    ).size;
+    const unsigned = entries.filter((entry) => !entry.signed_at).length;
+    const pendingReview = filteredTimesheets.filter(
+      (sheet) => sheet.status === "draft" || sheet.status === "submitted",
+    ).length;
+    return { totalHours, crew, unsigned, pendingReview, entryCount: entries.length };
+  }, [filteredTimesheets]);
 
   async function patchTimesheet(timesheetId: string, payload: Record<string, unknown>) {
     const res = await fetch(`/api/projects/${projectId}/timesheets/${timesheetId}`, {
@@ -235,20 +262,30 @@ export default function TimesheetsClient({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-4">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Timesheets</h1>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Timesheets</h1>
+            {!isLoading && filteredTimesheets.length > 0 && (
+              <p className="sub mt-1.5">
+                <em>Daily field hours, signed and reviewed</em>
+                <span className="sep">·</span>
+                <span className="num" style={{ color: "var(--brand-500)" }}>
+                  {stats.totalHours.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                </span> hrs
+                <span className="sep">·</span>
+                <span className="num">{stats.entryCount}</span> entries
+                <span className="sep">·</span>
+                <span className="num">{filteredTimesheets.length}</span> timesheets
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={exportCsv}
-              className="px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors"
-            >
+            <button onClick={exportCsv} className="btn-secondary">
               Export CSV
             </button>
             <div className="relative" ref={createRef}>
@@ -299,107 +336,160 @@ export default function TimesheetsClient({
           </div>
         </div>
 
-        <div className="bg-white border hairline rounded-xl p-4">
+        {!isLoading && filteredTimesheets.length > 0 && (
+          <div className="stats">
+            <div className="stat">
+              <div className="lbl">Total Hours</div>
+              <div className="val">{stats.totalHours.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div>
+              <div className="delta">across {filteredTimesheets.length} timesheets</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Crew on Site</div>
+              <div className="val">{stats.crew}</div>
+              <div className="delta">{stats.entryCount} resource entries</div>
+            </div>
+            <div className={`stat ${stats.pendingReview > 0 ? "warn" : "calm"}`}>
+              <div className="lbl">Pending Review</div>
+              <div className="val">{stats.pendingReview}</div>
+              <div className="delta">draft or submitted</div>
+            </div>
+            <div className={`stat ${stats.unsigned > 0 ? "alert" : "calm"}`}>
+              <div className="lbl">Unsigned Entries</div>
+              <div className="val">{stats.unsigned}</div>
+              <div className="delta">awaiting signature</div>
+            </div>
+          </div>
+        )}
+
+        <div className="card card-pad">
           <div className="grid md:grid-cols-6 gap-2">
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border border-gray-200 rounded-md px-3 py-2 text-sm" />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="border border-gray-200 rounded-md px-3 py-2 text-sm" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employee, location, cost code" className="md:col-span-2 border border-gray-200 rounded-md px-3 py-2 text-sm" />
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border border-gray-200 rounded-md px-3 py-2 text-sm">
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border hairline rounded-md px-3 py-2 text-sm font-mono tabular-nums" />
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="border hairline rounded-md px-3 py-2 text-sm font-mono tabular-nums" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employee, location, cost code" className="md:col-span-2 border hairline rounded-md px-3 py-2 text-sm" />
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border hairline rounded-md px-3 py-2 text-sm">
               <option value="all">All statuses</option>
               {TIMESHEET_STATUSES.map((status) => (
                 <option key={status} value={status}>{status}</option>
               ))}
             </select>
-            <button onClick={() => void fetchTimesheets()} className="rounded-md bg-[color:var(--ink)] text-white px-3 py-2 text-sm font-semibold hover:bg-black transition-colors">Apply Filters</button>
+            <button onClick={() => void fetchTimesheets()} className="btn-primary">Apply Filters</button>
           </div>
         </div>
 
         {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
 
         <div className="grid lg:grid-cols-[360px_1fr] gap-4">
-          <section className="bg-white border border-gray-200 rounded-xl divide-y">
+          <section className="card divide-y divide-[color:var(--hairline,#e7e3da)]">
+            <div className="px-4 py-3">
+              <p className="mono-label">Daily Timesheets</p>
+            </div>
             {isLoading ? (
-              <p className="p-4 text-sm text-gray-500">Loading timesheets…</p>
+              <p className="p-4 text-sm text-[color:var(--ink-soft,#6b6557)]">Loading timesheets…</p>
             ) : filteredTimesheets.length === 0 ? (
-              <p className="p-4 text-sm text-gray-500">No timesheets match your date range and filters.</p>
+              <p className="p-4 text-sm text-[color:var(--ink-soft,#6b6557)]">No timesheets match your date range and filters.</p>
             ) : (
-              filteredTimesheets.map((sheet) => (
-                <button
-                  key={sheet.id}
-                  onClick={() => setSelectedTimesheetId(sheet.id)}
-                  className={`w-full text-left p-4 hover:bg-gray-50 ${selectedTimesheet?.id === sheet.id ? "bg-gray-50" : ""}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium text-sm text-gray-900">{formatDate(sheet.work_date)}</p>
-                    <span className="text-xs uppercase tracking-wide text-gray-500">{sheet.status}</span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">{sheet.entries?.length ?? 0} entries</p>
-                </button>
-              ))
+              filteredTimesheets.map((sheet, idx) => {
+                const sheetHours = (sheet.entries || []).reduce((sum, entry) => sum + (entry.total_hours ?? 0), 0);
+                return (
+                  <button
+                    key={sheet.id}
+                    onClick={() => setSelectedTimesheetId(sheet.id)}
+                    className={`w-full text-left p-4 transition-colors hover:bg-[color:var(--surface-sunken)] ${selectedTimesheet?.id === sheet.id ? "bg-[color:var(--surface-sunken)]" : ""}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`idx-italic status-${["approved", "completed"].includes(sheet.status) ? "closed" : sheet.status === "draft" ? "draft" : "open"}`}>
+                        {String(idx + 1).padStart(2, "0")}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-medium text-sm text-[color:var(--ink)] font-mono tabular-nums">{formatDate(sheet.work_date)}</p>
+                          <StatusPill status={sheet.status} />
+                        </div>
+                        <p className="text-xs text-[color:var(--ink-soft,#6b6557)] mt-1">
+                          <span className="font-mono tabular-nums">{sheet.entries?.length ?? 0}</span> entries
+                          <span className="sep">·</span>
+                          <span className="font-mono tabular-nums">{sheetHours.toLocaleString(undefined, { maximumFractionDigits: 1 })}</span> hrs
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
             )}
           </section>
 
-          <section className="bg-white border border-gray-200 rounded-xl p-4">
+          <section className="card card-pad">
             {!selectedTimesheet ? (
-              <p className="text-sm text-gray-500">Select a timesheet to view details.</p>
+              <p className="text-sm text-[color:var(--ink-soft,#6b6557)]">Select a timesheet to view details.</p>
             ) : (
               <div className="space-y-4">
-                <div className="flex flex-wrap items-center gap-2 justify-between">
+                <div className="flex flex-wrap items-center gap-3 justify-between">
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-900">{formatDate(selectedTimesheet.work_date)}</h2>
-                    <p className="text-sm text-gray-500">Review entries, signatures, and quantities.</p>
+                    <h2 className="font-display text-[22px] leading-tight text-[color:var(--ink)]">{formatDate(selectedTimesheet.work_date)}</h2>
+                    <p className="sub mt-1">
+                      <em>Review entries, signatures, and quantities</em>
+                      <span className="sep">·</span>
+                      <span className="num">
+                        {(selectedTimesheet.entries || []).reduce((sum, e) => sum + (e.total_hours ?? 0), 0).toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                      </span> hrs
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <select
                       value={selectedTimesheet.status}
                       onChange={(e) => void patchTimesheet(selectedTimesheet.id, { status: e.target.value })}
-                      className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      className="border hairline rounded-md px-3 py-2 text-sm"
                     >
                       {TIMESHEET_STATUSES.map((status) => (
                         <option key={status} value={status}>{status}</option>
                       ))}
                     </select>
-                    <button onClick={() => setQuantitiesSheetId(selectedTimesheet.id)} className="border border-gray-300 rounded-md px-3 py-2 text-sm">View Quantities</button>
-                    <button onClick={() => void patchTimesheet(selectedTimesheet.id, { status: "reviewed" })} className="border border-blue-300 text-blue-700 rounded-md px-3 py-2 text-sm">Mark Reviewed</button>
-                    <button onClick={() => void patchTimesheet(selectedTimesheet.id, { status: "approved" })} className="bg-gray-900 text-white rounded-md px-3 py-2 text-sm">Approve</button>
+                    <button onClick={() => setQuantitiesSheetId(selectedTimesheet.id)} className="btn-secondary">View Quantities</button>
+                    <button onClick={() => void patchTimesheet(selectedTimesheet.id, { status: "reviewed" })} className="btn-quiet">Mark Reviewed</button>
+                    <button onClick={() => void patchTimesheet(selectedTimesheet.id, { status: "approved" })} className="btn-primary">Approve</button>
                   </div>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-2">Resource</th>
-                        <th className="text-left p-2">Hours</th>
-                        <th className="text-left p-2">Location</th>
-                        <th className="text-left p-2">Cost Code</th>
-                        <th className="text-left p-2">Status</th>
-                        <th className="text-left p-2">Signature</th>
+                    <thead>
+                      <tr className="border-b hairline">
+                        <th className="text-left px-2 py-2.5 mono-label">Resource</th>
+                        <th className="text-left px-2 py-2.5 mono-label">Hours</th>
+                        <th className="text-left px-2 py-2.5 mono-label">Location</th>
+                        <th className="text-left px-2 py-2.5 mono-label">Cost Code</th>
+                        <th className="text-left px-2 py-2.5 mono-label">Status</th>
+                        <th className="text-left px-2 py-2.5 mono-label">Signature</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(selectedTimesheet.entries || []).map((entry) => (
-                        <tr key={entry.id} className="border-t">
-                          <td className="p-2">{entry.resource_name}</td>
-                          <td className="p-2">{entry.total_hours}</td>
-                          <td className="p-2">{entry.location_path || "—"}</td>
-                          <td className="p-2">{entry.cost_code || "—"}</td>
-                          <td className="p-2">
+                        <tr key={entry.id} className="border-b hairline transition-colors hover:bg-[color:var(--surface-sunken)]">
+                          <td className="px-2 py-2.5 text-[color:var(--ink)]">
+                            {entry.resource_name}
+                            {entry.resource_type === "equipment" && (
+                              <span className="ml-1.5 text-xs italic text-[color:var(--ink-soft,#6b6557)]">equipment</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-2.5 font-mono tabular-nums text-[color:var(--ink)]">{entry.total_hours}</td>
+                          <td className="px-2 py-2.5 text-[color:var(--ink-soft,#6b6557)]">{entry.location_path || "—"}</td>
+                          <td className="px-2 py-2.5 font-mono tabular-nums text-[color:var(--ink-soft,#6b6557)]">{entry.cost_code || "—"}</td>
+                          <td className="px-2 py-2.5">
                             <select
                               value={entry.status}
                               onChange={(e) => void patchEntry(selectedTimesheet.id, entry.id, { status: e.target.value })}
-                              className="border border-gray-300 rounded-md px-2 py-1 text-xs"
+                              className="border hairline rounded-md px-2 py-1 text-xs"
                             >
                               {ENTRY_STATUSES.map((status) => (
                                 <option key={status} value={status}>{status}</option>
                               ))}
                             </select>
                           </td>
-                          <td className="p-2">
+                          <td className="px-2 py-2.5">
                             {entry.signed_at ? (
-                              <button onClick={() => setSignatureEntry(entry)} className="text-blue-700 underline text-xs">Signed</button>
+                              <button onClick={() => setSignatureEntry(entry)} className="text-xs font-semibold text-[color:var(--brand-700)] hover:underline">Signed</button>
                             ) : (
-                              <span className="text-xs text-gray-400">Unsigned</span>
+                              <span className="text-xs italic text-[color:var(--ink-soft,#6b6557)]">Unsigned</span>
                             )}
                           </td>
                         </tr>

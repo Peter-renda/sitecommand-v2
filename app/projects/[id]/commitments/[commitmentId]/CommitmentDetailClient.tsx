@@ -58,6 +58,24 @@ type Commitment = {
   // DocuSign / markup
   sign_docusign: boolean;
   financial_markup_enabled: boolean;
+  // ERP accounting feedback (pulled back from QuickBooks / Sage 300 CRE)
+  qbo_id: string | null;
+  qbo_ap_invoice_id: string | null;
+  qbo_total_amount: number | null;
+  qbo_balance: number | null;
+  qbo_payment_status: string | null;
+  qbo_ap_invoice_total_amount: number | null;
+  qbo_ap_invoice_balance: number | null;
+  qbo_ap_invoice_payment_status: string | null;
+  qbo_payments_refreshed_at: string | null;
+  sage300cre_id: string | null;
+  sage300cre_ap_invoice_id: string | null;
+  sage300cre_status: string | null;
+  sage300cre_ap_invoice_total_amount: number | null;
+  sage300cre_ap_invoice_amount_paid: number | null;
+  sage300cre_ap_invoice_balance: number | null;
+  sage300cre_ap_invoice_status: string | null;
+  sage300cre_payments_refreshed_at: string | null;
 };
 
 type SsovItem = {
@@ -155,6 +173,36 @@ const ERP_COLORS: Record<string, string> = {
   not_synced: "text-gray-400",
   pending: "text-amber-500",
 };
+
+const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  paid: "Paid",
+  partially_paid: "Partially Paid",
+  unpaid: "Unpaid",
+  open: "Open",
+  closed: "Closed",
+};
+
+const PAYMENT_STATUS_COLORS: Record<string, string> = {
+  paid: "bg-green-100 text-green-700",
+  partially_paid: "bg-amber-100 text-amber-700",
+  unpaid: "bg-gray-100 text-gray-600",
+  open: "bg-blue-50 text-blue-600",
+  closed: "bg-gray-100 text-gray-500",
+};
+
+function PaymentStatusPill({ status }: { status: string | null }) {
+  if (!status) return <span className="text-gray-400">—</span>;
+  const key = status.toLowerCase();
+  return (
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_COLORS[key] ?? "bg-gray-100 text-gray-600"}`}>
+      {PAYMENT_STATUS_LABELS[key] ?? status}
+    </span>
+  );
+}
+
+function fmtMoneyOrDash(n: number | null): string {
+  return n == null ? "—" : fmt(Number(n));
+}
 
 // ── Export helpers ────────────────────────────────────────────────────────────
 
@@ -289,6 +337,7 @@ function SsovPanel({
   onNotify,
   onSubmit,
   onRevise,
+  onApprove,
   editHref,
 }: {
   status: string;
@@ -390,7 +439,7 @@ function SsovPanel({
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
           <p className="text-xs font-medium text-gray-500 mb-1">Committed Amount</p>
           <p className="text-base font-semibold text-gray-900 tabular-nums">{fmt(committedAmount)}</p>
@@ -474,6 +523,7 @@ export default function CommitmentDetailClient({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [payRefreshing, setPayRefreshing] = useState(false);
   const [changeHistory, setChangeHistory] = useState<ChangeHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -507,6 +557,28 @@ export default function CommitmentDetailClient({
     ]);
     setCommitment(c);
     setSsovItems(Array.isArray(ssov) ? ssov : []);
+  }
+
+  async function handleRefreshPayments() {
+    if (!commitment) return;
+    setPayRefreshing(true);
+    try {
+      const targets: string[] = [];
+      if (commitment.qbo_id || commitment.qbo_ap_invoice_id) targets.push("quickbooks");
+      if (commitment.sage300cre_id || commitment.sage300cre_ap_invoice_id) targets.push("sage300cre");
+      await Promise.all(
+        targets.map((integration) =>
+          fetch(`/api/integrations/${integration}/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ recordType: "commitments", recordId: commitmentId }),
+          })
+        )
+      );
+      await reloadCommitment();
+    } finally {
+      setPayRefreshing(false);
+    }
   }
 
   useEffect(() => {
@@ -563,7 +635,7 @@ export default function CommitmentDetailClient({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center">
         <p className="text-sm text-gray-400">Loading…</p>
       </div>
     );
@@ -571,7 +643,7 @@ export default function CommitmentDetailClient({
 
   if (!commitment) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center">
         <p className="text-sm text-gray-500">Commitment not found.</p>
       </div>
     );
@@ -599,9 +671,9 @@ export default function CommitmentDetailClient({
     .reduce((sum, l) => sum + (sovMethod === "unit_quantity" ? l.qty * l.unit_cost : l.amount), 0);
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[#F9FAFB]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
         <a
           href="/dashboard"
           className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors"
@@ -623,8 +695,8 @@ export default function CommitmentDetailClient({
 
       {/* Page header bar */}
       <div className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
-        <div className="px-8 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="px-4 sm:px-8 py-3 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0 flex-wrap">
             <a
               href={`/projects/${projectId}/commitments`}
               className="text-sm text-gray-400 hover:text-gray-700 transition-colors"
@@ -927,7 +999,7 @@ export default function CommitmentDetailClient({
 
         {/* ── General Information ── */}
         <Section title="General Information">
-          <div className="grid grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
             <DetailField label="Contract #">
               {commitment.number}
             </DetailField>
@@ -938,7 +1010,7 @@ export default function CommitmentDetailClient({
               {commitment.title || <span className="text-gray-400">—</span>}
             </DetailField>
           </div>
-          <div className="grid grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
             <DetailField label="Status">
               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusCls}`}>
                 {statusLabel}
@@ -951,7 +1023,7 @@ export default function CommitmentDetailClient({
               {commitment.default_retainage}%
             </DetailField>
           </div>
-          <div className="grid grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
             <DetailField label="ERP Status">
               <span className={`text-sm italic ${erpColor}`}>{erpLabel}</span>
             </DetailField>
@@ -970,7 +1042,7 @@ export default function CommitmentDetailClient({
             </DetailField>
           </div>
           {commitment.type === "purchase_order" && (
-            <div className="grid grid-cols-3 gap-6 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
               <DetailField label="Bill To">
                 {commitment.bill_to || <span className="text-gray-400">—</span>}
               </DetailField>
@@ -998,6 +1070,84 @@ export default function CommitmentDetailClient({
             </div>
           )}
         </Section>
+
+        {/* ── Accounting (ERP feedback) ── */}
+        {(commitment.qbo_id || commitment.qbo_ap_invoice_id || commitment.sage300cre_id || commitment.sage300cre_ap_invoice_id) && (
+          <Section title="Accounting">
+            <div className="flex items-center justify-between mb-4 -mt-2">
+              <p className="text-xs text-gray-400">
+                Pulled from the connected accounting system
+                {(commitment.qbo_payments_refreshed_at || commitment.sage300cre_payments_refreshed_at) && (
+                  <> · last refreshed {new Date(commitment.qbo_payments_refreshed_at ?? commitment.sage300cre_payments_refreshed_at!).toLocaleString()}</>
+                )}
+              </p>
+              <button
+                onClick={handleRefreshPayments}
+                disabled={payRefreshing}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                <svg className={`w-3.5 h-3.5 ${payRefreshing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {payRefreshing ? "Refreshing…" : "Refresh payment status"}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {(commitment.qbo_id || commitment.qbo_ap_invoice_id) && (
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-gray-700 mb-3">QuickBooks Online</p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <DetailField label={commitment.type === "subcontract" ? "Bill Total" : "PO Total"}>
+                      <span className="tabular-nums">{fmtMoneyOrDash(commitment.qbo_total_amount)}</span>
+                    </DetailField>
+                    <DetailField label="Open Balance">
+                      <span className="tabular-nums">{fmtMoneyOrDash(commitment.qbo_balance)}</span>
+                    </DetailField>
+                    <DetailField label="Payment Status">
+                      <PaymentStatusPill status={commitment.qbo_payment_status} />
+                    </DetailField>
+                  </div>
+                  {commitment.qbo_ap_invoice_id && (
+                    <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-gray-200">
+                      <DetailField label="AP Invoice Total">
+                        <span className="tabular-nums">{fmtMoneyOrDash(commitment.qbo_ap_invoice_total_amount)}</span>
+                      </DetailField>
+                      <DetailField label="AP Invoice Balance">
+                        <span className="tabular-nums">{fmtMoneyOrDash(commitment.qbo_ap_invoice_balance)}</span>
+                      </DetailField>
+                      <DetailField label="AP Invoice Status">
+                        <PaymentStatusPill status={commitment.qbo_ap_invoice_payment_status} />
+                      </DetailField>
+                    </div>
+                  )}
+                </div>
+              )}
+              {(commitment.sage300cre_id || commitment.sage300cre_ap_invoice_id) && (
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-gray-700 mb-3">Sage 300 CRE</p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <DetailField label="PO Status">
+                      <PaymentStatusPill status={commitment.sage300cre_status} />
+                    </DetailField>
+                  </div>
+                  {commitment.sage300cre_ap_invoice_id && (
+                    <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-gray-200">
+                      <DetailField label="AP Invoice Total">
+                        <span className="tabular-nums">{fmtMoneyOrDash(commitment.sage300cre_ap_invoice_total_amount)}</span>
+                      </DetailField>
+                      <DetailField label="Amount Paid">
+                        <span className="tabular-nums">{fmtMoneyOrDash(commitment.sage300cre_ap_invoice_amount_paid)}</span>
+                      </DetailField>
+                      <DetailField label="Balance">
+                        <span className="tabular-nums">{fmtMoneyOrDash(commitment.sage300cre_ap_invoice_balance)}</span>
+                      </DetailField>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Section>
+        )}
 
         {/* ── Financial Summary ── */}
         <Section title="Financial Summary">
@@ -1118,7 +1268,7 @@ export default function CommitmentDetailClient({
         {/* ── Contract Dates ── */}
         <Section title="Contract Dates">
           {commitment.type === "purchase_order" ? (
-            <div className="grid grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
               <DetailField label="Contract Date">
                 {formatDate(commitment.contract_date ?? null)}
               </DetailField>
@@ -1133,7 +1283,7 @@ export default function CommitmentDetailClient({
               </DetailField>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
               <DetailField label="Start Date">
                 {formatDate(commitment.start_date ?? null)}
               </DetailField>
@@ -1152,7 +1302,7 @@ export default function CommitmentDetailClient({
 
         {/* ── Contract Privacy ── */}
         <Section title="Contract Privacy">
-          <div className="grid grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
             <DetailField label="Private">
               {commitment.is_private ? "Yes" : "No"}
             </DetailField>
@@ -1166,7 +1316,7 @@ export default function CommitmentDetailClient({
         <Section title="Additional Information">
           {commitment.type === "subcontract" ? (
             <div>
-              <div className="grid grid-cols-2 gap-6 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
                 <DetailField label="Cover Letter">
                   {commitment.subcontract_cover_letter || <span className="text-gray-400">—</span>}
                 </DetailField>
@@ -1214,7 +1364,7 @@ export default function CommitmentDetailClient({
             </div>
           ) : (
             <div>
-              <div className="grid grid-cols-2 gap-6 mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-4">
                 <DetailField label="Contract Type">
                   {commitment.subcontract_type
                     ? commitment.subcontract_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())

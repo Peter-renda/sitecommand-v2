@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
 import { Brand } from "@/components/design-system/Primitives";
 import { PERMISSION_TEMPLATES, type PermissionLevel } from "@/lib/permission-templates";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { COMPANY_REPORT_FIELDS } from "@/lib/report-fields";
 
 type Contact = {
   id: string;
@@ -61,6 +63,9 @@ export default function DirectoryContactDetailClient({ projectId, username, init
 
   const [companyTab, setCompanyTab] = useState<"general" | "users" | "bidder">("general");
   const [companyForm, setCompanyForm] = useState<Record<string, unknown>>({ ...initialContact });
+  // Every company already in the project directory (company-type contacts plus
+  // company names on user contacts), offered as suggestions on the Company field.
+  const [companyNames, setCompanyNames] = useState<string[]>([]);
   const [companyUsers, setCompanyUsers] = useState<{ onProject: Array<{ id: string; first_name: string | null; last_name: string | null; email: string | null }>; portfolio: Array<{ id: string; first_name: string | null; last_name: string | null; email: string | null }> }>({ onProject: [], portfolio: [] });
 
   const permissionRows = useMemo(() => {
@@ -75,6 +80,21 @@ export default function DirectoryContactDetailClient({ projectId, username, init
       .then((data) => setCompanyUsers({ onProject: data?.onProject ?? [], portfolio: data?.portfolio ?? [] }))
       .catch(() => {});
   }, [isCompany, projectId, initialContact.id]);
+
+  useEffect(() => {
+    if (isCompany) return;
+    fetch(`/api/projects/${projectId}/directory`)
+      .then((r) => r.json())
+      .then((data: Contact[]) => {
+        if (!Array.isArray(data)) return;
+        const names = new Set<string>();
+        for (const c of data) {
+          if (typeof c.company === "string" && c.company.trim()) names.add(c.company.trim());
+        }
+        setCompanyNames([...names].sort((a, b) => a.localeCompare(b)));
+      })
+      .catch(() => {});
+  }, [isCompany, projectId]);
 
   function setUserField(field: keyof UserFormData, value: string) {
     setSaved(false);
@@ -95,14 +115,13 @@ export default function DirectoryContactDetailClient({ projectId, username, init
     });
     setSaving(false);
     if (res.ok) {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      router.push(`/projects/${projectId}/directory`);
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-    <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between"><a href="/dashboard" className="hover:opacity-80 transition-opacity"><Brand /></a><div className="flex items-center gap-5"><span className="text-sm text-gray-400">{username}</span><button onClick={() => router.push(`/projects/${projectId}/directory`)} className="text-sm text-gray-400 hover:text-gray-900">Back to Directory</button></div></header>
+    <div className="min-h-screen bg-[#F9FAFB]">
+    <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between"><a href="/dashboard" className="hover:opacity-80 transition-opacity"><Brand /></a><div className="flex items-center gap-5"><span className="text-sm text-gray-400">{username}</span><button onClick={() => router.push(`/projects/${projectId}/directory`)} className="text-sm text-gray-400 hover:text-gray-900">Back to Directory</button></div></header>
     <ProjectNav projectId={projectId} />
     <main className="max-w-screen-xl mx-auto px-6 py-6 space-y-5">
         <div className="rounded-xl border border-[var(--border-base)] bg-white p-4">
@@ -182,7 +201,7 @@ export default function DirectoryContactDetailClient({ projectId, username, init
               ))}
             </div>
 
-            {companyTab === "general" && <div className="grid grid-cols-2 gap-3">{[["company", "Name"], ["abbreviated_name", "Abbreviated Name"], ["dba", "DBA"], ["business_phone", "Business Phone"], ["business_fax", "Business Fax"], ["email", "Email"], ["website", "Website"], ["phone", "Phone"], ["address", "Address"], ["city", "City"], ["country", "Country"], ["state", "State"], ["zip", "Zip"], ["project_roles", "Project Roles"], ["tags_keywords", "Tags/Keywords"], ["license_number", "License Number"], ["labor_union", "Labor Union"], ["entity_type", "Entity Type"], ["primary_contact", "Primary Contact"]].map(([k, l]) => <div key={k}><label className="block text-xs text-gray-500 mb-1">{l}</label><input className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm" value={String(companyForm[k] ?? "")} onChange={(e) => setCompanyField(k, e.target.value)} /></div>)}</div>}
+            {companyTab === "general" && <div className="grid grid-cols-2 gap-3">{[["company", "Name"], ["abbreviated_name", "Abbreviated Name"], ["dba", "DBA"], ["business_phone", "Business Phone"], ["business_fax", "Business Fax"], ["email", "Email"], ["website", "Website"], ["phone", "Phone"], ["address", "Address"], ["city", "City"], ["country", "Country"], ["state", "State"], ["zip", "Zip"], ["project_roles", "Project Roles"], ["tags_keywords", "Tags/Keywords"], ["license_number", "License Number"], ["labor_union", "Labor Union"], ["entity_type", "Entity Type"], ["primary_contact", "Primary Contact"]].map(([k, l]) => <div key={k}><label className="block text-xs text-gray-500 mb-1">{l}</label><input className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm" value={String(companyForm[k] ?? "")} onChange={(e) => setCompanyField(k, e.target.value)} /></div>)}<div className="col-span-2"><ReportFieldsSection title="Report Fields" description="Extra company attributes surfaced as columns in 360 Reports." fields={COMPANY_REPORT_FIELDS} values={(companyForm.report_fields as ReportFieldValues) ?? {}} onChange={(key, value) => setCompanyForm((prev) => ({ ...prev, report_fields: { ...((prev.report_fields as ReportFieldValues) ?? {}), [key]: value } }))} columns={2} /></div></div>}
             {companyTab === "users" && <div className="space-y-6 text-sm"><section><h3 className="font-semibold mb-2">Users on this project</h3><table className="w-full"><tbody>{companyUsers.onProject.map((u) => <tr key={u.id} className="border-t"><td className="py-2">{u.first_name} {u.last_name}</td><td>{u.email}</td></tr>)}</tbody></table></section><section><h3 className="font-semibold mb-2">Users in company portfolio (other projects)</h3><table className="w-full"><tbody>{companyUsers.portfolio.map((u) => <tr key={u.id} className="border-t"><td className="py-2">{u.first_name} {u.last_name}</td><td>{u.email}</td></tr>)}</tbody></table></section></div>}
             {companyTab === "bidder" && <div className="space-y-4"><div className="grid grid-cols-2 gap-3">{BIDDER_FLAGS.map(([k, l]) => <label key={k} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(companyForm[k])} onChange={(e) => setCompanyField(k, e.target.checked)} />{l}</label>)}</div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs text-gray-500 mb-1">Trades</label><input className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm" value={String(companyForm.trades ?? "")} onChange={(e) => setCompanyField("trades", e.target.value)} /></div><div><label className="block text-xs text-gray-500 mb-1">Cost Codes</label><input className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm" value={String(companyForm.cost_codes ?? "")} onChange={(e) => setCompanyField("cost_codes", e.target.value)} /></div></div><div><label className="block text-xs text-gray-500 mb-1">Comment</label><textarea className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm" value={String(companyForm.bidder_comment ?? "")} onChange={(e) => setCompanyField("bidder_comment", e.target.value)} /></div></div>}
             <div className="flex justify-end mt-4 gap-3">{saved && <span className="text-xs text-green-600">Saved</span>}<button onClick={() => save(companyForm)} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md">{saving ? "Saving..." : "Save"}</button></div>

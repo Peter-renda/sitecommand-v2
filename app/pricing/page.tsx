@@ -77,7 +77,7 @@ export default function PricingPage() {
         <div className="mb-14 animate-fade-up">
           {/* Eyebrow tag */}
           <div className="inline-flex items-center gap-2 mb-4 delay-100">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#D4500A" }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#2563EB" }} />
             <span className="text-xs font-medium tracking-widest text-gray-400 uppercase">Pricing</span>
           </div>
 
@@ -127,7 +127,7 @@ export default function PricingPage() {
                   {/* Most popular badge */}
                   {plan.highlight && (
                     <div className="mb-4">
-                      <span className="px-2.5 py-1 text-xs font-semibold bg-[#D4500A] text-white rounded-full">
+                      <span className="px-2.5 py-1 text-xs font-semibold bg-[#2563EB] text-white rounded-full">
                         Most popular
                       </span>
                     </div>
@@ -201,7 +201,7 @@ export default function PricingPage() {
                       <li key={f} className="flex items-start gap-2.5 text-sm">
                         <svg
                           className="w-4 h-4 shrink-0 mt-0.5"
-                          style={{ color: "#D4500A" }}
+                          style={{ color: "#2563EB" }}
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"

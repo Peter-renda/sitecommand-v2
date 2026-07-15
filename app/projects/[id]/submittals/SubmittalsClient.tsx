@@ -63,8 +63,58 @@ type SubmittalPackage = {
   description: string | null;
   submittal_count: number;
   distributed_count: number;
+  submittal_ids?: string[];
   created_at: string;
 };
+
+type UserRecord = {
+  id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+};
+
+type FilterKey =
+  | "approver"
+  | "ball_in_court"
+  | "ball_in_court_company"
+  | "created_by"
+  | "current_revision"
+  | "division"
+  | "location"
+  | "number"
+  | "private"
+  | "received_from"
+  | "response"
+  | "responsible_contractor"
+  | "spec_section"
+  | "status"
+  | "submittal_manager"
+  | "submittal_package"
+  | "type"
+  | "workflow_template";
+
+const FILTER_LABELS: { key: FilterKey; label: string }[] = [
+  { key: "approver", label: "Approver" },
+  { key: "ball_in_court", label: "Ball In Court" },
+  { key: "ball_in_court_company", label: "Ball In Court Company" },
+  { key: "created_by", label: "Created By" },
+  { key: "current_revision", label: "Current Revision" },
+  { key: "division", label: "Division" },
+  { key: "location", label: "Location" },
+  { key: "number", label: "Number" },
+  { key: "private", label: "Private" },
+  { key: "received_from", label: "Received From" },
+  { key: "response", label: "Response" },
+  { key: "responsible_contractor", label: "Responsible Contractor" },
+  { key: "spec_section", label: "Spec Section" },
+  { key: "status", label: "Status" },
+  { key: "submittal_manager", label: "Submittal Manager" },
+  { key: "submittal_package", label: "Submittal Package" },
+  { key: "type", label: "Type" },
+  { key: "workflow_template", label: "Workflow Template" },
+];
 
 
 const SUBMITTAL_TYPES = [
@@ -128,6 +178,22 @@ function formatDate(d: string | null): string {
   return new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+const OPEN_STATUSES = new Set(["open", "draft", "resubmitted", "revise_and_resubmit", "revise_and_resubmit_2", "make_corrections", "not_reviewed"]);
+const APPROVED_STATUSES = new Set(["approved", "approved_as_noted", "no_exceptions_taken"]);
+
+function isSubmittalOverdue(s: Submittal): boolean {
+  if (!s.final_due_date || !OPEN_STATUSES.has(s.status)) return false;
+  const due = new Date(s.final_due_date + "T23:59:59");
+  return due.getTime() < Date.now();
+}
+
+function indexStatus(status: string): "open" | "closed" | "answered" | "draft" {
+  if (status === "draft") return "draft";
+  if (status === "closed") return "closed";
+  if (APPROVED_STATUSES.has(status)) return "answered";
+  return "open";
+}
+
 
 function safeText(value: unknown): string {
   return typeof value === "string" ? value : value == null ? "" : String(value);
@@ -164,6 +230,24 @@ function summarizeApprovers(directory: DirectoryContact[], steps: Submittal["wor
     .filter((name) => name !== "—");
   if (names.length === 0) return "—";
   return Array.from(new Set(names)).join(", ");
+}
+
+function userDisplayName(u: UserRecord | undefined | null, fallback: string): string {
+  if (!u) return fallback;
+  const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  return name || u.username || u.email || fallback;
+}
+
+function approverIdsFor(steps: Submittal["workflow_steps"]): string[] {
+  return normalizeWorkflowSteps(steps)
+    .filter((step) => step.person_id && step.role?.toLowerCase().includes("approver"))
+    .map((step) => step.person_id as string);
+}
+
+function divisionFromSpec(spec: Specification | undefined | null): string | null {
+  if (!spec || !spec.code) return null;
+  const match = spec.code.trim().match(/^(\d{2})/);
+  return match ? match[1] : null;
 }
 
 function latestWorkflowResponse(steps: Submittal["workflow_steps"]) {
@@ -552,7 +636,7 @@ export function CreateSubmittalModal({
           </div>
 
           {/* Number & Revision / Submittal Type */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Number</label>
               <input
@@ -660,18 +744,21 @@ export function CreateSubmittalModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Cost Code</label>
-              {budgetCostCodes.length > 0 ? (
-                <select value={costCode} onChange={(e) => setCostCode(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white">
-                  <option value="">Select cost code...</option>
-                  {budgetCostCodes.map((item) => (
-                    <option key={item.code} value={item.code}>
-                      {item.code}{item.description ? ` – ${item.description}` : ""}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input type="text" value={costCode} onChange={(e) => setCostCode(e.target.value)} placeholder="Cost code" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-              )}
+              <select
+                value={costCode}
+                onChange={(e) => setCostCode(e.target.value)}
+                disabled={budgetCostCodes.length === 0}
+                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                <option value="">
+                  {budgetCostCodes.length === 0 ? "No budget cost codes available" : "Select cost code..."}
+                </option>
+                {budgetCostCodes.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.code}{item.description ? ` – ${item.description}` : ""}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Linked Drawings</label>
@@ -806,7 +893,7 @@ export function CreateSubmittalModal({
           {/* Additional Submittal Fields */}
           <div className="pt-2">
             <p className="text-xs font-semibold text-gray-700 mb-3">Additional Submittal Fields</p>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Approver Name</label>
                 <SingleContactPicker directory={directory} selectedId={approverNameId} onChange={setApproverNameId} filterType="user" placeholder="Select..." />
@@ -999,6 +1086,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
   const [packages, setPackages] = useState<SubmittalPackage[]>([]);
   const [directory, setDirectory] = useState<DirectoryContact[]>([]);
   const [specifications, setSpecifications] = useState<Specification[]>([]);
+  const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(shouldOpenCreate);
   const [showCreateMenu, setShowCreateMenu] = useState(false);
@@ -1009,6 +1097,31 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
   const [showProceedToSpecificationsModal, setShowProceedToSpecificationsModal] = useState(shouldPromptForSpecs);
   const [prefilledSpecificationId, setPrefilledSpecificationId] = useState<string | null>(selectedSpecificationId);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const [expandedFilter, setExpandedFilter] = useState<FilterKey | null>(null);
+  const [filters, setFilters] = useState<Record<FilterKey, string[]>>(() => {
+    const init = {} as Record<FilterKey, string[]>;
+    for (const f of FILTER_LABELS) init[f.key] = [];
+    return init;
+  });
+  const filterButtonRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function onPointerDown(e: MouseEvent) {
+      if (filterButtonRef.current && !filterButtonRef.current.contains(e.target as Node)) {
+        setShowFilters(false);
+      }
+    }
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, []);
+
+  useEffect(() => {
+    fetch(`/api/users`)
+      .then((r) => r.json())
+      .then((data: UserRecord[]) => { if (Array.isArray(data)) setUsers(data); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (shouldPromptForSpecs || shouldOpenCreate || selectedSpecificationId) {
@@ -1047,6 +1160,146 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
   }, []);
 
   const nextNumber = submittals.length > 0 ? Math.max(...submittals.map((s) => s.submittal_number)) + 1 : 1;
+
+  // Map submittal id -> set of package ids
+  const submittalPackageIds = new Map<string, string[]>();
+  for (const pkg of packages) {
+    for (const sid of pkg.submittal_ids ?? []) {
+      const list = submittalPackageIds.get(sid) ?? [];
+      list.push(pkg.id);
+      submittalPackageIds.set(sid, list);
+    }
+  }
+
+  function ballInCourtCompanyId(s: Submittal): string | null {
+    if (!s.ball_in_court_id) return null;
+    const contact = directory.find((c) => c.id === s.ball_in_court_id);
+    return contact?.company?.trim() || null;
+  }
+
+  function valuesForFilter(key: FilterKey, s: Submittal): string[] {
+    switch (key) {
+      case "approver":
+        return approverIdsFor(s.workflow_steps);
+      case "ball_in_court":
+        return s.ball_in_court_id ? [s.ball_in_court_id] : [];
+      case "ball_in_court_company": {
+        const c = ballInCourtCompanyId(s);
+        return c ? [c] : [];
+      }
+      case "created_by":
+        return s.created_by ? [s.created_by] : [];
+      case "current_revision":
+        return [s.revision ?? "0"];
+      case "division": {
+        const spec = specifications.find((x) => x.id === s.specification_id);
+        const div = divisionFromSpec(spec);
+        return div ? [div] : [];
+      }
+      case "location":
+        return s.location ? [s.location] : [];
+      case "number":
+        return [String(s.submittal_number)];
+      case "private":
+        return [s.private ? "true" : "false"];
+      case "received_from":
+        return s.received_from_id ? [s.received_from_id] : [];
+      case "response": {
+        const latest = latestWorkflowResponse(s.workflow_steps);
+        return latest?.response ? [latest.response] : [];
+      }
+      case "responsible_contractor":
+        return s.responsible_contractor_id ? [s.responsible_contractor_id] : [];
+      case "spec_section":
+        return s.specification_id ? [s.specification_id] : [];
+      case "status":
+        return [s.status];
+      case "submittal_manager":
+        return s.submittal_manager_id ? [s.submittal_manager_id] : [];
+      case "submittal_package":
+        return submittalPackageIds.get(s.id) ?? [];
+      case "type":
+        return s.submittal_type ? [s.submittal_type] : [];
+      case "workflow_template":
+        return [];
+      default:
+        return [];
+    }
+  }
+
+  function filterOptionLabel(key: FilterKey, value: string): string {
+    switch (key) {
+      case "approver":
+      case "ball_in_court":
+      case "received_from":
+      case "responsible_contractor":
+      case "submittal_manager":
+        return getContactNameById(directory, value);
+      case "ball_in_court_company":
+        return value;
+      case "created_by": {
+        const u = users.find((x) => x.id === value);
+        return userDisplayName(u, "Unknown user");
+      }
+      case "private":
+        return value === "true" ? "Yes" : "No";
+      case "division":
+        return `Division ${value}`;
+      case "spec_section":
+        return getSpecName(specifications, value);
+      case "submittal_package": {
+        const pkg = packages.find((p) => p.id === value);
+        return pkg ? `#${pkg.package_number} ${pkg.title}` : value;
+      }
+      case "status":
+        return STATUS_LABELS[value] ?? value;
+      default:
+        return value;
+    }
+  }
+
+  function optionsForFilter(key: FilterKey): { value: string; label: string }[] {
+    const seen = new Set<string>();
+    const out: { value: string; label: string }[] = [];
+    for (const s of submittals) {
+      for (const v of valuesForFilter(key, s)) {
+        if (seen.has(v)) continue;
+        seen.add(v);
+        out.push({ value: v, label: filterOptionLabel(key, v) });
+      }
+    }
+    return out.sort((a, b) => safeLocaleCompare(a.label, b.label, true));
+  }
+
+  function toggleFilterValue(key: FilterKey, value: string) {
+    setFilters((prev) => {
+      const current = prev[key] ?? [];
+      const next = current.includes(value)
+        ? current.filter((v) => v !== value)
+        : [...current, value];
+      return { ...prev, [key]: next };
+    });
+  }
+
+  function clearAllFilters() {
+    setFilters(() => {
+      const cleared = {} as Record<FilterKey, string[]>;
+      for (const f of FILTER_LABELS) cleared[f.key] = [];
+      return cleared;
+    });
+  }
+
+  const activeFilterCount = Object.values(filters).reduce((acc, arr) => acc + (arr?.length ?? 0), 0);
+
+  const visibleSubmittals = submittals.filter((s) => {
+    for (const f of FILTER_LABELS) {
+      const selected = filters[f.key];
+      if (!selected || selected.length === 0) continue;
+      const submittalValues = valuesForFilter(f.key, s);
+      if (!submittalValues.some((v) => selected.includes(v))) return false;
+    }
+    return true;
+  });
   const specSectionRows = Array.from(
     submittals.reduce((acc, submittal) => {
       const key = submittal.specification_id ?? "none";
@@ -1056,7 +1309,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
       else existing.open += 1;
       acc.set(key, existing);
       return acc;
-    }, new Map<string, { key: string; name: string; total: number; open: number; closed: number }>())
+    }, new Map<string, { key: string; name: string; total: number; open: number; closed: number }>()).values()
   ).sort((a, b) => safeLocaleCompare(a.name, b.name));
 
   async function handleCreate(data: Record<string, unknown>, sendEmails: boolean) {
@@ -1148,9 +1401,9 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-        <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">SiteCommand</a>
+    <div className="min-h-screen bg-[#F9FAFB]">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+        <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">SiteCommand</a>
         <div className="flex items-center gap-5">
           <span className="text-sm text-gray-400">{username}</span>
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Logout</button>
@@ -1165,20 +1418,20 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
             <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Submittals</h1>
             {!loading && submittals.length > 0 && (
               <p className="sec-sub mt-1.5">
-                <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+                <span className="serif-italic text-[color:var(--brand-700)]">Shop drawings &amp; product data under review</span>
                 <span className="sep">·</span>
-                <span className="num" style={{ color: "var(--brand-500)" }}>{submittals.filter((s) => s.status === "open").length}</span> open
+                <span className="num" style={{ color: "var(--brand-500)" }}>{submittals.filter((s) => OPEN_STATUSES.has(s.status)).length}</span> open
                 <span className="sep">·</span>
-                <span className="num">{submittals.filter((s) => s.status === "closed").length}</span> closed
+                <span className="num">{submittals.filter(isSubmittalOverdue).length}</span> overdue
                 <span className="sep">·</span>
                 <span className="num">{submittals.length}</span> total
               </p>
             )}
-            <div className="mt-3 inline-flex rounded-md border hairline overflow-hidden bg-white">
-              <button onClick={() => { setActiveTab("items"); setSelectedIds([]); }} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "items" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Items</button>
-              <button onClick={() => { setActiveTab("packages"); setSelectedIds([]); }} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "packages" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Packages</button>
-              <button onClick={() => { setActiveTab("spec_sections"); setSelectedIds([]); }} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "spec_sections" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Spec Sections</button>
-              <button onClick={() => { setActiveTab("recycle_bin"); setSelectedIds([]); }} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "recycle_bin" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Recycle Bin</button>
+            <div className="seg mt-3">
+              <button onClick={() => { setActiveTab("items"); setSelectedIds([]); }} className={activeTab === "items" ? "active" : ""}>Items</button>
+              <button onClick={() => { setActiveTab("packages"); setSelectedIds([]); }} className={activeTab === "packages" ? "active" : ""}>Packages</button>
+              <button onClick={() => { setActiveTab("spec_sections"); setSelectedIds([]); }} className={activeTab === "spec_sections" ? "active" : ""}>Spec Sections</button>
+              <button onClick={() => { setActiveTab("recycle_bin"); setSelectedIds([]); }} className={activeTab === "recycle_bin" ? "active" : ""}>Recycle Bin</button>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1194,7 +1447,87 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                 <button onClick={() => { const managerId = prompt("Bulk edit Submittal Manager contact ID (blank to cancel):"); if (!managerId) return; runBulkAction("edit", { submittal_manager_id: managerId.trim() }); }} disabled={bulkLoading || activeTab === "recycle_bin"} className="px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50">Bulk Edit</button>
               </>
             )}
-            <button onClick={() => exportSubmittalsPDF(submittals, directory, specifications)} disabled={activeTab === "packages"} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors disabled:opacity-50">
+            {activeTab === "items" && (
+              <div className="relative" ref={filterButtonRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowFilters((o) => !o)}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border rounded-md transition-colors ${
+                    activeFilterCount > 0 || showFilters
+                      ? "border-gray-900 text-gray-900 bg-gray-50"
+                      : "text-gray-700 border-gray-200 bg-white hover:bg-gray-50"
+                  }`}
+                >
+                  <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  Filters
+                  {activeFilterCount > 0 && (
+                    <span className="ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-gray-900 text-white text-[10px] font-semibold">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+                {showFilters && (
+                  <div className="absolute right-0 top-full mt-1 w-80 bg-white border border-gray-200 rounded-md shadow-lg z-30 overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+                      <span className="text-xs font-semibold uppercase tracking-[0.1em] text-gray-500">Filter by</span>
+                      {activeFilterCount > 0 && (
+                        <button onClick={clearAllFilters} className="text-xs text-gray-500 hover:text-gray-900">Clear all</button>
+                      )}
+                    </div>
+                    <div className="max-h-[420px] overflow-y-auto">
+                      {FILTER_LABELS.map((f) => {
+                        const isExpanded = expandedFilter === f.key;
+                        const selected = filters[f.key] ?? [];
+                        const options = isExpanded ? optionsForFilter(f.key) : [];
+                        return (
+                          <div key={f.key} className="border-b border-gray-50 last:border-b-0">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedFilter(isExpanded ? null : f.key)}
+                              className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                            >
+                              <span className="flex items-center gap-2">
+                                <span>{f.label}</span>
+                                {selected.length > 0 && (
+                                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-gray-900 text-white text-[10px] font-semibold">
+                                    {selected.length}
+                                  </span>
+                                )}
+                              </span>
+                              <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 8l4 4 4-4" />
+                              </svg>
+                            </button>
+                            {isExpanded && (
+                              <div className="bg-gray-50/60 px-3 py-2 max-h-56 overflow-y-auto">
+                                {options.length === 0 ? (
+                                  <p className="text-xs text-gray-400 py-1">No options available</p>
+                                ) : (
+                                  options.map((opt) => (
+                                    <label key={opt.value} className="flex items-center gap-2 py-1 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={selected.includes(opt.value)}
+                                        onChange={() => toggleFilterValue(f.key, opt.value)}
+                                        className="w-3.5 h-3.5 rounded border-gray-300 text-gray-900"
+                                      />
+                                      <span className="text-xs text-gray-700">{opt.label || "—"}</span>
+                                    </label>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            <button onClick={() => exportSubmittalsPDF(visibleSubmittals, directory, specifications)} disabled={activeTab === "packages"} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-md bg-white hover:bg-gray-50 transition-colors disabled:opacity-50">
               <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
               Export as PDF
             </button>
@@ -1207,7 +1540,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors disabled:opacity-50"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
-                {activeTab !== "items" ? "Create disabled" : creating ? "Creating..." : "New submittal"}
+                {activeTab !== "items" ? "Create disabled" : creating ? "Creating..." : "Create +"}
                 <svg className={`w-3.5 h-3.5 transition-transform ${showCreateMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 8l4 4 4-4" /></svg>
               </button>
               {showCreateMenu && (
@@ -1240,6 +1573,55 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
           </div>
         </div>
 
+        {activeTab === "items" && activeFilterCount > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            {FILTER_LABELS.flatMap((f) =>
+              (filters[f.key] ?? []).map((value) => (
+                <span key={`${f.key}:${value}`} className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-gray-100 text-xs text-gray-700 rounded-full">
+                  <span className="text-gray-500">{f.label}:</span>
+                  <span className="font-medium text-gray-800">{filterOptionLabel(f.key, value) || "—"}</span>
+                  <button
+                    type="button"
+                    onClick={() => toggleFilterValue(f.key, value)}
+                    className="text-gray-400 hover:text-gray-700"
+                    aria-label="Remove filter"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              ))
+            )}
+            <button onClick={clearAllFilters} className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2">Clear all</button>
+          </div>
+        )}
+
+        {!loading && activeTab === "items" && submittals.length > 0 && (
+          <div className="stats">
+            <div className="stat">
+              <div className="lbl">Total Submittals</div>
+              <div className="val">{submittals.length}</div>
+              <div className="delta">{visibleSubmittals.length} shown</div>
+            </div>
+            <div className="stat">
+              <div className="lbl">Open</div>
+              <div className="val">{submittals.filter((s) => OPEN_STATUSES.has(s.status)).length}</div>
+              <div className="delta">In active workflow</div>
+            </div>
+            <div className={`stat ${submittals.filter(isSubmittalOverdue).length > 0 ? "alert" : ""}`}>
+              <div className="lbl">Overdue</div>
+              <div className="val">{submittals.filter(isSubmittalOverdue).length}</div>
+              <div className="delta">Past final due date</div>
+            </div>
+            <div className="stat calm">
+              <div className="lbl">Approved</div>
+              <div className="val">{submittals.filter((s) => APPROVED_STATUSES.has(s.status)).length}</div>
+              <div className="delta">No exceptions / as noted</div>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <p className="text-sm text-gray-400">Loading...</p>
         ) : activeTab === "packages" ? (
@@ -1264,7 +1646,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                 <tbody>
                   {packages.map((pkg) => (
                     <tr key={pkg.id} className="border-b border-gray-50 hover:bg-[color:var(--surface-sunken)] cursor-pointer" onClick={() => { window.location.href = `/projects/${projectId}/submittal-packages/${pkg.id}`; }}>
-                      <td className="px-4 py-3 text-sm font-mono text-[color:var(--ink)] tabular-nums">#{pkg.package_number}</td>
+                      <td className="px-4 py-3"><span className="idx-italic status-open">{String(pkg.package_number).padStart(3, "0")}</span></td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-medium">{pkg.title}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{getSpecName(specifications, pkg.specification_id)}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 tabular-nums">{pkg.submittal_count}</td>
@@ -1310,6 +1692,11 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
             <p className="font-display text-xl text-[color:var(--ink)] mb-1">No submittals yet</p>
             <p className="text-xs text-gray-400 mt-1">Click New submittal to add the first one</p>
           </div>
+        ) : visibleSubmittals.length === 0 ? (
+          <div className="bg-white border border-dashed border-gray-200 rounded-xl py-16 text-center">
+            <p className="font-display text-xl text-[color:var(--ink)] mb-1">No submittals match the current filters</p>
+            <button onClick={clearAllFilters} className="mt-2 text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2">Clear all filters</button>
+          </div>
         ) : (
           <div className="bg-white border hairline rounded-xl overflow-x-auto">
             <table className="w-full min-w-[2200px]">
@@ -1318,8 +1705,8 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                   <th className="text-left px-4 py-3 mono-label w-10">
                     <input
                       type="checkbox"
-                      checked={submittals.length > 0 && selectedIds.length === submittals.length}
-                      onChange={(e) => setSelectedIds(e.target.checked ? submittals.map((s) => s.id) : [])}
+                      checked={visibleSubmittals.length > 0 && selectedIds.length === visibleSubmittals.length}
+                      onChange={(e) => setSelectedIds(e.target.checked ? visibleSubmittals.map((s) => s.id) : [])}
                     />
                   </th>
                   <th className="text-left px-4 py-3 mono-label whitespace-nowrap">#</th>
@@ -1344,7 +1731,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                 </tr>
               </thead>
               <tbody>
-                {submittals.map((s) => {
+                {visibleSubmittals.map((s) => {
                   const latestResponse = latestWorkflowResponse(s.workflow_steps);
                   return (
                   <tr
@@ -1363,11 +1750,13 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                         }
                         className="mr-2"
                       />
-                      <a href={`/projects/${projectId}/submittals/${s.id}`} className="inline-flex p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      <a href={`/projects/${projectId}/submittals/${s.id}?edit=1`} className="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50 hover:text-gray-900 transition-colors">
+                        Edit
                       </a>
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono text-[color:var(--ink)] tabular-nums">#{s.submittal_number}</td>
+                    <td className="px-4 py-3">
+                      <span className={`idx-italic status-${indexStatus(s.status)}`}>{String(s.submittal_number).padStart(3, "0")}</span>
+                    </td>
                     <td className="px-4 py-3 text-sm text-gray-700 tabular-nums">{s.revision ?? "—"}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 font-medium">{s.title}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{s.submittal_type ?? "—"}</td>
@@ -1385,7 +1774,7 @@ export default function SubmittalsClient({ projectId, role, username, userId, us
                     <td className="px-4 py-3 text-sm text-gray-600">{latestResponse?.response ?? "—"}</td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{formatDate(latestResponse?.sent_date ?? null)}</td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{formatDate(latestResponse?.returned_date ?? null)}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{formatDate(s.final_due_date)}</td>
+                    <td className={`px-4 py-3 text-xs whitespace-nowrap tabular-nums ${isSubmittalOverdue(s) ? "font-semibold text-[color:var(--brand-600)]" : "text-gray-500"}`}>{formatDate(s.final_due_date)}</td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{formatDate(s.distributed_at ? s.distributed_at.slice(0, 10) : null)}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{s.location ?? "—"}</td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap tabular-nums">{new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>

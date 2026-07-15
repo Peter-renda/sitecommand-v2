@@ -36,6 +36,7 @@ export default async function TransmittalDetailPage({
     .single();
 
   if (error || !transmittal) notFound();
+  if (transmittal.private && transmittal.created_by !== session.id) notFound();
 
   const items = Array.isArray(transmittal.items) ? (transmittal.items as TransmittalItem[]) : [];
 
@@ -48,7 +49,7 @@ export default async function TransmittalDetailPage({
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">Transmittal #{transmittal.transmittal_number}</h1>
+        <h1 className="font-display text-[24px] leading-tight text-[color:var(--ink)]">Transmittal #{transmittal.transmittal_number}</h1>
         <p className="mt-1 text-sm text-gray-500">Created {formatDate(transmittal.created_at)}</p>
 
         <div className="mt-6 grid gap-4 sm:grid-cols-2">

@@ -10,7 +10,6 @@ export default async function PreconstructionPage({
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
-
   const { id } = await params;
   return (
     <>

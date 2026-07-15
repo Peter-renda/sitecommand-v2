@@ -90,19 +90,15 @@ function fmtDate(d: string | null | undefined) {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    Draft: "border-gray-400 text-gray-600",
-    "Out for Bid": "border-yellow-500 text-yellow-600",
-    "Out for Signature": "border-blue-400 text-blue-600",
-    Approved: "border-green-500 text-green-600",
-    Complete: "border-blue-500 text-blue-600",
-    Terminated: "border-red-400 text-red-600",
+    Draft: "pill-warn",
+    "Out for Bid": "pill-warn",
+    "Out for Signature": "pill-open",
+    Approved: "pill-calm",
+    Complete: "pill-post",
+    Terminated: "pill-alert",
   };
-  const cls = map[status] ?? "border-gray-400 text-gray-600";
-  return (
-    <span className={`px-2 py-0.5 rounded border text-[11px] font-medium bg-white ${cls}`}>
-      {status}
-    </span>
-  );
+  const cls = map[status] ?? "pill-post";
+  return <span className={`pill ${cls}`}>{status}</span>;
 }
 
 const COLUMNS = [
@@ -507,48 +503,59 @@ export default function PrimeContractsClient({
 
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* Header */}
-      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-gray-50 gap-4 flex-wrap">
+      <div className="flex items-end justify-between px-6 pt-8 pb-4 bg-[#F9FAFB] gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)]">Prime Contracts</h1>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Prime Contracts</h1>
             <button
               onClick={openSettingsModal}
-              className="text-gray-400 hover:text-gray-700 transition-colors"
+              className="text-gray-400 hover:text-[color:var(--ink)] transition-colors"
               title="Prime Contract Settings"
             >
               <Settings className="w-4 h-4" />
             </button>
           </div>
+          {!loading && contracts.length > 0 && (
+            <p className="sec-sub mt-1.5">
+              <span className="serif-italic text-[color:var(--brand-700)]">Owner agreements on this project</span>
+              <span className="sep">·</span>
+              <span className="num" style={{ color: "var(--brand-500)" }}>{contracts.filter((c) => c.status === "Approved").length}</span> approved
+              <span className="sep">·</span>
+              <span className="num">{contracts.filter((c) => c.executed).length}</span> executed
+              <span className="sep">·</span>
+              <span className="num">{contracts.length}</span> total
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div ref={exportRef} className="relative">
             <button
               onClick={() => setShowExportMenu((o) => !o)}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors"
+              className="btn-secondary flex items-center gap-1.5"
             >
-              Export <ChevronDown className={`w-3 h-3 transition-transform ${showExportMenu ? "rotate-180" : ""}`} />
+              Export <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showExportMenu ? "rotate-180" : ""}`} />
             </button>
             {showExportMenu && (
-              <div className="absolute right-0 mt-1 w-44 bg-white border border-gray-100 rounded-xl shadow-lg py-1 z-20">
+              <div className="absolute right-0 mt-1 w-44 bg-white border hairline rounded-xl shadow-lg py-1 z-20">
                 <button
                   onClick={() => { exportCSV(filtered); setShowExportMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                  className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors flex items-center gap-2"
                 >
-                  <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                  <svg className="w-4 h-4 text-[color:var(--brand-500)]" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                   </svg>
                   Export as CSV
                 </button>
                 <button
                   onClick={() => { exportPDF(filtered); setShowExportMenu(false); }}
-                  className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                  className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors flex items-center gap-2"
                 >
-                  <svg className="w-4 h-4 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                  <svg className="w-4 h-4 text-[color:var(--brand-500)]" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                   </svg>
                   Export as PDF
@@ -558,9 +565,9 @@ export default function PrimeContractsClient({
           </div>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors"
+            className="btn-secondary flex items-center gap-1.5"
           >
-            <Upload className="w-3 h-3" />
+            <Upload className="w-3.5 h-3.5" />
             Import
           </button>
           <input
@@ -572,7 +579,7 @@ export default function PrimeContractsClient({
           />
           <button
             onClick={() => router.push(`/projects/${projectId}/prime-contracts/new`)}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[color:var(--ink)] rounded-md hover:bg-black transition-colors"
+            className="btn-primary flex items-center gap-1.5"
           >
             <Plus className="w-4 h-4" />
             Create
@@ -580,34 +587,70 @@ export default function PrimeContractsClient({
         </div>
       </div>
 
+      {/* Stat strip */}
+      {!loading && contracts.length > 0 && (() => {
+        const stripOriginal = contracts.reduce((s, c) => s + (c.original_contract_amount ?? 0), 0);
+        const stripApproved = contracts.reduce((s, c) => s + (c.approved_change_orders ?? 0), 0);
+        const stripRevised = stripOriginal + stripApproved;
+        const stripPayments = contracts.reduce((s, c) => s + (c.payments_received ?? 0), 0);
+        const stripPctPaid = stripRevised > 0 ? ((stripPayments / stripRevised) * 100).toFixed(1) : "0.0";
+        const stripOutstanding = stripRevised - stripPayments;
+        return (
+          <div className="px-6 pb-4 bg-[#F9FAFB]">
+            <div className="stats">
+              <div className="stat">
+                <div className="lbl">Revised Contract Value</div>
+                <div className="val tabular-nums">{fmt(stripRevised)}</div>
+                <div className="delta">{fmt(stripOriginal)} original</div>
+              </div>
+              <div className={`stat ${stripApproved > 0 ? "alert" : ""}`}>
+                <div className="lbl">Approved Change Orders</div>
+                <div className="val tabular-nums">{fmt(stripApproved)}</div>
+                <div className="delta">across {contracts.length} contract{contracts.length === 1 ? "" : "s"}</div>
+              </div>
+              <div className="stat calm">
+                <div className="lbl">Payments Received</div>
+                <div className="val tabular-nums">{fmt(stripPayments)}</div>
+                <div className="delta">{stripPctPaid}% of revised</div>
+              </div>
+              <div className={`stat ${stripOutstanding > 0 ? "warn" : ""}`}>
+                <div className="lbl">Balance Outstanding</div>
+                <div className="val tabular-nums">{fmt(stripOutstanding)}</div>
+                <div className="delta">remaining to collect</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white shrink-0">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap px-4 sm:px-6 py-2.5 border-y hairline bg-white shrink-0">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input
               type="text"
               placeholder="Search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-7 pr-3 py-1 text-xs border border-gray-300 rounded w-44 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              className="pl-8 pr-3 py-1.5 text-xs border hairline rounded-md w-48 focus:outline-none focus:ring-1 focus:ring-[color:var(--brand-500)]"
             />
           </div>
           <button
             onClick={() => setShowFilters(true)}
-            className="flex items-center gap-1.5 px-3 py-1 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs border hairline rounded-md text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors"
           >
             <SlidersHorizontal className="w-3 h-3" />
             Filters
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <select className="px-3 py-1 text-xs border border-gray-300 rounded text-gray-500 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 w-48">
+          <select className="px-3 py-1.5 text-xs border hairline rounded-md text-gray-500 bg-white focus:outline-none focus:ring-1 focus:ring-[color:var(--brand-500)] w-48">
             <option value="">Select a column to group</option>
             <option value="status">Status</option>
             <option value="owner_client">Owner/Client</option>
           </select>
-          <button className="flex items-center gap-1.5 px-3 py-1 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors">
+          <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs border hairline rounded-md text-gray-700 hover:bg-[color:var(--surface-sunken)] transition-colors">
             <Columns3 className="w-3 h-3" />
             Configure
           </button>
@@ -621,23 +664,30 @@ export default function PrimeContractsClient({
             className="absolute inset-0 bg-black/10"
             onClick={() => setShowFilters(false)}
           />
-          <div className="absolute left-0 top-0 h-full w-full max-w-sm bg-white border-r border-gray-200 shadow-xl">
-            <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-              <h2 className="text-3xl font-semibold text-gray-900">Filters</h2>
-              <div className="flex items-center gap-4">
+          <div className="absolute left-0 top-0 h-full w-full max-w-sm bg-white border-r hairline shadow-xl">
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b hairline bg-[#F9FAFB]">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">Prime contracts</p>
+                <h2 className="font-display text-[22px] leading-tight text-[color:var(--ink)]">Filters</h2>
+              </div>
+              <div className="flex items-center gap-2">
                 <button
                   onClick={clearAllFilters}
-                  className="text-lg font-semibold text-gray-900 hover:text-gray-700 transition-colors"
+                  className="px-2.5 py-1.5 text-xs font-medium text-gray-700 border hairline rounded-md hover:bg-white transition-colors"
                 >
-                  Clear All Filters
+                  Clear all
                 </button>
-                <button onClick={() => setShowFilters(false)} className="text-gray-700 hover:text-gray-900">
-                  <X className="w-7 h-7" />
+                <button
+                  onClick={() => setShowFilters(false)}
+                  className="grid h-8 w-8 place-items-center rounded-md text-gray-500 hover:bg-white hover:text-gray-900 transition-colors"
+                  aria-label="Close filters"
+                >
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            <div className="p-4 space-y-5">
+            <div className="p-5 space-y-4">
               <FilterSelect
                 label="Owner/Client"
                 value={selectedOwnerClient}
@@ -671,18 +721,18 @@ export default function PrimeContractsClient({
       )}
 
       {/* Table */}
-      <div className="flex-1 overflow-x-auto">
+      <div className="flex-1 overflow-x-auto bg-white">
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">Loading contracts...</div>
         ) : (
           <table className="w-full text-xs border-collapse">
             <thead>
-              <tr className="border-b border-gray-200 bg-white">
-                <th className="w-6 px-2 py-2" />
+              <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
+                <th className="w-6 px-2 py-2.5" />
                 {COLUMNS.map((col) => (
                   <th
                     key={col.key}
-                    className={`px-2 py-2 font-medium text-gray-500 whitespace-pre-line leading-tight ${col.right ? "text-right" : "text-left"}`}
+                    className={`px-2 py-2.5 mono-label whitespace-pre-line leading-tight ${col.right ? "text-right" : "text-left"}`}
                   >
                     {col.label}
                   </th>
@@ -713,19 +763,28 @@ export default function PrimeContractsClient({
                     const pcos = primePcosByContract[contract.id] ?? [];
                     const isPcoLoading = loadingContractPcos.has(contract.id);
 
+                    const statusKey =
+                      contract.status === "Approved" || contract.status === "Complete"
+                        ? "answered"
+                        : contract.status === "Terminated"
+                        ? "closed"
+                        : contract.status === "Draft"
+                        ? "draft"
+                        : "open";
+
                     return (
                       <Fragment key={contract.id}>
                         <tr
-                          className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+                          className="border-b border-gray-50 hover:bg-[color:var(--surface-sunken)] transition-colors cursor-pointer"
                           onClick={() => router.push(`/projects/${projectId}/prime-contracts/${contract.id}`)}
                         >
                           <td className="px-2 py-1.5 text-gray-400" onClick={(e) => toggleContractExpansion(e, contract.id)}>
                             <ChevronRight className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
                           </td>
-                        <td className="px-2 py-1.5 text-blue-600 hover:underline">
-                          {contract.contract_number}
+                        <td className="px-2 py-1.5">
+                          <span className={`idx-italic ${statusKey}`}>{contract.contract_number}</span>
                         </td>
-                        <td className="px-2 py-1.5 text-blue-600 hover:underline max-w-[9rem] truncate">
+                        <td className="px-2 py-1.5 text-[color:var(--ink)] font-medium hover:underline max-w-[9rem] truncate">
                           {contract.owner_client}
                         </td>
                         <td className="px-2 py-1.5 text-gray-700 max-w-[10rem] truncate">
@@ -769,26 +828,26 @@ export default function PrimeContractsClient({
                           <StatusBadge status={contract.status} />
                         </td>
                         <td className="px-2 py-1.5 text-gray-700">{contract.executed ? "Yes" : "No"}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{fmt(original)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{fmt(approved)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{fmt(revised)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{fmt(pending)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{fmt(draft)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{fmt(invoiced)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{fmt(payments)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{pctPaid}%</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{fmt(remaining)}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{fmt(original)}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{fmt(approved)}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{fmt(revised)}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{fmt(pending)}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{fmt(draft)}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{fmt(invoiced)}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{fmt(payments)}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{pctPaid}%</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{fmt(remaining)}</td>
                         <td className="px-2 py-1.5 text-gray-700">{contract.is_private ? "Yes" : "No"}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700">{contract.attachments_count ?? 0}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 font-mono tabular-nums">{contract.attachments_count ?? 0}</td>
                         </tr>
                         {isExpanded && (
-                          <tr className="border-b border-gray-100 bg-gray-50">
+                          <tr className="border-b border-gray-50 bg-[color:var(--surface-sunken)]">
                             <td />
                             <td colSpan={COLUMNS.length} className="px-3 py-2">
                               {isPcoLoading ? (
                                 <p className="text-xs text-gray-500">Loading associated prime contract PCOs…</p>
                               ) : pcos.length === 0 ? (
-                                <p className="text-xs text-gray-500">No associated prime contract PCOs found.</p>
+                                <p className="text-xs text-gray-500 serif-italic">No associated prime contract PCOs found.</p>
                               ) : (
                                 <div className="space-y-1">
                                   {pcos.map((pco) => (
@@ -798,9 +857,15 @@ export default function PrimeContractsClient({
                                         e.stopPropagation();
                                         router.push(`/projects/${projectId}/change-orders/${pco.id}`);
                                       }}
-                                      className="w-full text-left text-xs px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-100 transition-colors"
+                                      className="w-full text-left text-xs px-2 py-1.5 rounded border hairline bg-white hover:bg-[color:var(--surface-sunken)] transition-colors"
                                     >
-                                      PCO #{pco.number || "—"}: {pco.title || "Untitled"} · {pco.status || "Draft"} · {fmt(pco.amount)}
+                                      <span className="font-mono text-[color:var(--brand-700)]">PCO #{pco.number || "—"}</span>
+                                      <span className="sep mx-1.5">·</span>
+                                      {pco.title || "Untitled"}
+                                      <span className="sep mx-1.5">·</span>
+                                      {pco.status || "Draft"}
+                                      <span className="sep mx-1.5">·</span>
+                                      <span className="font-mono tabular-nums">{fmt(pco.amount)}</span>
                                     </button>
                                   ))}
                                 </div>
@@ -823,20 +888,20 @@ export default function PrimeContractsClient({
                     const totRemaining = totRevised - totPayments;
                     const totAttachments = filtered.reduce((s, c) => s + (c.attachments_count ?? 0), 0);
                     return (
-                      <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
-                        <td className="px-2 py-1.5" />
-                        <td colSpan={6} className="px-2 py-1.5 text-gray-700">Totals</td>
-                        <td className="px-2 py-1.5 text-right text-gray-900">{fmt(totOriginal)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-900">{fmt(totApproved)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-900">{fmt(totRevised)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-900">{fmt(totPending)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-900">{fmt(totDraft)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-900">{fmt(totInvoiced)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-900">{fmt(totPayments)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-900">{totPctPaid}%</td>
-                        <td className="px-2 py-1.5 text-right text-gray-900">{fmt(totRemaining)}</td>
-                        <td className="px-2 py-1.5" />
-                        <td className="px-2 py-1.5 text-right text-gray-900">{totAttachments}</td>
+                      <tr className="border-t-2 hairline bg-[color:var(--surface-sunken)] font-semibold">
+                        <td className="px-2 py-2" />
+                        <td colSpan={6} className="px-2 py-2 mono-label">Totals</td>
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{fmt(totOriginal)}</td>
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{fmt(totApproved)}</td>
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{fmt(totRevised)}</td>
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{fmt(totPending)}</td>
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{fmt(totDraft)}</td>
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{fmt(totInvoiced)}</td>
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{fmt(totPayments)}</td>
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{totPctPaid}%</td>
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{fmt(totRemaining)}</td>
+                        <td className="px-2 py-2" />
+                        <td className="px-2 py-2 text-right text-[color:var(--ink)] font-mono tabular-nums">{totAttachments}</td>
                       </tr>
                     );
                   })()}
@@ -934,16 +999,16 @@ export default function PrimeContractsClient({
               <button
                 onClick={closeImportModal}
                 disabled={importState === "creating"}
-                className="px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                className="btn-secondary disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreateFromImport}
                 disabled={importState === "creating"}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-900 hover:bg-gray-700 text-white rounded font-medium transition-colors disabled:opacity-50"
+                className="btn-primary flex items-center gap-1.5 disabled:opacity-50"
               >
-                {importState === "creating" && <Loader2 className="w-3 h-3 animate-spin" />}
+                {importState === "creating" && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 Create Contract
               </button>
             </div>
@@ -1075,13 +1140,13 @@ function FilterSelect({
 }) {
   return (
     <div>
-      <label className="block text-2xl font-semibold text-gray-900 mb-2">{label}</label>
+      <label className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500 mb-1.5">{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-3 text-xl border border-gray-300 rounded-md text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+        className="w-full px-3 py-2 text-xs border hairline rounded-md text-gray-700 focus:outline-none focus:ring-1 focus:ring-[color:var(--brand-500)] bg-white"
       >
-        <option value="">Select Values</option>
+        <option value="">Select values</option>
         {options.map((option) => {
           const normalized = typeof option === "string" ? { value: option, label: option } : option;
           return (

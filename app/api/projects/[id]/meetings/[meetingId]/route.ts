@@ -36,6 +36,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     "title", "series", "overview", "date", "end_date", "location", "status",
     "template", "meeting_link", "timezone", "start_time", "end_time",
     "is_private", "is_draft", "attendees", "notes", "agenda", "is_locked",
+    "report_fields",
   ];
   const patch: Record<string, unknown> = {};
   for (const key of allowed) {

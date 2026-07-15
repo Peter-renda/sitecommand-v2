@@ -503,7 +503,7 @@ export default function NewCommitmentCOClient({
                               <option value="specific">Apply to specific line items</option>
                             </select>
                             {rule.apply_to === "specific" && (
-                              <div className="grid grid-cols-3 gap-2 mt-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
                                 <div>
                                   <label className="block text-xs text-gray-500 mb-1">Segment</label>
                                   <select

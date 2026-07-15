@@ -19,6 +19,22 @@ function isToolEnabled(slug: string, enabledFeatures: string[] | null | undefine
   if (slug === "admin") return true;
   // Assist is a core tool, available on every project regardless of feature allowlist.
   if (slug === "assist") return true;
+  // Accounting → Transaction Orders launched after existing company allowlists
+  // were created, so it shows everywhere by default until allowlists are updated.
+  if (slug === "transaction-orders") return true;
+  // Project Tools → Permit Applications also launched after many existing
+  // company allowlists were created, so default to visible unless explicitly
+  // removed through project/user tool permissions.
+  if (slug === "permit-applications") return true;
+  // Development → Zoning Analysis launched after many existing company
+  // allowlists were created, so default to visible unless explicitly removed.
+  if (slug === "zoning-analysis") return true;
+  // Development → Site Plan likewise launched after existing allowlists, so
+  // default to visible unless explicitly removed.
+  if (slug === "site-plan") return true;
+  // Core Tools → Emails launched after existing company allowlists were
+  // created, so it shows everywhere by default until allowlists are updated.
+  if (slug === "emails") return true;
   if (!enabledFeatures) return true;
   if (enabledFeatures.includes(slug)) return true;
   // Backward compatibility: existing companies with feature allowlists often enabled
@@ -268,7 +284,7 @@ export default function ProjectNav({
 
   return (
     <>
-      <nav className="bg-white border-b border-gray-100 w-full flex items-center overflow-visible relative">
+      <nav className="sticky top-0 z-40 bg-[#F9FAFB]/85 backdrop-blur-md border-b border-black/[0.06] w-full flex items-center overflow-visible relative">
         {/* Non-scrollable left: back links + tools dropdown */}
         <div className="flex items-center gap-4 pl-6 shrink-0">
           {/* Home */}
@@ -315,8 +331,8 @@ export default function ProjectNav({
               </svg>
             </button>
             {open && (
-              <div className="absolute left-0 top-full mt-1 w-56 sm:w-[min(96vw,1120px)] bg-white border border-gray-100 rounded-xl shadow-xl z-[9999] p-5 max-h-[80vh] overflow-y-auto">
-                <div className="grid grid-cols-1 gap-1 sm:grid-cols-5 sm:gap-6">
+              <div className="absolute left-0 top-full mt-1 w-[min(92vw,224px)] sm:w-[min(96vw,1120px)] bg-white border border-gray-100 rounded-xl shadow-xl z-[9999] p-5 max-h-[80vh] overflow-y-auto">
+                <div className="grid grid-cols-1 gap-1 sm:grid-cols-6 sm:gap-6">
                   {visibleSections.map((section) => (
                     <div key={section.label}>
                       <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2 mt-3 sm:mt-0">
@@ -360,7 +376,7 @@ export default function ProjectNav({
             </>
           )}
 
-          <div ref={searchRef} className="relative ml-auto shrink-0 w-64">
+          <div ref={searchRef} className="relative ml-auto shrink-0 w-36 sm:w-64">
             <svg
               className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
               fill="none"

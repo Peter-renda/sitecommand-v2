@@ -77,7 +77,9 @@ export async function GET() {
       | "change_order"
       | "budget"
       | "commitment"
-      | "prime_contract";
+      | "prime_contract"
+      | "transaction_order_assignment"
+      | "training_guide_assignment";
     status: string;
     due_date: string | null;
     project_id: string;
@@ -272,6 +274,65 @@ export async function GET() {
     }
   } catch {}
 
+  // Open Transaction Order assignments where the current user is a
+  // recipient (matched by user_id or email).
+  try {
+    const { data } = await supabase
+      .from("transaction_order_assignments")
+      .select("id, invoice_filename, status, created_at, project_id, recipients")
+      .eq("status", "open")
+      .limit(200);
+
+    for (const row of data || []) {
+      const recipients = Array.isArray(row.recipients) ? row.recipients : [];
+      const matched = recipients.some((r: { userId?: string | null; email?: string | null }) => {
+        if (!r || typeof r !== "object") return false;
+        if (r.userId && r.userId === session.id) return true;
+        if (sessionEmail && typeof r.email === "string" && r.email.toLowerCase() === sessionEmail) {
+          return true;
+        }
+        return false;
+      });
+      if (!matched) continue;
+      openItems.push({
+        id: row.id,
+        title: row.invoice_filename || "Assigned invoice",
+        type: "transaction_order_assignment",
+        status: row.status || "open",
+        due_date: null,
+        project_id: row.project_id,
+      });
+    }
+  } catch {}
+
+  // Company training guides assigned to the current user that are still
+  // outstanding. These are company-scoped (not tied to a project).
+  try {
+    const { data } = await supabase
+      .from("training_guide_assignments")
+      .select("id, due_date, status, training_guides(title)")
+      .eq("user_id", session.id)
+      .eq("status", "assigned")
+      .limit(50);
+
+    for (const row of data || []) {
+      const tgRaw = (row as { training_guides?: unknown }).training_guides;
+      const tg = Array.isArray(tgRaw) ? tgRaw[0] : tgRaw;
+      const title =
+        (tg && typeof tg === "object" && "title" in tg
+          ? (tg as { title?: string | null }).title
+          : null) || "Assigned guide";
+      openItems.push({
+        id: row.id,
+        title,
+        type: "training_guide_assignment",
+        status: row.status || "assigned",
+        due_date: row.due_date || null,
+        project_id: "",
+      });
+    }
+  } catch {}
+
   // Deduplicate and normalize status filtering for non-closed items.
   const isPastDueAndNotDraft = (item: OpenItem) => {
     const status = String(item.status || "").trim().toLowerCase();
@@ -295,23 +356,38 @@ export async function GET() {
     ).values()
   );
 
-  // Fetch project names for all returned entities.
-  const projectIds = [...new Set([...tasks.map((t) => t.project_id), ...dedupedOpenItems.map((i) => i.project_id)])];
+  // Fetch project names for all returned entities. Filter out empty ids so
+  // company-scoped items (e.g. training guide assignments, project_id "") don't
+  // break the UUID `in` query.
+  const projectIds = [...new Set([...tasks.map((t) => t.project_id), ...dedupedOpenItems.map((i) => i.project_id)])].filter(Boolean);
   const { data: projectsData } = projectIds.length
-    ? await supabase.from("projects").select("id, name").in("id", projectIds)
-    : { data: [] as { id: string; name: string }[] };
+    ? await supabase.from("projects").select("id, name, is_training").in("id", projectIds)
+    : { data: [] as { id: string; name: string; is_training: boolean }[] };
 
   const projectMap = new Map((projectsData || []).map((p: { id: string; name: string }) => [p.id, p.name]));
+  // Training sandboxes are personal practice environments — keep their items out
+  // of the real dashboard.
+  const trainingProjectIds = new Set(
+    (projectsData || [])
+      .filter((p: { is_training?: boolean }) => p.is_training)
+      .map((p: { id: string }) => p.id),
+  );
 
-  const result = tasks.map((t) => ({
-    ...t,
-    project_name: projectMap.get(t.project_id) ?? "",
-  }));
+  const result = tasks
+    .filter((t) => !trainingProjectIds.has(t.project_id))
+    .map((t) => ({
+      ...t,
+      project_name: projectMap.get(t.project_id) ?? "",
+    }));
 
   const openItemsResult = dedupedOpenItems
+    .filter((item) => !trainingProjectIds.has(item.project_id))
     .map((item) => ({
       ...item,
-      project_name: projectMap.get(item.project_id) ?? "",
+      project_name:
+        item.type === "training_guide_assignment"
+          ? "Company guides"
+          : projectMap.get(item.project_id) ?? "",
     }))
     .sort((a, b) => {
       const aDue = a.due_date ? new Date(a.due_date).getTime() : Number.POSITIVE_INFINITY;

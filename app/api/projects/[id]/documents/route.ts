@@ -3,6 +3,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getSession } from "@/lib/auth";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { sendDocumentTrackingEmail } from "@/lib/email";
+import { buildFolderPath, getProjectEmailContext } from "@/lib/document-notify";
 
 async function getChangedByName(supabase: SupabaseClient, userId: string): Promise<string> {
   const { data } = await supabase
@@ -23,11 +24,11 @@ async function logAndNotifyParentTrackers(
   changedByName: string,
   docName: string,
   docType: "file" | "folder",
+  storagePath: string | null,
 ) {
   const action = docType === "folder" ? "New folder added" : "New file added";
   const details = `"${docName}" was added by ${changedByName}`;
 
-  // Log the addition on the parent folder so it shows in the folder's change history
   if (parentId) {
     await supabase.from("document_change_history").insert({
       document_id: parentId,
@@ -39,7 +40,6 @@ async function logAndNotifyParentTrackers(
     });
   }
 
-  // Also log creation on the new document itself
   await supabase.from("document_change_history").insert({
     document_id: newDocId,
     project_id: projectId,
@@ -49,7 +49,6 @@ async function logAndNotifyParentTrackers(
     details: `"${docName}" was ${docType === "folder" ? "created" : "uploaded"}`,
   });
 
-  // Notify trackers on the full ancestor chain (direct parent + all ancestors)
   if (!parentId) return;
 
   const ancestorIds: string[] = [];
@@ -70,14 +69,34 @@ async function logAndNotifyParentTrackers(
     .from("document_tracking")
     .select("user_email")
     .in("document_id", ancestorIds)
-    .eq("project_id", projectId)
-    .neq("user_id", userId);
+    .eq("project_id", projectId);
 
   const uniqueEmails = [...new Set((trackers || []).map((t) => t.user_email).filter(Boolean))];
+  if (uniqueEmails.length === 0) return;
+
+  const [{ companyName, projectName, projectUrl }, filePath] = await Promise.all([
+    getProjectEmailContext(supabase, projectId),
+    buildFolderPath(supabase, projectId, parentId),
+  ]);
+  const fileUrl = storagePath
+    ? supabase.storage.from("project-documents").getPublicUrl(storagePath).data.publicUrl
+    : null;
+  const viewOnlineUrl = `${projectUrl}/documents`;
+  const eventTime = new Date();
 
   for (const email of uniqueEmails) {
     try {
-      await sendDocumentTrackingEmail(email, docName, action, details, changedByName);
+      await sendDocumentTrackingEmail({
+        to: email,
+        companyName,
+        projectName,
+        filePath,
+        fileName: docName,
+        fileUrl,
+        event: action,
+        eventTime,
+        viewOnlineUrl,
+      });
     } catch {
       // Non-fatal
     }
@@ -198,7 +217,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 });
 
     const changedByName = await getChangedByName(supabase, session.id);
-    await logAndNotifyParentTrackers(supabase, docId, parentId, projectId, session.id, changedByName, file.name, "file");
+    await logAndNotifyParentTrackers(supabase, docId, parentId, projectId, session.id, changedByName, file.name, "file", path);
 
     return NextResponse.json({
       ...data,
@@ -235,7 +254,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 });
 
     const changedByName = await getChangedByName(supabase, session.id);
-    await logAndNotifyParentTrackers(supabase, docId, parent_id || null, projectId, session.id, changedByName, name, "file");
+    await logAndNotifyParentTrackers(supabase, docId, parent_id || null, projectId, session.id, changedByName, name, "file", storage_path);
 
     return NextResponse.json({
       ...data,
@@ -257,7 +276,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (data) {
     const changedByName = await getChangedByName(supabase, session.id);
-    await logAndNotifyParentTrackers(supabase, data.id, parent_id || null, projectId, session.id, changedByName, name, "folder");
+    await logAndNotifyParentTrackers(supabase, data.id, parent_id || null, projectId, session.id, changedByName, name, "folder", null);
   }
 
   return NextResponse.json({ ...data, url: null });

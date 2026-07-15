@@ -7,5 +7,5 @@ export default async function ReportingPage({ params }: { params: Promise<{ id: 
   if (!session) redirect("/login");
 
   const { id } = await params;
-  return <ReportingClient projectId={id} />;
+  return <ReportingClient projectId={id} currentUserName={session.username || session.email || "You"} />;
 }

@@ -34,7 +34,15 @@
       "Bash(gunzip -c /tmp/design.gz)",
       "Read(//tmp/**)",
       "Bash(cp /root/.claude/projects/-home-user-SiteCommand/97c3d04c-6bae-4f01-be80-708a7b4883b1/tool-results/webfetch-1777390768792-z47n2s.bin /tmp/design.bin.gz)",
-      "Bash(gunzip -f /tmp/design.bin.gz)"
+      "Bash(gunzip -f /tmp/design.bin.gz)",
+      "Bash(cp /root/.claude/projects/-home-user-SiteCommand/b774361b-1b89-4069-afc4-3baa9482b0e9/tool-results/webfetch-1779467060436-kxw9ol.bin /tmp/design.gz)",
+      "Bash(gunzip -f /tmp/design.gz)",
+      "Bash(cp \"/root/.claude/uploads/a2ce9306-2780-5b88-99d6-5b8c5dae9d07/96c1b116-208570_Addendum_No.1.pdf\" /home/user/SiteCommand/public/training/208570-addendum-no-1.pdf)",
+      "Bash(cp \"/root/.claude/uploads/a2ce9306-2780-5b88-99d6-5b8c5dae9d07/1a712ced-208570_Addendum_No.2__Final.pdf\" /home/user/SiteCommand/public/training/208570-addendum-no-2-final.pdf)",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(cp \"/root/.claude/uploads/a2ce9306-2780-5b88-99d6-5b8c5dae9d07/d22bf351-260415_UW_Kane_Hall_CAAMs_Bid_Drawings_Part1.pdf\" /home/user/SiteCommand/public/training/208570-bid-drawings-part-1.pdf && ls -lh /home/user/SiteCommand/public/training/ | awk '{print $5, $9}')",
+      "Bash(cp \"/root/.claude/uploads/a2ce9306-2780-5b88-99d6-5b8c5dae9d07/7293b978-260415_UW_Kane_Hall_CAAMs_Bid_Drawings_Part2_Part1.pdf\" /home/user/SiteCommand/public/training/208570-bid-drawings-part-2-1.pdf)",
+      "Bash(cp \"/root/.claude/uploads/a2ce9306-2780-5b88-99d6-5b8c5dae9d07/303304bb-260415_UW_Kane_Hall_CAAMs_Bid_Drawings_Part2_Part2.pdf\" /home/user/SiteCommand/public/training/208570-bid-drawings-part-2-2.pdf)"
     ]
   }
 }

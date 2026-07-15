@@ -7,11 +7,11 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
+  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist", "mammoth"],
   experimental: {
     serverBodySizeLimit: "100mb",
   },
-  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
+  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist", "mammoth"],
   turbopack: {
     resolveAlias: {
       // pdfjs-dist optionally requires 'canvas' for server-side rendering; stub it out

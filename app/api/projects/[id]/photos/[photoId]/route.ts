@@ -16,13 +16,20 @@ export async function PATCH(
   const allowed: Record<string, unknown> = {};
   if ("caption" in body) allowed.caption = body.caption;
   if ("album_id" in body) allowed.album_id = body.album_id;
+  if ("location_id" in body) allowed.location_id = body.location_id;
+  if ("taken_at" in body) allowed.taken_at = body.taken_at;
+  if ("trades" in body) {
+    allowed.trades = Array.isArray(body.trades)
+      ? body.trades.map((t: unknown) => String(t).trim()).filter(Boolean)
+      : [];
+  }
 
   const { data, error } = await supabase
     .from("project_photos")
     .update(allowed)
     .eq("id", photoId)
     .eq("project_id", projectId)
-    .select()
+    .select("*, location:project_locations(id,name,path)")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

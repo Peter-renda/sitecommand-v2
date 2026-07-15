@@ -199,8 +199,8 @@ function GanttView({ tasks }: { tasks: Task[] }) {
   const validTasks = tasks.filter((t) => t.start && t.finish);
   if (validTasks.length === 0) {
     return (
-      <div className="flex items-center justify-center h-48 text-sm text-gray-400">
-        No tasks with date information to display.
+      <div className="flex items-center justify-center h-48 text-sm text-gray-400 italic font-display">
+        No activities with date information to display.
       </div>
     );
   }
@@ -232,6 +232,12 @@ function GanttView({ tasks }: { tasks: Task[] }) {
   const totalW = totalDays * DAY_W;
   const BAR_HEIGHT = 22;
   const BAR_TOP = (ROW_HEIGHT - BAR_HEIGHT) / 2;
+
+  // Orange "today" marker position within the timeline
+  const nowMs = Date.now();
+  const todayOffsetDays = (nowMs - rangeStart.getTime()) / msPerDay;
+  const todayPct = (todayOffsetDays / totalDays) * 100;
+  const todayInRange = todayPct >= 0 && todayPct <= 100;
 
   const taskByUid = new Map<number, Task>(tasks.map((t) => [t.uid, t]));
   const taskRowByUid = new Map<number, number>(tasks.map((t, idx) => [t.uid, idx]));
@@ -266,23 +272,33 @@ function GanttView({ tasks }: { tasks: Task[] }) {
       >
         <div
           style={{ height: `${HEADER_H}px` }}
-          className="border-b border-gray-200 bg-gray-50 shrink-0 px-3 flex items-end pb-1"
+          className="border-b border-gray-200 bg-[#F9FAFB] shrink-0 px-3 flex items-end pb-1.5"
         >
-          <span className="text-xs font-medium text-gray-500">Task Name</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+            Activity
+          </span>
         </div>
         <div className="overflow-y-auto flex-1">
           {tasks.map((task) => (
             <div
               key={task.uid}
               style={{ height: `${ROW_HEIGHT}px` }}
-              className={`flex items-center border-b border-gray-100 px-3 ${task.isSummary ? "bg-gray-50" : ""}`}
+              className={`flex items-center border-b border-gray-100 px-3 ${task.isSummary ? "bg-[#F9FAFB]" : ""}`}
             >
               <span
                 style={{ paddingLeft: `${task.outlineLevel * 12}px` }}
-                className={`truncate text-xs ${task.isSummary ? "font-semibold text-gray-800" : "text-gray-700"} ${task.isMilestone ? "italic" : ""}`}
+                className={`truncate text-xs ${
+                  task.isSummary
+                    ? "font-semibold text-gray-800"
+                    : task.isMilestone
+                    ? "font-display italic text-[color:var(--brand-700)]"
+                    : "text-gray-700"
+                }`}
                 title={task.name}
               >
-                {task.isMilestone && <span className="mr-1 text-amber-500">◆</span>}
+                {task.isMilestone && (
+                  <span className="mr-1 text-[color:var(--brand-500)]">◆</span>
+                )}
                 {task.name}
               </span>
             </div>
@@ -389,6 +405,21 @@ function GanttView({ tasks }: { tasks: Task[] }) {
                   />
                 ))}
 
+                {/* Orange "today" line */}
+                {todayInRange && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: `${todayPct}%`,
+                      top: 0,
+                      bottom: 0,
+                      width: 1,
+                      background: "#2563EB",
+                      zIndex: 5,
+                    }}
+                  />
+                )}
+
                 {hasDate && (
                   task.isMilestone ? (
                     <div
@@ -397,36 +428,60 @@ function GanttView({ tasks }: { tasks: Task[] }) {
                         left: `calc(${leftPct}% - 6px)`,
                         width: "12px",
                         height: "12px",
-                        background: "#f59e0b",
+                        background: "#111110",
                         transform: "rotate(45deg)",
+                        borderRadius: "2px",
+                        zIndex: 4,
                       }}
                       title={`${task.name}\n${task.start}`}
                     />
-                  ) : (
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: `${leftPct}%`,
-                        width: `${widthPct}%`,
-                        top: `${BAR_TOP}px`,
-                        height: task.isSummary ? `${BAR_HEIGHT}px` : `${Math.round(BAR_HEIGHT * 0.75)}px`,
-                        background: task.isSummary ? "#4b5563" : "#3b82f6",
-                        borderRadius: "3px",
-                        overflow: "hidden",
-                      }}
-                      title={`${task.name}\n${task.start} → ${task.finish}\n${task.percentComplete}% complete`}
-                    >
-                      {task.percentComplete > 0 && (
-                        <div
-                          style={{
-                            width: `${task.percentComplete}%`,
-                            height: "100%",
-                            background: task.isSummary ? "#374151" : "#1d4ed8",
-                          }}
-                        />
-                      )}
-                    </div>
-                  )
+                  ) : (() => {
+                    // W2 bar state: complete (green) / in progress (orange) / planned (warm gray)
+                    const finishMs = new Date(task.finish).getTime();
+                    const isComplete = task.percentComplete >= 100;
+                    const isCritical =
+                      !isComplete && finishMs < nowMs && task.percentComplete < 100;
+                    const isNow =
+                      !isComplete &&
+                      !isCritical &&
+                      (task.percentComplete > 0 ||
+                        (new Date(task.start).getTime() <= nowMs && finishMs >= nowMs));
+                    const barColors = task.isSummary
+                      ? { bg: "#E7E2D8", border: "#D6CFBF", fill: "#64748B", text: "#6B5B45" }
+                      : isComplete
+                      ? { bg: "rgba(4,120,87,0.12)", border: "rgba(4,120,87,0.25)", fill: "rgba(4,120,87,0.4)", text: "#047857" }
+                      : isCritical
+                      ? { bg: "rgba(220,38,38,0.1)", border: "rgba(220,38,38,0.25)", fill: "rgba(220,38,38,0.35)", text: "#B91C1C" }
+                      : isNow
+                      ? { bg: "rgba(212,80,10,0.12)", border: "rgba(212,80,10,0.3)", fill: "rgba(212,80,10,0.35)", text: "#1D4ED8" }
+                      : { bg: "#F3F4F6", border: "#E5E7EB", fill: "#D1D5DB", text: "#6B7280" };
+                    return (
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: `${leftPct}%`,
+                          width: `${widthPct}%`,
+                          top: `${BAR_TOP}px`,
+                          height: task.isSummary ? `${BAR_HEIGHT}px` : `${Math.round(BAR_HEIGHT * 0.82)}px`,
+                          background: barColors.bg,
+                          border: `1px solid ${barColors.border}`,
+                          borderRadius: "5px",
+                          overflow: "hidden",
+                        }}
+                        title={`${task.name}\n${task.start} → ${task.finish}\n${task.percentComplete}% complete`}
+                      >
+                        {task.percentComplete > 0 && (
+                          <div
+                            style={{
+                              width: `${task.percentComplete}%`,
+                              height: "100%",
+                              background: barColors.fill,
+                            }}
+                          />
+                        )}
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             );
@@ -546,6 +601,46 @@ function CalendarView({ tasks }: { tasks: Task[] }) {
 
 // ── Upload Zone ───────────────────────────────────────────────────────────────
 
+// Uploads the XML straight to Supabase Storage via a signed URL, then registers
+// the metadata. Routing the file around the Vercel function avoids the 4.5 MB
+// serverless body limit, so large MS Project exports (30-50 MB) go through.
+async function uploadScheduleFile(
+  projectId: string,
+  file: File
+): Promise<{ ok: boolean; error?: string }> {
+  // Step 1: get a signed upload URL (no file data sent to the API function).
+  const urlRes = await fetch(
+    `/api/projects/${projectId}/schedule/upload-url?filename=${encodeURIComponent(file.name)}`
+  );
+  if (!urlRes.ok) {
+    const err = await urlRes.json().catch(() => ({}));
+    return { ok: false, error: err.error ?? "Could not prepare the upload." };
+  }
+  const { signedUrl, storagePath } = await urlRes.json();
+
+  // Step 2: upload directly to Supabase Storage.
+  const putRes = await fetch(signedUrl, {
+    method: "PUT",
+    body: file,
+    headers: { "Content-Type": "text/xml" },
+  });
+  if (!putRes.ok) {
+    return { ok: false, error: `Storage upload failed (${putRes.status}).` };
+  }
+
+  // Step 3: register the schedule metadata.
+  const regRes = await fetch(`/api/projects/${projectId}/schedule`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ storagePath, filename: file.name }),
+  });
+  if (!regRes.ok) {
+    const err = await regRes.json().catch(() => ({}));
+    return { ok: false, error: err.error ?? "Upload failed." };
+  }
+  return { ok: true };
+}
+
 function UploadZone({
   projectId,
   uploading,
@@ -567,15 +662,12 @@ function UploadZone({
     }
     setError(null);
     setIsUploading(true);
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`/api/projects/${projectId}/schedule`, { method: "POST", body: fd });
+    const result = await uploadScheduleFile(projectId, file);
     setIsUploading(false);
-    if (res.ok) {
+    if (result.ok) {
       onUploaded();
     } else {
-      const data = await res.json();
-      setError(data.error ?? "Upload failed.");
+      setError(result.error ?? "Upload failed.");
     }
   }
 
@@ -715,15 +807,12 @@ export default function ScheduleClient({
     }
     setReplaceError(null);
     setUploading(true);
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`/api/projects/${projectId}/schedule`, { method: "POST", body: fd });
+    const result = await uploadScheduleFile(projectId, file);
     setUploading(false);
-    if (res.ok) {
+    if (result.ok) {
       fetchSchedule();
     } else {
-      const data = await res.json().catch(() => ({}));
-      setReplaceError(data.error ?? "Upload failed. Please try again.");
+      setReplaceError(result.error ?? "Upload failed. Please try again.");
     }
   }
 
@@ -732,10 +821,48 @@ export default function ScheduleClient({
     window.location.href = "/";
   }
 
+  // ── Derived schedule metrics (from real task data) ────────────────────────────
+  const datedTasks = tasks.filter((t) => t.start && t.finish);
+  const leafTasks = tasks.filter((t) => !t.isSummary && !t.isMilestone);
+  const milestones = tasks.filter((t) => t.isMilestone && t.start);
+  const inProgressCount = leafTasks.filter(
+    (t) => t.percentComplete > 0 && t.percentComplete < 100
+  ).length;
+  const avgPercent =
+    leafTasks.length > 0
+      ? Math.round(
+          leafTasks.reduce((sum, t) => sum + t.percentComplete, 0) / leafTasks.length
+        )
+      : 0;
+
+  const todayMs = Date.now();
+  let rangeStartIso = "";
+  let rangeFinishIso = "";
+  if (datedTasks.length > 0) {
+    const starts = datedTasks.map((t) => new Date(t.start).getTime());
+    const finishes = datedTasks.map((t) => new Date(t.finish).getTime());
+    rangeStartIso = new Date(Math.min(...starts)).toISOString().slice(0, 10);
+    rangeFinishIso = new Date(Math.max(...finishes)).toISOString().slice(0, 10);
+  }
+
+  // Upcoming milestones — next, sorted by start date
+  const upcomingMilestones = milestones
+    .slice()
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+    .filter((m) => new Date(m.start).getTime() >= todayMs - 86400000)
+    .slice(0, 4);
+
+  function daysFromToday(iso: string): string {
+    const diff = Math.round((new Date(iso).getTime() - todayMs) / 86400000);
+    if (diff === 0) return "today";
+    if (diff < 0) return `${Math.abs(diff)} day${Math.abs(diff) === 1 ? "" : "s"} ago`;
+    return `in ${diff} day${diff === 1 ? "" : "s"}`;
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between shrink-0">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between shrink-0">
         <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">
           SiteCommand
         </a>
@@ -749,14 +876,31 @@ export default function ScheduleClient({
 
       <ProjectNav projectId={projectId} />
 
-      {/* Page heading */}
-      <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0">
-        <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Schedule</h1>
-        {schedule && tasks.length > 0 && (
-          <p className="sec-sub mt-1.5">
-            <span className="serif-italic text-[color:var(--brand-700)]">Across this project</span>
+      {/* Page heading — editorial */}
+      <div className="bg-white border-b border-gray-100 px-6 py-5 shrink-0">
+        <h1 className="h2-warm">Schedule</h1>
+        {schedule && tasks.length > 0 ? (
+          <p className="sub mt-1">
+            <em>Project look-ahead</em>
+            {rangeStartIso && rangeFinishIso && (
+              <>
+                <span className="sep">·</span>
+                <span className="num">{formatDate(rangeStartIso)}</span> –{" "}
+                <span className="num">{formatDate(rangeFinishIso)}</span>
+              </>
+            )}
             <span className="sep">·</span>
-            <span className="num" style={{ color: "var(--brand-500)" }}>{tasks.length}</span> tasks
+            <span className="num" style={{ color: "var(--brand-500)" }}>{tasks.length}</span> activities
+            {milestones.length > 0 && (
+              <>
+                <span className="sep">·</span>
+                <span className="num">{milestones.length}</span> milestones
+              </>
+            )}
+          </p>
+        ) : (
+          <p className="sub mt-1">
+            <em>Import an MS Project schedule to track the project look-ahead.</em>
           </p>
         )}
       </div>
@@ -778,29 +922,21 @@ export default function ScheduleClient({
       ) : (
         <div className="flex flex-col flex-1 overflow-hidden">
           {/* Schedule header bar */}
-          <div className="bg-white border-b border-gray-100 px-6 py-3 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span className="font-medium text-gray-800">{schedule.filename}</span>
-              <span className="text-gray-300">·</span>
+          <div className="bg-white border-b border-gray-100 px-6 py-3 sec-row shrink-0">
+            <div className="flex items-baseline gap-2 text-[13px] text-gray-500 font-mono">
+              <span className="font-medium text-gray-700">{schedule.filename}</span>
+              <span className="sep">·</span>
               <span>Uploaded by {schedule.uploaded_by_name}</span>
-              <span className="text-gray-300">·</span>
+              <span className="sep">·</span>
               <span>{formatDate(schedule.uploaded_at)}</span>
-              <span className="text-gray-300">·</span>
-              <span className="text-gray-400">{tasks.length} tasks</span>
             </div>
             <div className="flex flex-col items-end gap-1">
               <button
                 onClick={() => { setReplaceError(null); fileReplaceRef.current?.click(); }}
                 disabled={uploading}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                className="btn-secondary disabled:opacity-50"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                </svg>
-                {uploading ? "Replacing…" : "Replace Schedule"}
+                {uploading ? "Replacing…" : "Replace schedule"}
               </button>
               {replaceError && <p className="text-xs text-red-600">{replaceError}</p>}
             </div>
@@ -813,20 +949,46 @@ export default function ScheduleClient({
             />
           </div>
 
+          {/* Stat strip — computed from real task data */}
+          {tasks.length > 0 && (
+            <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0">
+              <div className="stats">
+                <div className={`stat ${avgPercent >= 100 ? "calm" : ""}`}>
+                  <div className="lbl">% complete</div>
+                  <div className="val">{avgPercent}%</div>
+                  <div className="delta">Across {leafTasks.length} work activities</div>
+                </div>
+                <div className={`stat ${inProgressCount > 0 ? "alert" : ""}`}>
+                  <div className="lbl">In progress</div>
+                  <div className="val">{inProgressCount}</div>
+                  <div className="delta">Activities currently underway</div>
+                </div>
+                <div className="stat">
+                  <div className="lbl">Milestones</div>
+                  <div className="val">{milestones.length}</div>
+                  <div className="delta">{upcomingMilestones.length} still upcoming</div>
+                </div>
+                <div className="stat">
+                  <div className="lbl">Substantial completion</div>
+                  <div className="val" style={{ fontSize: 22 }}>
+                    {rangeFinishIso ? formatDate(rangeFinishIso) : "—"}
+                  </div>
+                  <div className="delta">Latest scheduled finish</div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Tab bar */}
-          <div className="bg-white border-b border-gray-100 px-6 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-1">
+          <div className="bg-white border-b border-gray-100 px-6 py-3 sec-row shrink-0">
+            <div className="seg">
               {(["table", "gantt", "calendar"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === tab
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
-                  }`}
+                  className={activeTab === tab ? "active" : ""}
                 >
-                  {tab === "table" ? "Table" : tab === "gantt" ? "Gantt Chart" : "Calendar"}
+                  {tab === "table" ? "Table" : tab === "gantt" ? "Gantt chart" : "Calendar"}
                 </button>
               ))}
             </div>
@@ -841,9 +1003,9 @@ export default function ScheduleClient({
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Change History
+              Change history
               {changeHistory.length > 0 && (
-                <span className="ml-0.5 bg-blue-100 text-blue-700 text-xs font-semibold px-1.5 py-0.5 rounded-full leading-none">
+                <span className="ml-0.5 bg-[color:var(--brand-500)]/10 text-[color:var(--brand-700)] text-xs font-semibold px-1.5 py-0.5 rounded-full leading-none">
                   {changeHistory.length}
                 </span>
               )}
@@ -903,6 +1065,45 @@ export default function ScheduleClient({
                     );
                   })
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Upcoming milestones — editorial card grid */}
+          {upcomingMilestones.length > 0 && (
+            <div className="bg-white border-b border-gray-100 px-6 py-4 shrink-0">
+              <h3 className="h3-warm" style={{ marginBottom: 12 }}>Upcoming milestones</h3>
+              <div className="grid-4">
+                {upcomingMilestones.map((m, i) => (
+                  <div key={m.uid} className="card card-pad" style={{ padding: "14px 16px" }}>
+                    <div
+                      style={{
+                        fontFamily: "'DM Serif Display', serif",
+                        fontStyle: "italic",
+                        fontSize: 18,
+                        color: "var(--brand-500)",
+                        marginBottom: 6,
+                      }}
+                    >
+                      {String(i + 1).padStart(2, "0")}
+                    </div>
+                    <div
+                      style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginBottom: 4 }}
+                      title={m.name}
+                    >
+                      {m.name}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 11,
+                        color: "#6B7280",
+                      }}
+                    >
+                      {formatDate(m.start)} · {daysFromToday(m.start)}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

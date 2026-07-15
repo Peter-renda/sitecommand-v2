@@ -6,20 +6,34 @@
  * Redirects the user to Intuit authorization; after approval Intuit redirects
  * to /api/integrations/quickbooks/callback.
  *
+ * CSRF: a random nonce is embedded in the OAuth `state` parameter and mirrored
+ * in a short-lived httpOnly cookie; the callback rejects any response whose
+ * state nonce doesn't match the cookie.
+ *
  * Auth: company super_admin or site_admin.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { getSession } from "@/lib/auth";
-import { getQBOAppCredentials } from "@/lib/quickbooks";
+import {
+  getQBOAppCredentials,
+  getIntuitRedirectUri,
+  getAppOrigin,
+  QBO_OAUTH_STATE_COOKIE,
+} from "@/lib/quickbooks";
+import {
+  getSage300CreAppCredentials,
+  getSage300CreCompanyCredentials,
+  isSage300CreConnected,
+} from "@/lib/sage300cre";
 
 const QBO_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
 const INTUIT_ACCOUNTING_SCOPE = "com.intuit.quickbooks.accounting";
 const SCOPES = process.env.INTUIT_OAUTH_SCOPES?.trim() || INTUIT_ACCOUNTING_SCOPE;
 
 export async function GET(req: NextRequest) {
-  const origin = new URL(req.url).origin;
-  const settingsUrl = `${origin}/settings/integrations`;
+  const settingsUrl = `${getAppOrigin(req)}/settings/integrations`;
 
   const session = await getSession();
   if (!session) return NextResponse.redirect(`${settingsUrl}?error=qbo_unauthorized`);
@@ -35,10 +49,28 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${settingsUrl}?error=qbo_not_configured`);
   }
 
-  const redirectUri = `${origin}/api/integrations/quickbooks/callback`;
+  // Only one accounting ERP may be connected at a time. Block starting the QBO
+  // OAuth flow while Sage 300 CRE is connected.
+  const [sageApp, sageCo] = await Promise.all([
+    getSage300CreAppCredentials(session.company_id),
+    getSage300CreCompanyCredentials(session.company_id),
+  ]);
+  if (isSage300CreConnected(sageApp, sageCo)) {
+    return NextResponse.redirect(`${settingsUrl}?error=qbo_other_erp_connected`);
+  }
 
-  // Encode company_id in state so the callback can associate tokens with the right company
-  const state = Buffer.from(JSON.stringify({ companyId: session.company_id })).toString("base64url");
+  // Pinned to a stable value (env-driven) so it matches the URI registered in
+  // the Intuit Developer portal — a mismatch is what triggers Intuit's generic
+  // "…didn't connect" error page. Must be identical to the value the callback
+  // uses for the token exchange.
+  const redirectUri = getIntuitRedirectUri(req);
+
+  // Encode company_id + a CSRF nonce in state so the callback can associate
+  // tokens with the right company and verify the flow started here.
+  const nonce = randomUUID();
+  const state = Buffer.from(
+    JSON.stringify({ companyId: session.company_id, nonce })
+  ).toString("base64url");
 
   const params = new URLSearchParams({
     client_id: appCreds.clientId,
@@ -48,5 +80,13 @@ export async function GET(req: NextRequest) {
     state,
   });
 
-  return NextResponse.redirect(`${QBO_AUTH_URL}?${params.toString()}`);
+  const res = NextResponse.redirect(`${QBO_AUTH_URL}?${params.toString()}`);
+  res.cookies.set(QBO_OAUTH_STATE_COOKIE, nonce, {
+    httpOnly: true,
+    sameSite: "lax", // sent on Intuit's top-level redirect back to the callback
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 600, // 10 minutes — plenty for the consent screen
+    path: "/",
+  });
+  return res;
 }

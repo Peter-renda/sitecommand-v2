@@ -11,7 +11,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data, error } = await supabase
     .from("projects")
-    .select("id, name, description, address, zip_code, status, project_number, sector, city, state, county, start_date, actual_start_date, completion_date, projected_finish_date, warranty_start_date, warranty_end_date")
+    .select("id, name, description, address, zip_code, status, project_number, sector, work_scope, city, state, county, start_date, actual_start_date, completion_date, projected_finish_date, warranty_start_date, warranty_end_date, erp_sync, erp_job_cost_sync, prevent_overbilling, non_commitment_costs, test_project, labor_productivity, sage_300_id, qbo_customer_id, qbo_customer_name")
     .eq("id", id)
     .single();
 
@@ -21,8 +21,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
-  const canEdit = session?.company_role === "admin" || session?.company_role === "super_admin";
-  if (!session || !canEdit) {
+  // Every project setting is editable by Company Super Admins only. Regular
+  // Company Admins manage team members through /api/projects/[id]/members.
+  if (!session || session.company_role !== "super_admin") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -30,15 +31,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json();
 
   const allowed = [
-    "name", "description", "project_number", "status", "sector",
+    "name", "description", "project_number", "status", "sector", "work_scope",
     "address", "city", "state", "zip_code", "county",
     "start_date", "actual_start_date", "completion_date",
     "projected_finish_date", "warranty_start_date", "warranty_end_date",
+    "erp_sync", "erp_job_cost_sync", "prevent_overbilling",
+    "non_commitment_costs", "test_project", "labor_productivity", "sage_300_id",
+    "qbo_customer_id", "qbo_customer_name",
+    "report_fields",
   ];
 
   const update: Record<string, unknown> = {};
   for (const key of allowed) {
-    if (key in body) update[key] = body[key] || null;
+    if (!(key in body)) continue;
+    const value = body[key];
+    // Preserve boolean false; for other fields normalize empty strings to null.
+    update[key] = typeof value === "boolean" ? value : value || null;
   }
 
   const supabase = getSupabase();

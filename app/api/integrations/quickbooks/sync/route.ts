@@ -23,15 +23,67 @@ import {
   getQBOAppCredentials,
   getQBOCompanyCredentials,
   isQBOConfigured,
+  lookupDirectoryPartyDetails,
   syncCommitmentToQBO,
   syncPrimeContractToQBO,
   syncAPInvoiceToQBO,
   syncARInvoiceToQBO,
+  syncChangeOrderToQBO,
+  type QBOEntityFinancials,
   type QBOResult,
 } from "@/lib/quickbooks";
 
-const VALID_TYPES = ["commitments", "prime_contracts", "ap_invoice", "ar_invoice"] as const;
+const VALID_TYPES = ["commitments", "prime_contracts", "ap_invoice", "ar_invoice", "change_order"] as const;
 type RecordType = (typeof VALID_TYPES)[number];
+
+/** Project context passed to the sync payloads (class job costing + DocNumber prefix). */
+async function getProjectContext(
+  supabase: ReturnType<typeof getSupabase>,
+  projectId: string
+): Promise<{ name: string | null; number: string | null; qboCustomerId: string | null }> {
+  const { data } = await supabase
+    .from("projects")
+    .select("name, project_number, qbo_customer_id")
+    .eq("id", projectId)
+    .single();
+  return { name: data?.name ?? null, number: data?.project_number ?? null, qboCustomerId: data?.qbo_customer_id ?? null };
+}
+
+/** Maps QBO financial feedback onto update columns with the given prefix. */
+function financialsColumns(
+  prefix: "qbo" | "qbo_ap_invoice" | "qbo_ar_invoice",
+  fin?: QBOEntityFinancials
+): Record<string, unknown> {
+  if (!fin) return {};
+  return {
+    [`${prefix}_total_amount`]: fin.totalAmount,
+    [`${prefix}_balance`]: fin.balance,
+    [`${prefix}_payment_status`]: fin.paymentStatus ?? fin.docStatus?.toLowerCase() ?? null,
+    qbo_payments_refreshed_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Distinguishes "row genuinely absent" (PGRST116: zero rows for .single()) from
+ * a failed query (e.g. a column missing because a migration wasn't applied).
+ * Masking DB errors as 404 "not found" makes schema drift undiagnosable.
+ */
+function fetchFailure(
+  label: string,
+  fetchErr: { code?: string; message?: string } | null,
+  row: unknown
+): NextResponse | null {
+  if (fetchErr && fetchErr.code !== "PGRST116") {
+    return NextResponse.json(
+      { error: `Failed to load ${label}: ${fetchErr.message ?? "database error"}. If this mentions a missing column, apply supabase/migrations/113_qbo_idempotency_columns.sql.` },
+      { status: 500 }
+    );
+  }
+  if (!row) {
+    return NextResponse.json({ error: `${label[0].toUpperCase()}${label.slice(1)} not found` }, { status: 404 });
+  }
+  return null;
+}
 
 async function writeLog(
   supabase: ReturnType<typeof getSupabase>,
@@ -88,26 +140,59 @@ export async function POST(req: NextRequest) {
   if (recordType === "commitments") {
     const { data: commitment, error: fetchErr } = await supabase
       .from("commitments")
-      .select("id, type, number, title, contract_company, original_contract_amount, status, project_id, qbo_id")
+      .select("id, type, number, title, contract_company, original_contract_amount, approved_change_orders, status, project_id, qbo_id, start_date, estimated_completion, contract_date, issued_on_date, delivery_date, payment_terms, ship_to, ship_via, bill_to")
       .eq("id", recordId)
       .is("deleted_at", null)
       .single();
 
-    if (fetchErr || !commitment) {
-      return NextResponse.json({ error: "Commitment not found" }, { status: 404 });
-    }
+    const failure = fetchFailure("commitment", fetchErr, commitment);
+    if (failure) return failure;
+
+    const { data: sovRows } = await supabase
+      .from("commitment_sov_items")
+      .select("budget_code, description, amount, qty, uom, unit_cost, sort_order")
+      .eq("commitment_id", recordId)
+      .eq("is_group_header", false)
+      .order("sort_order", { ascending: true });
+    const sovLines = (sovRows ?? []).map((r) => ({
+      budgetCode: r.budget_code ?? "",
+      description: r.description || commitment.title,
+      amount: Number(r.amount),
+      qty: Number(r.qty) || undefined,
+      uom: r.uom || undefined,
+      unitCost: Number(r.unit_cost) || undefined,
+    }));
+
+    const [project, vendorDetails] = await Promise.all([
+      getProjectContext(supabase, commitment.project_id),
+      lookupDirectoryPartyDetails(commitment.project_id, commitment.contract_company),
+    ]);
 
     await supabase.from("commitments").update({ erp_status: "pending" }).eq("id", recordId);
 
     const result = await syncCommitmentToQBO(
-      session.company_id, appCreds, companyCreds, commitment, commitment.qbo_id
+      session.company_id, appCreds, companyCreds,
+      { ...commitment, sovLines, project_name: project.name, project_number: project.number, qbo_customer_id: project.qboCustomerId, vendorDetails },
+      commitment.qbo_id
     );
 
     const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
     if (result.ok) {
-      update.qbo_id = result.id;
-      update.qbo_sync_token = result.syncToken ?? null;
       update.last_synced_at = new Date().toISOString();
+      if (result.action === "deleted" || result.action === "skipped") {
+        // Void/terminated: the QBO doc is gone (or never existed) — clear refs.
+        update.qbo_id = null;
+        update.qbo_sync_token = null;
+        update.erp_status = "not_synced";
+        update.qbo_total_amount = null;
+        update.qbo_balance = null;
+        update.qbo_payment_status = null;
+      } else {
+        update.qbo_id = result.id;
+        update.qbo_sync_token = result.syncToken ?? null;
+        if (result.vendorId) update.qbo_vendor_id = result.vendorId;
+        Object.assign(update, financialsColumns("qbo", result.financials));
+      }
     }
 
     await Promise.all([
@@ -115,33 +200,65 @@ export async function POST(req: NextRequest) {
       writeLog(supabase, "commitments", recordId, result),
     ]);
 
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
-    return NextResponse.json({ ok: true, qboId: result.id, erp_status: "synced" });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
+    return NextResponse.json({ ok: true, qboId: result.id, erp_status: update.erp_status });
   }
 
   // ── prime_contracts ─────────────────────────────────────────────────────────
   if (recordType === "prime_contracts") {
     const { data: contract, error: fetchErr } = await supabase
       .from("prime_contracts")
-      .select("id, contract_number, title, owner_client, contractor, architect_engineer, description, original_contract_amount, approved_change_orders, default_retainage, status, executed, start_date, estimated_completion_date, qbo_id")
+      .select("id, project_id, contract_number, title, owner_client, contractor, architect_engineer, description, original_contract_amount, approved_change_orders, default_retainage, status, executed, start_date, estimated_completion_date, qbo_id")
       .eq("id", recordId)
       .single();
 
-    if (fetchErr || !contract) {
-      return NextResponse.json({ error: "Prime contract not found" }, { status: 404 });
-    }
+    const failure = fetchFailure("prime contract", fetchErr, contract);
+    if (failure) return failure;
+
+    const { data: psovRows } = await supabase
+      .from("prime_contract_sov_items")
+      .select("budget_code, description, scheduled_value, qty, uom, unit_cost, sort_order")
+      .eq("prime_contract_id", recordId)
+      .eq("is_group_header", false)
+      .order("sort_order", { ascending: true });
+    const sovLines = (psovRows ?? []).map((r) => ({
+      budgetCode: r.budget_code ?? "",
+      description: r.description || contract.title,
+      amount: Number(r.scheduled_value),
+      qty: Number(r.qty) || undefined,
+      uom: r.uom || undefined,
+      unitCost: Number(r.unit_cost) || undefined,
+    }));
+
+    const [project, customerDetails] = await Promise.all([
+      getProjectContext(supabase, contract.project_id),
+      lookupDirectoryPartyDetails(contract.project_id, contract.owner_client),
+    ]);
 
     await supabase.from("prime_contracts").update({ erp_status: "pending" }).eq("id", recordId);
 
     const result = await syncPrimeContractToQBO(
-      session.company_id, appCreds, companyCreds, contract, contract.qbo_id
+      session.company_id, appCreds, companyCreds,
+      { ...contract, sovLines, project_name: project.name, project_number: project.number, customerDetails },
+      contract.qbo_id
     );
 
     const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
     if (result.ok) {
-      update.qbo_id = result.id;
-      update.qbo_sync_token = result.syncToken ?? null;
       update.last_synced_at = new Date().toISOString();
+      if (result.action === "deleted" || result.action === "skipped") {
+        update.qbo_id = null;
+        update.qbo_sync_token = null;
+        update.erp_status = "not_synced";
+        update.qbo_total_amount = null;
+        update.qbo_balance = null;
+        update.qbo_payment_status = null;
+      } else {
+        update.qbo_id = result.id;
+        update.qbo_sync_token = result.syncToken ?? null;
+        if (result.customerId) update.qbo_customer_id = result.customerId;
+        Object.assign(update, financialsColumns("qbo", result.financials));
+      }
     }
 
     await Promise.all([
@@ -149,26 +266,25 @@ export async function POST(req: NextRequest) {
       writeLog(supabase, "prime_contracts", recordId, result),
     ]);
 
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
-    return NextResponse.json({ ok: true, qboId: result.id, erp_status: "synced" });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
+    return NextResponse.json({ ok: true, qboId: result.id, erp_status: update.erp_status });
   }
 
   // ── ap_invoice ───────────────────────────────────────────────────────────────
   if (recordType === "ap_invoice") {
     const { data: commitment, error: fetchErr } = await supabase
       .from("commitments")
-      .select("id, number, title, contract_company, qbo_ap_invoice_id")
+      .select("id, project_id, number, title, contract_company, qbo_ap_invoice_id, default_retainage")
       .eq("id", recordId)
       .is("deleted_at", null)
       .single();
 
-    if (fetchErr || !commitment) {
-      return NextResponse.json({ error: "Commitment not found" }, { status: 404 });
-    }
+    const failure = fetchFailure("commitment", fetchErr, commitment);
+    if (failure) return failure;
 
     const { data: sovItems } = await supabase
       .from("commitment_sov_items")
-      .select("description, billed_to_date")
+      .select("budget_code, description, billed_to_date")
       .eq("commitment_id", recordId)
       .eq("is_group_header", false)
       .gt("billed_to_date", 0)
@@ -181,6 +297,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const [project, vendorDetails] = await Promise.all([
+      getProjectContext(supabase, commitment.project_id),
+      lookupDirectoryPartyDetails(commitment.project_id, commitment.contract_company),
+    ]);
+
     const result = await syncAPInvoiceToQBO(
       session.company_id, appCreds, companyCreds,
       {
@@ -189,9 +310,15 @@ export async function POST(req: NextRequest) {
         vendorName: commitment.contract_company,
         description: commitment.title,
         lineItems: sovItems.map((item) => ({
+          budgetCode: item.budget_code ?? "",
           description: item.description || commitment.title,
           amount: Number(item.billed_to_date),
         })),
+        retainagePct: Number(commitment.default_retainage) || 0,
+        projectName: project.name,
+        projectNumber: project.number,
+        qboCustomerId: project.qboCustomerId,
+        vendorDetails,
       },
       commitment.qbo_ap_invoice_id
     );
@@ -203,12 +330,14 @@ export async function POST(req: NextRequest) {
           qbo_ap_invoice_id: result.id,
           qbo_ap_invoice_sync_token: result.syncToken ?? null,
           qbo_ap_invoice_synced_at: new Date().toISOString(),
+          ...(result.vendorId ? { qbo_vendor_id: result.vendorId } : {}),
+          ...financialsColumns("qbo_ap_invoice", result.financials),
         })
         .eq("id", recordId);
     }
 
     await writeLog(supabase, "ap_invoice", recordId, result);
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
     return NextResponse.json({ ok: true, qboId: result.id });
   }
 
@@ -216,18 +345,17 @@ export async function POST(req: NextRequest) {
   if (recordType === "ar_invoice") {
     const { data: contract, error: fetchErr } = await supabase
       .from("prime_contracts")
-      .select("id, contract_number, title, owner_client, qbo_ar_invoice_id")
+      .select("id, project_id, contract_number, title, owner_client, qbo_ar_invoice_id")
       .eq("id", recordId)
       .is("deleted_at", null)
       .single();
 
-    if (fetchErr || !contract) {
-      return NextResponse.json({ error: "Prime contract not found" }, { status: 404 });
-    }
+    const failure = fetchFailure("prime contract", fetchErr, contract);
+    if (failure) return failure;
 
     const { data: sovItems } = await supabase
       .from("prime_contract_sov_items")
-      .select("description, work_completed_this_period")
+      .select("budget_code, description, work_completed_this_period, materials_stored, retainage_pct")
       .eq("prime_contract_id", recordId)
       .eq("is_group_header", false)
       .gt("work_completed_this_period", 0)
@@ -240,6 +368,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const [project, customerDetails] = await Promise.all([
+      getProjectContext(supabase, contract.project_id),
+      lookupDirectoryPartyDetails(contract.project_id, contract.owner_client),
+    ]);
+
     const result = await syncARInvoiceToQBO(
       session.company_id, appCreds, companyCreds,
       {
@@ -247,10 +380,20 @@ export async function POST(req: NextRequest) {
         contractNumber: contract.contract_number,
         customerName: contract.owner_client,
         description: contract.title,
-        lineItems: sovItems.map((item) => ({
-          description: item.description || contract.title,
-          amount: Number(item.work_completed_this_period),
-        })),
+        lineItems: sovItems.map((item) => {
+          const amount = Number(item.work_completed_this_period);
+          const pct = Number(item.retainage_pct) || 0;
+          return {
+            budgetCode: item.budget_code ?? "",
+            description: item.description || contract.title,
+            amount,
+            retainageAmount: pct > 0 ? Number(((amount * pct) / 100).toFixed(2)) : 0,
+            materialsStored: Number(item.materials_stored) || 0,
+          };
+        }),
+        projectName: project.name,
+        projectNumber: project.number,
+        customerDetails,
       },
       contract.qbo_ar_invoice_id
     );
@@ -262,13 +405,103 @@ export async function POST(req: NextRequest) {
           qbo_ar_invoice_id: result.id,
           qbo_ar_invoice_sync_token: result.syncToken ?? null,
           qbo_ar_invoice_synced_at: new Date().toISOString(),
+          ...(result.customerId ? { qbo_customer_id: result.customerId } : {}),
+          ...financialsColumns("qbo_ar_invoice", result.financials),
         })
         .eq("id", recordId);
     }
 
     await writeLog(supabase, "ar_invoice", recordId, result);
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
     return NextResponse.json({ ok: true, qboId: result.id });
+  }
+
+  // ── change_order ─────────────────────────────────────────────────────────────
+  if (recordType === "change_order") {
+    const { data: co, error: fetchErr } = await supabase
+      .from("change_orders")
+      .select("id, type, number, title, description, contract_company, amount, status, date_initiated, due_date, project_id, commitment_id, prime_contract_id, schedule_of_values, qbo_id")
+      .eq("id", recordId)
+      .is("deleted_at", null)
+      .single();
+
+    const failure = fetchFailure("change order", fetchErr, co);
+    if (failure) return failure;
+
+    if (co.status !== "Approved") {
+      return NextResponse.json(
+        { error: "Only Approved change orders can be synced to QuickBooks. Change the status to Approved first." },
+        { status: 422 }
+      );
+    }
+
+    // Resolve the parent type so we know which QBO entity to create.
+    let parentType: "subcontract" | "purchase_order" | "prime";
+    if (co.type === "prime") {
+      parentType = "prime";
+    } else {
+      if (!co.commitment_id) {
+        return NextResponse.json({ error: "Commitment change order has no parent commitment." }, { status: 422 });
+      }
+      const { data: parent } = await supabase
+        .from("commitments")
+        .select("type")
+        .eq("id", co.commitment_id)
+        .single();
+      parentType = parent?.type === "purchase_order" ? "purchase_order" : "subcontract";
+    }
+
+    const project = await getProjectContext(supabase, co.project_id);
+    const partyDetails = await lookupDirectoryPartyDetails(co.project_id, co.contract_company);
+
+    // Map schedule_of_values JSONB → QBOSovLine[]
+    const sovLines = Array.isArray(co.schedule_of_values)
+      ? (co.schedule_of_values as Array<{ budget_code?: string | null; description?: string | null; amount?: number | string | null }>)
+          .filter((l) => l?.amount != null && Number(l.amount) !== 0)
+          .map((l) => ({
+            budgetCode: String(l.budget_code ?? ""),
+            description: String(l.description ?? co.title),
+            amount: Number(l.amount),
+          }))
+      : [];
+
+    await supabase.from("change_orders").update({ erp_status: "pending" }).eq("id", recordId);
+
+    const result = await syncChangeOrderToQBO(
+      session.company_id, appCreds, companyCreds,
+      { ...co, sovLines, parentType, project_name: project.name, project_number: project.number, partyDetails },
+      co.qbo_id
+    );
+
+    const update: Record<string, unknown> = { erp_status: result.ok ? "synced" : "not_synced" };
+    if (result.ok) {
+      update.qbo_synced_at = new Date().toISOString();
+      if (result.action === "deleted" || result.action === "skipped") {
+        update.qbo_id = null;
+        update.qbo_sync_token = null;
+        update.erp_status = "not_synced";
+        update.qbo_total_amount = null;
+        update.qbo_balance = null;
+        update.qbo_payment_status = null;
+      } else {
+        update.qbo_id = result.id;
+        update.qbo_sync_token = result.syncToken ?? null;
+        if (result.financials) {
+          update.qbo_total_amount = result.financials.totalAmount;
+          update.qbo_balance = result.financials.balance;
+          update.qbo_payment_status = result.financials.paymentStatus ?? result.financials.docStatus?.toLowerCase() ?? null;
+          update.qbo_payments_refreshed_at = new Date().toISOString();
+        }
+      }
+    }
+
+    await Promise.all([
+      supabase.from("change_orders").update(update).eq("id", recordId),
+      writeLog(supabase, "change_order", recordId, result),
+    ]);
+
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.validation ? 422 : 502 });
+    return NextResponse.json({ ok: true, qboId: result.id, erp_status: update.erp_status });
   }
 
   return NextResponse.json({ error: "Unhandled recordType" }, { status: 500 });

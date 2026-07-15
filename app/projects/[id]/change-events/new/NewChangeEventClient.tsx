@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
 import AppHeader from "@/app/components/AppHeader";
@@ -32,7 +32,15 @@ import {
   Search,
   Plus,
   HelpCircle,
+  Home,
 } from "lucide-react";
+import {
+  COST_CODE_CATEGORIES,
+  COST_TYPES,
+  costTypeLabel,
+  subcategoryLabel,
+  type CostCodeCategory,
+} from "@/lib/cost-codes";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -54,6 +62,7 @@ type LineItem = {
 type BudgetItem = {
   id: string;
   cost_code: string;
+  cost_type?: string | null;
   description: string;
 };
 
@@ -76,14 +85,11 @@ function BudgetCodeDropdown({
   value: string;
   budgetItems: BudgetItem[];
   onSelect: (code: string, description: string) => void;
-  onCreateNew: (code: string, description: string) => Promise<void>;
+  onCreateNew: (code: string, description: string, costType: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [newCode, setNewCode] = useState("");
-  const [newDesc, setNewDesc] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -91,7 +97,6 @@ function BudgetCodeDropdown({
     function handleClick(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
-        setCreating(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
@@ -109,7 +114,7 @@ function BudgetCodeDropdown({
     <div ref={containerRef} className="relative">
       <button
         type="button"
-        onClick={() => { setOpen((o) => !o); setSearch(""); setCreating(false); }}
+        onClick={() => { setOpen((o) => !o); setSearch(""); }}
         className="w-full flex items-center justify-between px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white text-left"
       >
         <span className={value ? "text-gray-800 truncate" : "text-gray-400"}>{value || "--"}</span>
@@ -143,7 +148,9 @@ function BudgetCodeDropdown({
                   onClick={() => { onSelect(b.cost_code, b.description); setOpen(false); }}
                   className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-b-0"
                 >
-                  <p className="text-xs font-medium text-gray-800">{b.cost_code}</p>
+                  <p className="text-xs font-medium text-gray-800">
+                    {b.cost_code}{b.cost_type ? <span className="text-gray-400"> · {b.cost_type}</span> : null}
+                  </p>
                   {b.description && <p className="text-[11px] text-gray-500">{b.description}</p>}
                 </button>
               ))
@@ -151,64 +158,340 @@ function BudgetCodeDropdown({
           </div>
 
           {/* Create section */}
-          {creating ? (
-            <div className="border-t border-gray-100 px-3 py-2.5 space-y-1.5">
-              <input
-                autoFocus
-                type="text"
-                placeholder="Budget code"
-                value={newCode}
-                onChange={(e) => setNewCode(e.target.value)}
-                className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-              <input
-                type="text"
-                placeholder="Description"
-                value={newDesc}
-                onChange={(e) => setNewDesc(e.target.value)}
-                className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-              <div className="flex gap-1.5 pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => setCreating(false)}
-                  className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={!newCode.trim() || saving}
-                  onClick={async () => {
-                    if (!newCode.trim()) return;
-                    setSaving(true);
-                    await onCreateNew(newCode.trim(), newDesc.trim());
-                    onSelect(newCode.trim(), newDesc.trim());
-                    setSaving(false);
-                    setCreating(false);
-                    setOpen(false);
-                    setNewCode("");
-                    setNewDesc("");
-                  }}
-                  className="flex-1 px-2 py-1 text-xs bg-gray-900 hover:bg-gray-700 text-white rounded font-medium disabled:opacity-50"
-                >
-                  {saving ? "Saving…" : "Save"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 bg-gray-900 hover:bg-gray-700 text-white text-xs font-medium transition-colors rounded-b"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Create
-              <HelpCircle className="w-3.5 h-3.5 opacity-70" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => { setShowCreateModal(true); setOpen(false); }}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 bg-gray-900 hover:bg-gray-700 text-white text-xs font-medium transition-colors rounded-b"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Create
+            <HelpCircle className="w-3.5 h-3.5 opacity-70" />
+          </button>
         </div>
       )}
+
+      {showCreateModal && (
+        <CreateBudgetCodeModal
+          onClose={() => setShowCreateModal(false)}
+          onCreate={async (code, description, costType) => {
+            await onCreateNew(code, description, costType);
+            onSelect(code, description);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Hierarchical select (cost code categories → subcategories, cost types) ──────
+
+function HierSelect({
+  placeholder,
+  valueLabel,
+  children,
+}: {
+  placeholder: string;
+  valueLabel: string | null;
+  children: (close: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white text-left"
+      >
+        <span className={valueLabel ? "text-gray-800 truncate" : "text-gray-400"}>
+          {valueLabel || placeholder}
+        </span>
+        <ChevronDown className="w-4 h-4 text-gray-400 shrink-0 ml-1" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-[60] bg-white border border-gray-200 rounded shadow-lg w-full">
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Create Budget Code Modal ───────────────────────────────────────────────────
+
+function CreateBudgetCodeModal({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (code: string, description: string, costType: string) => Promise<void>;
+}) {
+  const [costCode, setCostCode] = useState<{ code: string; name: string } | null>(null);
+  const [costType, setCostType] = useState<{ code: string; name: string } | null>(null);
+  const [descMode, setDescMode] = useState<"concatenated" | "custom">("concatenated");
+  const [customDesc, setCustomDesc] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Cost code picker drill-down state
+  const [activeCategory, setActiveCategory] = useState<CostCodeCategory | null>(null);
+  const [codeSearch, setCodeSearch] = useState("");
+  const [typeSearch, setTypeSearch] = useState("");
+
+  const concatenated = costCode
+    ? costType
+      ? `${costCode.name} - ${costType.name}`
+      : costCode.name
+    : "";
+
+  const finalDescription = descMode === "custom" ? customDesc.trim() || concatenated : concatenated;
+  const canCreate = !!costCode && !!costType && !saving;
+
+  async function handleCreate() {
+    if (!costCode || !costType) return;
+    setSaving(true);
+    try {
+      await onCreate(costCode.code, finalDescription, costType.name);
+      onClose();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to create budget code.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const filteredCategories = COST_CODE_CATEGORIES.filter(
+    (c) =>
+      !codeSearch ||
+      c.code.includes(codeSearch) ||
+      c.name.toLowerCase().includes(codeSearch.toLowerCase())
+  );
+  const filteredSubcategories = (activeCategory?.subcategories ?? []).filter(
+    (s) =>
+      !codeSearch ||
+      s.code.includes(codeSearch) ||
+      s.name.toLowerCase().includes(codeSearch.toLowerCase())
+  );
+  const filteredTypes = COST_TYPES.filter(
+    (t) =>
+      !typeSearch ||
+      t.code.toLowerCase().includes(typeSearch.toLowerCase()) ||
+      t.name.toLowerCase().includes(typeSearch.toLowerCase())
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/40 p-4 pt-24"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-md" onMouseDown={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h3 className="text-lg font-semibold text-gray-900">Create Budget Code</h3>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 space-y-4">
+          {/* Cost Code */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              Cost Code <span className="text-red-500">*</span>
+            </label>
+            <HierSelect
+              placeholder="Select an item"
+              valueLabel={costCode ? `${costCode.code} - ${costCode.name}` : null}
+            >
+              {(close) => (
+                <div>
+                  {/* Search */}
+                  <div className="flex items-center border-b border-gray-100 px-3 py-2">
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder="Search"
+                      value={codeSearch}
+                      onChange={(e) => setCodeSearch(e.target.value)}
+                      className="flex-1 text-sm focus:outline-none"
+                    />
+                    <Search className="w-4 h-4 text-gray-400 ml-2 shrink-0" />
+                  </div>
+
+                  {activeCategory ? (
+                    <>
+                      {/* Breadcrumb */}
+                      <button
+                        type="button"
+                        onClick={() => { setActiveCategory(null); setCodeSearch(""); }}
+                        className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 border-b border-gray-100"
+                      >
+                        <Home className="w-3.5 h-3.5" />
+                        <ChevronRight className="w-3 h-3 text-gray-400" />
+                        <span className="font-medium">{activeCategory.code} - {activeCategory.name}</span>
+                      </button>
+                      <div className="max-h-60 overflow-y-auto">
+                        {filteredSubcategories.length === 0 ? (
+                          <p className="text-sm text-gray-400 px-3 py-3 text-center">No items found</p>
+                        ) : (
+                          filteredSubcategories.map((s) => (
+                            <button
+                              key={s.code}
+                              type="button"
+                              onClick={() => {
+                                setCostCode({ code: s.code, name: s.name });
+                                setActiveCategory(null);
+                                setCodeSearch("");
+                                close();
+                              }}
+                              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                            >
+                              {subcategoryLabel(s)}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="max-h-60 overflow-y-auto">
+                      {filteredCategories.length === 0 ? (
+                        <p className="text-sm text-gray-400 px-3 py-3 text-center">No items found</p>
+                      ) : (
+                        filteredCategories.map((c) => (
+                          <button
+                            key={c.code}
+                            type="button"
+                            onClick={() => { setActiveCategory(c); setCodeSearch(""); }}
+                            className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                          >
+                            <span>{c.code} - {c.name}</span>
+                            <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </HierSelect>
+          </div>
+
+          {/* Cost Type */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              Cost Type <span className="text-red-500">*</span>
+            </label>
+            <HierSelect
+              placeholder="Select an item"
+              valueLabel={costType ? costTypeLabel(costType) : null}
+            >
+              {(close) => (
+                <div>
+                  <div className="flex items-center border-b border-gray-100 px-3 py-2">
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder="Search"
+                      value={typeSearch}
+                      onChange={(e) => setTypeSearch(e.target.value)}
+                      className="flex-1 text-sm focus:outline-none"
+                    />
+                    <Search className="w-4 h-4 text-gray-400 ml-2 shrink-0" />
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {filteredTypes.length === 0 ? (
+                      <p className="text-sm text-gray-400 px-3 py-3 text-center">No items found</p>
+                    ) : (
+                      filteredTypes.map((t) => (
+                        <button
+                          key={t.code}
+                          type="button"
+                          onClick={() => { setCostType({ code: t.code, name: t.name }); setTypeSearch(""); close(); }}
+                          className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                        >
+                          {costTypeLabel(t)}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </HierSelect>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="flex items-center gap-1 text-xs font-semibold text-gray-700 mb-1">
+              Description <span className="text-red-500">*</span>
+              <HelpCircle className="w-3.5 h-3.5 text-gray-400" />
+            </label>
+            <div className="space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="desc-mode"
+                  checked={descMode === "concatenated"}
+                  onChange={() => setDescMode("concatenated")}
+                  className="mt-0.5"
+                />
+                <span className="text-sm text-gray-700">
+                  Concatenated
+                  <span className="block text-xs text-gray-500">{concatenated || "-"}</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="desc-mode"
+                  checked={descMode === "custom"}
+                  onChange={() => setDescMode("custom")}
+                  className="mt-0.5"
+                />
+                <span className="flex-1 text-sm text-gray-700">
+                  Custom
+                  <input
+                    type="text"
+                    value={customDesc}
+                    onChange={(e) => setCustomDesc(e.target.value)}
+                    onFocus={() => setDescMode("custom")}
+                    placeholder="Enter custom description, or leave blank to use concatenated description"
+                    className="mt-1 w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  />
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-sm font-medium text-gray-600 hover:text-gray-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!canCreate}
+            onClick={handleCreate}
+            className="px-4 py-2 text-sm font-medium bg-orange-500 hover:bg-orange-600 text-white rounded disabled:opacity-50"
+          >
+            {saving ? "Creating…" : "Create"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -318,29 +601,8 @@ function ClearableSelect({
 
 // ── Rich text toolbar ──────────────────────────────────────────────────────────
 
-function RichTextEditor({ editorRef }: { editorRef: { current: HTMLDivElement | null } }) {
-  function exec(cmd: string, value?: string) {
-    editorRef.current?.focus();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (document as any).execCommand(cmd, false, value ?? undefined);
-  }
-
-  const fontSizes = ["8pt", "10pt", "12pt", "14pt", "16pt", "18pt", "24pt", "36pt"];
-  const [fontSize, setFontSize] = useState("12pt");
-
-  function applyFontSize(size: string) {
-    setFontSize(size);
-    // execCommand fontSize uses 1-7 scale; use a workaround
-    exec("fontSize", "7");
-    const spans = editorRef.current?.querySelectorAll('font[size="7"]');
-    spans?.forEach((span) => {
-      (span as HTMLElement).removeAttribute("size");
-      (span as HTMLElement).style.fontSize = size;
-    });
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ToolBtn = ({ onClick, title, children }: { onClick: () => void; title: string; children?: any }) => (
+function ToolbarButton({ onClick, title, children }: { onClick: () => void; title: string; children?: ReactNode }) {
+  return (
     <button
       type="button"
       title={title}
@@ -353,59 +615,115 @@ function RichTextEditor({ editorRef }: { editorRef: { current: HTMLDivElement | 
       {children}
     </button>
   );
+}
 
-  const Sep = () => <span className="w-px h-4 bg-gray-300 mx-0.5" />;
+function ToolbarSeparator() {
+  return <span className="w-px h-4 bg-gray-300 mx-0.5" />;
+}
+
+function ColorPalette({
+  colors,
+  onSelect,
+  ariaLabel,
+}: {
+  colors: string[];
+  onSelect: (color: string) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div className="absolute left-0 top-full mt-1 z-10 grid grid-cols-6 gap-1 rounded-md border border-gray-200 bg-white p-1.5 shadow-lg">
+      {colors.map((color) => (
+        <button
+          key={color}
+          type="button"
+          aria-label={`${ariaLabel} ${color}`}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onSelect(color);
+          }}
+          className="h-5 w-5 rounded border border-gray-200 hover:ring-2 hover:ring-gray-300"
+          style={{ backgroundColor: color }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RichTextEditor({ editorRef }: { editorRef: { current: HTMLDivElement | null } }) {
+  function exec(cmd: string, value?: string) {
+    editorRef.current?.focus();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (document as any).execCommand(cmd, false, value ?? undefined);
+  }
+
+  const fontSizes = ["8pt", "10pt", "12pt", "14pt", "16pt", "18pt", "24pt", "36pt"];
+  const textColors = ["#111827", "#dc2626", "#d97706", "#059669", "#2563eb", "#7c3aed"];
+  const highlightColors = ["#fef3c7", "#fee2e2", "#dcfce7", "#dbeafe", "#ede9fe", "#fce7f3"];
+  const [fontSize, setFontSize] = useState("12pt");
+  const [showTextColors, setShowTextColors] = useState(false);
+  const [showHighlightColors, setShowHighlightColors] = useState(false);
+
+  function applyFontSize(size: string) {
+    setFontSize(size);
+    // execCommand fontSize uses 1-7 scale; use a workaround
+    exec("fontSize", "7");
+    const spans = editorRef.current?.querySelectorAll('font[size="7"]');
+    spans?.forEach((span) => {
+      (span as HTMLElement).removeAttribute("size");
+      (span as HTMLElement).style.fontSize = size;
+    });
+  }
 
   return (
     <div className="border border-gray-300 rounded overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center flex-wrap gap-0.5 px-2 py-1.5 border-b border-gray-200 bg-gray-50">
-        <ToolBtn onClick={() => exec("bold")} title="Bold">
+        <ToolbarButton onClick={() => exec("bold")} title="Bold">
           <Bold className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("italic")} title="Italic">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("italic")} title="Italic">
           <Italic className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("underline")} title="Underline">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("underline")} title="Underline">
           <Underline className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("strikeThrough")} title="Strikethrough">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("strikeThrough")} title="Strikethrough">
           <Strikethrough className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <Sep />
-        <ToolBtn onClick={() => exec("justifyLeft")} title="Align Left">
+        </ToolbarButton>
+        <ToolbarSeparator />
+        <ToolbarButton onClick={() => exec("justifyLeft")} title="Align Left">
           <AlignLeft className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("justifyCenter")} title="Align Center">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("justifyCenter")} title="Align Center">
           <AlignCenter className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("justifyRight")} title="Align Right">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("justifyRight")} title="Align Right">
           <AlignRight className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <Sep />
-        <ToolBtn onClick={() => exec("insertUnorderedList")} title="Bullet List">
+        </ToolbarButton>
+        <ToolbarSeparator />
+        <ToolbarButton onClick={() => exec("insertUnorderedList")} title="Bullet List">
           <List className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("insertOrderedList")} title="Numbered List">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("insertOrderedList")} title="Numbered List">
           <ListOrdered className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("outdent")} title="Outdent">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("outdent")} title="Outdent">
           <Outdent className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("indent")} title="Indent">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("indent")} title="Indent">
           <Indent className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <Sep />
-        <ToolBtn onClick={() => exec("cut")} title="Cut">
+        </ToolbarButton>
+        <ToolbarSeparator />
+        <ToolbarButton onClick={() => exec("cut")} title="Cut">
           <Scissors className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("copy")} title="Copy">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("copy")} title="Copy">
           <Copy className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("paste")} title="Paste">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("paste")} title="Paste">
           <Clipboard className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <Sep />
+        </ToolbarButton>
+        <ToolbarSeparator />
         {/* Font size */}
         <div className="relative flex items-center">
           <select
@@ -419,32 +737,64 @@ function RichTextEditor({ editorRef }: { editorRef: { current: HTMLDivElement | 
           </select>
           <ChevronDown className="absolute right-1 w-2.5 h-2.5 text-gray-400 pointer-events-none" />
         </div>
-        <Sep />
-        {/* Text color placeholder */}
-        <button
-          type="button"
-          title="Text Color"
-          className="p-1 rounded hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors flex items-center gap-0.5"
-        >
-          <span className="text-xs font-bold" style={{ color: "#e11d48" }}>A</span>
-          <ChevronDown className="w-2.5 h-2.5 text-gray-400" />
-        </button>
-        {/* Highlight color placeholder */}
-        <button
-          type="button"
-          title="Highlight Color"
-          className="p-1 rounded hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors flex items-center gap-0.5"
-        >
-          <span className="text-xs font-bold" style={{ backgroundColor: "#fde68a", padding: "0 2px" }}>A</span>
-          <ChevronDown className="w-2.5 h-2.5 text-gray-400" />
-        </button>
-        <Sep />
-        <ToolBtn onClick={() => exec("undo")} title="Undo">
+        <ToolbarSeparator />
+        <div className="relative">
+          <button
+            type="button"
+            title="Text Color"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setShowTextColors((open) => !open);
+              setShowHighlightColors(false);
+            }}
+            className="p-1 rounded hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors flex items-center gap-0.5"
+          >
+            <span className="text-xs font-bold" style={{ color: "#dc2626" }}>A</span>
+            <ChevronDown className="w-2.5 h-2.5 text-gray-400" />
+          </button>
+          {showTextColors && (
+            <ColorPalette
+              ariaLabel="Apply text color"
+              colors={textColors}
+              onSelect={(color) => {
+                exec("foreColor", color);
+                setShowTextColors(false);
+              }}
+            />
+          )}
+        </div>
+        <div className="relative">
+          <button
+            type="button"
+            title="Highlight Color"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setShowHighlightColors((open) => !open);
+              setShowTextColors(false);
+            }}
+            className="p-1 rounded hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors flex items-center gap-0.5"
+          >
+            <span className="text-xs font-bold" style={{ backgroundColor: "#fef3c7", padding: "0 2px" }}>A</span>
+            <ChevronDown className="w-2.5 h-2.5 text-gray-400" />
+          </button>
+          {showHighlightColors && (
+            <ColorPalette
+              ariaLabel="Apply highlight color"
+              colors={highlightColors}
+              onSelect={(color) => {
+                exec("hiliteColor", color);
+                setShowHighlightColors(false);
+              }}
+            />
+          )}
+        </div>
+        <ToolbarSeparator />
+        <ToolbarButton onClick={() => exec("undo")} title="Undo">
           <RotateCcw className="w-3.5 h-3.5" />
-        </ToolBtn>
-        <ToolBtn onClick={() => exec("redo")} title="Redo">
+        </ToolbarButton>
+        <ToolbarButton onClick={() => exec("redo")} title="Redo">
           <RotateCw className="w-3.5 h-3.5" />
-        </ToolBtn>
+        </ToolbarButton>
       </div>
       {/* Editable area */}
       <div
@@ -547,7 +897,7 @@ function LineItemsTable({
   vendorOptions: string[];
   contractOptions: string[];
   budgetItems: BudgetItem[];
-  onCreateBudgetCode: (code: string, description: string) => Promise<void>;
+  onCreateBudgetCode: (code: string, description: string, costType: string) => Promise<void>;
   onAddLinesForAllCommitments: () => void;
   onImportCsv: (file: File) => void;
 }) {
@@ -931,17 +1281,25 @@ export default function NewChangeEventClient({
       .catch(() => {});
   }, [projectId, sourceId, sourceType]);
 
-  async function handleCreateBudgetCode(code: string, description: string) {
-    await fetch(`/api/projects/${projectId}/budget`, {
+  async function handleCreateBudgetCode(code: string, description: string, costType: string) {
+    const res = await fetch(`/api/projects/${projectId}/budget`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cost_code: code, description }),
-    })
-      .then((r) => r.json())
-      .then((item) => {
-        if (item?.id) setBudgetItems((prev) => [...prev, item]);
-      })
-      .catch(() => {});
+      body: JSON.stringify({
+        cost_code: code,
+        cost_type: costType || "Other",
+        description,
+        original_budget_amount: 0,
+        is_partial_line_item: true,
+        sort_order: budgetItems.length,
+      }),
+    });
+
+    const item = await res.json();
+    if (!res.ok) {
+      throw new Error(item?.error || "Unable to create budget line item.");
+    }
+    if (item?.id) setBudgetItems((prev) => [...prev, item]);
   }
 
   function updateLine(id: string, field: keyof LineItem, value: string) {
@@ -1067,12 +1425,12 @@ export default function NewChangeEventClient({
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#F9FAFB] flex flex-col">
       <AppHeader username={username} />
       <ProjectNav projectId={projectId} />
 
       {/* ── Breadcrumb + Title ────────────────────────────────────────────────── */}
-      <div className="px-6 pt-8 pb-4 bg-gray-50">
+      <div className="px-6 pt-8 pb-4 bg-[#F9FAFB]">
         <nav className="flex items-center gap-1 text-xs text-gray-500 mb-2">
           <button
             onClick={() => router.push(`/projects/${projectId}/change-events`)}
@@ -1094,7 +1452,7 @@ export default function NewChangeEventClient({
           <h2 className="text-sm font-semibold text-gray-900 mb-5">General Information</h2>
 
           {/* Row 1: Number | Title | Status | Origin */}
-          <div className="grid grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
             <Field>
               <Label text="Number" />
               <input
@@ -1150,7 +1508,7 @@ export default function NewChangeEventClient({
           </div>
 
           {/* Row 2: Type | Change Reason | Scope */}
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Field>
               <Label text="Type" />
               <div className="relative flex items-center">
@@ -1189,7 +1547,7 @@ export default function NewChangeEventClient({
           </div>
 
           {/* Row 3: Expecting Revenue | Line Item Revenue Source | Prime Contract */}
-          <div className="grid grid-cols-3 gap-4 mb-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
             <Field>
               <Label text="Expecting Revenue" />
               <div className="flex items-center gap-5 mt-1">

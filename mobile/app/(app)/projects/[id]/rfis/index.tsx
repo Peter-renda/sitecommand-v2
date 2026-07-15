@@ -58,7 +58,7 @@ export default function RFIsScreen() {
           title: 'RFIs',
           headerRight: () => (
             <TouchableOpacity
-              onPress={() => Alert.alert('Coming Soon', 'Create RFI flow coming soon.')}
+              onPress={() => router.push(`/(app)/projects/${projectId}/rfis/new`)}
               style={{ marginRight: 4 }}
             >
               <Ionicons name="add-circle-outline" size={26} color={Colors.primary} />

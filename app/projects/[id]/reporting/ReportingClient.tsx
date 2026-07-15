@@ -1,21 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectNav from "@/components/ProjectNav";
-import { deleteSavedReport, loadSavedReports, type StoredReport } from "./saved-reports-store";
-import { Pill } from "@/components/design-system/Primitives";
+import { deleteSavedReport, loadSavedReports, saveReport, type StoredReport } from "./saved-reports-store";
+import { REPORT_TYPES, type ReportDef } from "./report-types";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-type ReportDef = {
-  label: string;
-  value: string;
-  group: string;
-  description: string;
-  columns: { key: string; label: string }[];
-  hasDateRange: boolean;
-};
 
 type VisualType = "table" | "bar" | "horizontal-bar" | "line" | "donut" | "stacked-bar" | "scorecard";
 
@@ -33,6 +24,14 @@ type VisualConfig = {
   useDualAxis?: boolean;
   decimalPlaces?: number;
   displayUnits?: "none" | "thousands" | "millions";
+  selectedColumnKeys?: string[];
+  groupByKey?: string;
+};
+
+type TemplateLaunchConfig = {
+  visualConfig: VisualConfig;
+  autoRun?: boolean;
+  showConfiguration?: boolean;
 };
 
 type VisualCard = {
@@ -42,10 +41,35 @@ type VisualCard = {
   config: VisualConfig;
 };
 
+type FilterMode =
+  | "matches"
+  | "not_matches"
+  | "contains"
+  | "not_contains"
+  | "starts_with"
+  | "ends_with";
+
+type ReportFilter = {
+  id: string;
+  columnKey: string;
+  mode: FilterMode;
+  values: string[];
+};
+
+const FILTER_MODES: { value: FilterMode; label: string }[] = [
+  { value: "matches", label: "Matches" },
+  { value: "not_matches", label: "Does not match" },
+  { value: "contains", label: "Contains text" },
+  { value: "not_contains", label: "Does not contain text" },
+  { value: "starts_with", label: "Starts with" },
+  { value: "ends_with", label: "Ends with" },
+];
+
 type SavedReport = {
   id: string;
   name: string;
   reportType: string;
+  templateValue?: string;
   description: string;
   createdBy: string;
   createdAt: string;
@@ -55,11 +79,13 @@ type SavedReport = {
   calculatedColumns?: CalculatedColumn[];
   visualConfig?: VisualConfig;
   visualCards?: VisualCard[];
+  filters?: ReportFilter[];
   lastRunRecordCount?: number;
   distributionCount?: number;
   lastDistributedAt?: string;
   promotedToCompanyAt?: string;
   promotedBy?: string;
+  hasSingleToolTabs?: boolean;
 };
 
 type CalculatedColumnType = "basic" | "date-variance";
@@ -105,280 +131,183 @@ type SavedDashboard = {
 type SnapshotSchedule = "one-time" | "daily" | "weekly" | "monthly";
 type AggregateFunction = "none" | "count" | "sum" | "min" | "max" | "avg";
 
-// ─── Report definitions ───────────────────────────────────────────────────────
-
-const REPORT_TYPES: ReportDef[] = [
-  {
-    label: "Delays",
-    value: "daily-delays",
-    group: "Daily Log",
-    description: "All delay entries logged in the daily log, including type, duration and location.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "delay_type", label: "Delay Type" },
-      { key: "start_time", label: "Start Time" },
-      { key: "end_time", label: "End Time" },
-      { key: "duration_hours", label: "Duration (hrs)" },
-      { key: "location", label: "Location" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Manpower",
-    value: "daily-manpower",
-    group: "Daily Log",
-    description: "Workforce entries per company, including worker counts, hours and cost codes.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "company", label: "Company" },
-      { key: "workers", label: "Workers" },
-      { key: "hours", label: "Hours" },
-      { key: "location", label: "Location" },
-      { key: "cost_code", label: "Cost Code" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Weather Observations",
-    value: "daily-weather",
-    group: "Daily Log",
-    description: "Weather conditions recorded each day, including sky, temperature, wind and precipitation.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "time_observed", label: "Time" },
-      { key: "sky", label: "Sky" },
-      { key: "temperature", label: "Temp" },
-      { key: "wind", label: "Wind" },
-      { key: "avg_precipitation", label: "Precipitation" },
-      { key: "ground_sea", label: "Ground/Sea" },
-      { key: "delay", label: "Delay?" },
-      { key: "calamity", label: "Calamity" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Safety Violations",
-    value: "daily-safety",
-    group: "Daily Log",
-    description: "Safety notices issued on site, including subject, recipient and compliance due date.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "time", label: "Time" },
-      { key: "subject", label: "Subject" },
-      { key: "safety_notice", label: "Safety Notice" },
-      { key: "issued_to", label: "Issued To" },
-      { key: "compliance_due", label: "Compliance Due" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Accidents",
-    value: "daily-accidents",
-    group: "Daily Log",
-    description: "Accident and incident records logged in the daily log.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "time", label: "Time" },
-      { key: "party_involved", label: "Party Involved" },
-      { key: "company_involved", label: "Company" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Inspections",
-    value: "daily-inspections",
-    group: "Daily Log",
-    description: "Site inspection records including type, inspector, and location details.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "inspection_type", label: "Type" },
-      { key: "inspecting_entity", label: "Entity" },
-      { key: "inspector_name", label: "Inspector" },
-      { key: "start_time", label: "Start" },
-      { key: "end_time", label: "End" },
-      { key: "location", label: "Location" },
-      { key: "inspection_area", label: "Area" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Deliveries",
-    value: "daily-deliveries",
-    group: "Daily Log",
-    description: "Material and equipment deliveries tracked in the daily log.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "time", label: "Time" },
-      { key: "delivery_from", label: "Delivery From" },
-      { key: "tracking_number", label: "Tracking #" },
-      { key: "contents", label: "Contents" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Visitors",
-    value: "daily-visitors",
-    group: "Daily Log",
-    description: "Visitor log entries including arrival/departure times.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "visitor", label: "Visitor" },
-      { key: "start_time", label: "Start" },
-      { key: "end_time", label: "End" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Notes & Issues",
-    value: "daily-notes",
-    group: "Daily Log",
-    description: "General notes and flagged issues recorded during daily log entries.",
-    hasDateRange: true,
-    columns: [
-      { key: "log_date", label: "Date" },
-      { key: "is_issue", label: "Issue?" },
-      { key: "location", label: "Location" },
-      { key: "comments", label: "Comments" },
-    ],
-  },
-  {
-    label: "Commitments Summary",
-    value: "commitments-summary",
-    group: "Financial Management",
-    description: "All purchase orders and subcontracts with status, contract amounts, approved change orders, and remaining balances.",
-    hasDateRange: false,
-    columns: [
-      { key: "number", label: "#" },
-      { key: "type", label: "Type" },
-      { key: "contract_company", label: "Company" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "sov_accounting_method", label: "Accounting Method" },
-      { key: "original_contract_amount", label: "Original Amount" },
-      { key: "approved_change_orders", label: "Approved COs" },
-      { key: "pending_change_orders", label: "Pending COs" },
-      { key: "erp_status", label: "ERP Status" },
-    ],
-  },
-  {
-    label: "Change Events",
-    value: "change-events",
-    group: "Financial Management",
-    description: "Change events log with scope classification, ROM amounts, and linkage to change orders.",
-    hasDateRange: false,
-    columns: [
-      { key: "number", label: "#" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "scope", label: "Scope" },
-      { key: "rom_amount", label: "ROM Amount" },
-      { key: "created_at", label: "Created" },
-    ],
-  },
-  {
-    label: "Commitment Change Orders",
-    value: "commitment-change-orders",
-    group: "Financial Management",
-    description: "All commitment change orders across the project, including status, amount, and linked contracts.",
-    hasDateRange: false,
-    columns: [
-      { key: "number", label: "#" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "contract_company", label: "Company" },
-      { key: "contract_name", label: "Contract" },
-      { key: "amount", label: "Amount" },
-      { key: "change_reason", label: "Change Reason" },
-      { key: "due_date", label: "Due Date" },
-    ],
-  },
-  {
-    label: "Budget Summary",
-    value: "budget-summary",
-    group: "Financial Management",
-    description: "Budget line items showing original budget, committed costs, and variance by cost code.",
-    hasDateRange: false,
-    columns: [
-      { key: "cost_code", label: "Cost Code" },
-      { key: "description", label: "Description" },
-      { key: "original_budget", label: "Original Budget" },
-      { key: "committed_costs", label: "Committed Costs" },
-      { key: "variance", label: "Variance" },
-    ],
-  },
-  {
-    label: "RFIs",
-    value: "rfis",
-    group: "Project Tools",
-    description: "All Requests for Information on the project, with status and due dates.",
-    hasDateRange: false,
-    columns: [
-      { key: "rfi_number", label: "RFI #" },
-      { key: "subject", label: "Subject" },
-      { key: "status", label: "Status" },
-      { key: "due_date", label: "Due Date" },
-      { key: "created_at", label: "Created" },
-    ],
-  },
-  {
-    label: "Submittals",
-    value: "submittals",
-    group: "Project Tools",
-    description: "Submittal log including type, status, submission and issue dates.",
-    hasDateRange: false,
-    columns: [
-      { key: "submittal_number", label: "Submittal #" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "submittal_type", label: "Type" },
-      { key: "submit_by", label: "Submit By" },
-      { key: "received_date", label: "Received" },
-      { key: "issue_date", label: "Issued" },
-      { key: "cost_code", label: "Cost Code" },
-    ],
-  },
-  {
-    label: "Tasks",
-    value: "tasks",
-    group: "Project Tools",
-    description: "Open and closed tasks assigned to the project team.",
-    hasDateRange: false,
-    columns: [
-      { key: "task_number", label: "Task #" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "category", label: "Category" },
-      { key: "created_at", label: "Created" },
-    ],
-  },
-  {
-    label: "Punch List",
-    value: "punch-list",
-    group: "Project Tools",
-    description: "Punch list items with type, trade, priority and location details.",
-    hasDateRange: false,
-    columns: [
-      { key: "item_number", label: "Item #" },
-      { key: "title", label: "Title" },
-      { key: "status", label: "Status" },
-      { key: "type", label: "Type" },
-      { key: "trade", label: "Trade" },
-      { key: "priority", label: "Priority" },
-      { key: "due_date", label: "Due Date" },
-      { key: "location", label: "Location" },
-    ],
-  },
-];
 
 const GROUPS = Array.from(new Set(REPORT_TYPES.map((r) => r.group)));
+
+
+function getTemplateLaunchConfig(reportDef: ReportDef): TemplateLaunchConfig {
+  const allColumnKeys = reportDef.columns.map((column) => column.key);
+
+  const groupByKeyByTemplate: Record<string, string> = {
+    "daily-delays": "delay_type",
+    "daily-manpower": "company",
+    "daily-weather": "sky",
+    "daily-safety": "issued_to",
+    "daily-accidents": "company_involved",
+    "daily-inspections": "inspection_type",
+    "daily-deliveries": "delivery_from",
+    "daily-visitors": "visitor",
+    "daily-notes": "is_issue",
+    "commitments-summary": "contract_company",
+    "change-events": "status",
+    "commitment-change-orders": "status",
+    "budget-summary": "cost_code",
+    rfis: "status",
+    submittals: "status",
+    tasks: "status",
+    "punch-list": "status",
+  };
+
+  const sortByKeyByTemplate: Record<string, string> = {
+    "daily-delays": "log_date",
+    "daily-manpower": "log_date",
+    "daily-weather": "log_date",
+    "daily-safety": "log_date",
+    "daily-accidents": "log_date",
+    "daily-inspections": "log_date",
+    "daily-deliveries": "log_date",
+    "daily-visitors": "log_date",
+    "daily-notes": "log_date",
+    "commitments-summary": "contract_company",
+    "change-events": "created_at",
+    "commitment-change-orders": "number",
+    "budget-summary": "cost_code",
+    rfis: "due_date",
+    submittals: "submit_by",
+    tasks: "created_at",
+    "punch-list": "due_date",
+  };
+
+  const measureKeyByTemplate: Record<string, string> = {
+    "daily-delays": "duration_hours",
+    "daily-manpower": "workers",
+    "commitments-summary": "original_contract_amount",
+    "commitment-change-orders": "amount",
+    "budget-summary": "variance",
+  };
+
+  const groupByKey = groupByKeyByTemplate[reportDef.value];
+  const sortByKey = sortByKeyByTemplate[reportDef.value];
+
+  return {
+    autoRun: true,
+    showConfiguration: true,
+    visualConfig: {
+      visualType: "table",
+      selectedColumnKeys: allColumnKeys,
+      groupByKey: groupByKey && allColumnKeys.includes(groupByKey) ? groupByKey : undefined,
+      sortByKey: sortByKey && allColumnKeys.includes(sortByKey) ? sortByKey : undefined,
+      sortDirection: reportDef.hasDateRange ? "desc" : "asc",
+      yAxisKey: measureKeyByTemplate[reportDef.value],
+      showLegend: true,
+      showValueLabels: false,
+      showPoints: false,
+      maxBars: 10,
+      useDualAxis: false,
+      decimalPlaces: 2,
+      displayUnits: "none",
+    },
+  };
+}
+
+// ─── Report sections (left-side tree on the Reports tab) ──────────────────────
+
+type SectionId =
+  | "my-reports"
+  | "assigned-reports"
+  | "popular-templates"
+  | "canned-erp"
+  | "canned-project"
+  | "canned-financial"
+  | "canned-schedule"
+  | "canned-daily-log";
+
+type SectionKind = "my-reports" | "assigned-reports" | "templates";
+
+type ReportSection = {
+  id: SectionId;
+  title: string;
+  description: string;
+  kind: SectionKind;
+  templateValues?: string[];
+};
+
+const POPULAR_TEMPLATE_VALUES = REPORT_TYPES.map((r) => r.value);
+const CANNED_ERP_VALUES = ["commitments-summary", "budget-summary"];
+const CANNED_PROJECT_VALUES = ["rfis", "submittals", "tasks", "punch-list"];
+const CANNED_FINANCIAL_VALUES = [
+  "commitments-summary",
+  "change-events",
+  "commitment-change-orders",
+  "budget-summary",
+];
+const CANNED_SCHEDULE_VALUES: string[] = [];
+const CANNED_DAILY_LOG_VALUES = REPORT_TYPES.filter((r) => r.group === "Daily Log").map((r) => r.value);
+
+const REPORT_SECTIONS: ReportSection[] = [
+  {
+    id: "my-reports",
+    title: "My Reports",
+    description:
+      "Custom reports you've made or were shared with you and any Assigned Reports you've customized. These are only viewable to you.",
+    kind: "my-reports",
+  },
+  {
+    id: "assigned-reports",
+    title: "Assigned Reports",
+    description:
+      "Reports assigned to you by the company. Data in Assigned Reports is relative to projects and permissions.",
+    kind: "assigned-reports",
+  },
+  {
+    id: "popular-templates",
+    title: "Popular Templates",
+    description:
+      "A selection of the most used Templates across Site Command. Templates are customizable, industry-standard reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: POPULAR_TEMPLATE_VALUES,
+  },
+  {
+    id: "canned-erp",
+    title: "Canned ERP Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_ERP_VALUES,
+  },
+  {
+    id: "canned-project",
+    title: "Canned Project Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_PROJECT_VALUES,
+  },
+  {
+    id: "canned-financial",
+    title: "Canned Financial Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_FINANCIAL_VALUES,
+  },
+  {
+    id: "canned-schedule",
+    title: "Canned Schedule Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_SCHEDULE_VALUES,
+  },
+  {
+    id: "canned-daily-log",
+    title: "Canned Daily Log Reports",
+    description:
+      "Non-customizable reports provided by Site Command. Data shown in reports is relative to projects and permissions.",
+    kind: "templates",
+    templateValues: CANNED_DAILY_LOG_VALUES,
+  },
+];
 const VIEWER_OPTIONS = ["Company Admins", "Project Managers", "Field Team", "Executives"];
 const VISUAL_TYPE_OPTIONS: { value: VisualType; label: string; description: string }[] = [
   { value: "table", label: "Tabular Report", description: "Detailed row and column output for audits and exports." },
@@ -485,6 +414,50 @@ function getAggregateFunctionsForColumn(key: string): AggregateFunction[] {
   const normalized = key.toLowerCase();
   const isNumeric = NUMERIC_COLUMN_HINTS.some((hint) => normalized.includes(hint));
   return isNumeric ? ["count", "sum", "min", "max", "avg"] : ["count"];
+}
+
+function applyReportFilters(
+  rows: Record<string, unknown>[],
+  filters: ReportFilter[],
+): Record<string, unknown>[] {
+  const active = filters.filter((f) => f.columnKey && f.values.length > 0);
+  if (active.length === 0) return rows;
+  return rows.filter((row) =>
+    active.every((f) => {
+      const cell = row[f.columnKey];
+      const raw = cell === null || cell === undefined ? "" : String(cell);
+      const lower = raw.toLowerCase();
+      switch (f.mode) {
+        case "matches":
+          return f.values.some((fv) => raw === fv);
+        case "not_matches":
+          return f.values.every((fv) => raw !== fv);
+        case "contains":
+          return f.values.some((fv) => lower.includes(fv.toLowerCase()));
+        case "not_contains":
+          return f.values.every((fv) => !lower.includes(fv.toLowerCase()));
+        case "starts_with":
+          return f.values.some((fv) => lower.startsWith(fv.toLowerCase()));
+        case "ends_with":
+          return f.values.some((fv) => lower.endsWith(fv.toLowerCase()));
+        default:
+          return true;
+      }
+    }),
+  );
+}
+
+function distinctColumnValues(rows: Record<string, unknown>[], columnKey: string): string[] {
+  const set = new Set<string>();
+  for (const r of rows) {
+    const v = r[columnKey];
+    set.add(v === null || v === undefined ? "" : String(v));
+  }
+  return Array.from(set).sort((a, b) => {
+    if (a === "" && b !== "") return -1;
+    if (b === "" && a !== "") return 1;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
 }
 
 function toCSV(columns: { key: string; label: string }[], rows: Record<string, unknown>[]): string {
@@ -642,12 +615,243 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
-        active ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+      className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+        active ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"
       }`}
     >
       {label}
     </button>
+  );
+}
+
+function SectionCard({
+  section,
+  open,
+  onToggle,
+  onViewAll,
+  search,
+  myReports,
+  templates,
+  onOpenSaved,
+  onOpenTemplate,
+  onPreviewTemplate,
+  onAddVisual,
+  onEditReport,
+  onShareReport,
+  onDistribute,
+  onPreviewInDashboard,
+  onPromote,
+  onCloneReport,
+  onDeleteReport,
+}: {
+  section: ReportSection;
+  open: boolean;
+  onToggle: () => void;
+  onViewAll: () => void;
+  search: string;
+  myReports: SavedReport[];
+  templates: ReportDef[];
+  onOpenSaved: (r: SavedReport) => void;
+  onOpenTemplate: (r: ReportDef) => void;
+  onPreviewTemplate: (r: ReportDef) => void;
+  onAddVisual: (r: SavedReport) => void;
+  onEditReport: (id: string) => void;
+  onShareReport: (id: string) => void;
+  onDistribute: (id: string) => void;
+  onPreviewInDashboard: (id: string) => void;
+  onPromote: (id: string) => void;
+  onCloneReport: (r: SavedReport) => void;
+  onDeleteReport: (id: string) => void;
+}) {
+  const q = search.trim().toLowerCase();
+
+  const items = useMemo(() => {
+    if (section.kind === "my-reports") return myReports;
+    if (section.kind === "assigned-reports") {
+      return myReports.filter((r) => r.promotedToCompanyAt);
+    }
+    const allowed = new Set(section.templateValues ?? []);
+    const filtered = templates.filter((t) => allowed.has(t.value));
+    if (!q) return filtered;
+    return filtered.filter(
+      (t) =>
+        t.label.toLowerCase().includes(q) ||
+        t.group.toLowerCase().includes(q) ||
+        t.description.toLowerCase().includes(q)
+    );
+  }, [section, myReports, templates, q]);
+
+  const filteredSaved = useMemo(() => {
+    if (section.kind === "templates") return [];
+    if (!q) return items as SavedReport[];
+    return (items as SavedReport[]).filter(
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.reportType.toLowerCase().includes(q) ||
+        r.description.toLowerCase().includes(q)
+    );
+  }, [items, q, section.kind]);
+
+  const count =
+    section.kind === "templates"
+      ? (items as ReportDef[]).length
+      : filteredSaved.length;
+
+  return (
+    <div id={`section-${section.id}`} className="bg-white border hairline rounded-xl">
+      <div className="flex items-start justify-between px-4 pt-3 pb-2 gap-4">
+        <button
+          onClick={onToggle}
+          className="flex items-center gap-2 text-left flex-1 min-w-0 group"
+        >
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform shrink-0 ${open ? "" : "-rotate-90"}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+          <h3 className="h3-warm group-hover:opacity-80">
+            {section.title} <span className="num text-gray-400" style={{ fontFamily: "inherit" }}>({count})</span>
+          </h3>
+        </button>
+        <button
+          onClick={onViewAll}
+          className="btn-quiet shrink-0"
+        >
+          View All
+        </button>
+      </div>
+      <p className="px-4 pb-3 pl-10 text-xs text-gray-500">{section.description}</p>
+
+      {open && (
+        <div className="border-t hairline">
+          {section.kind === "templates" ? (
+            (items as ReportDef[]).length === 0 ? (
+              <div className="py-8 text-center text-xs text-gray-400">
+                {q
+                  ? "No templates match your search."
+                  : "No reports in this category yet."}
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
+                    <th className="px-4 py-3 text-left mono-label w-64">Report Name</th>
+                    <th className="px-4 py-3 text-left mono-label w-44">Report Type</th>
+                    <th className="px-4 py-3 text-left mono-label">Description</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(items as ReportDef[]).map((r, idx) => (
+                    <tr
+                      key={r.value}
+                      className="border-b border-gray-50 last:border-b-0 hover:bg-[color:var(--surface-sunken)] transition-colors cursor-pointer"
+                      onClick={() => onOpenTemplate(r)}
+                    >
+                      <td className="px-4 py-3">
+                        <span className="idx-italic mr-2">{String(idx + 1).padStart(2, "0")}</span>
+                        <span className="font-medium text-gray-900">{r.label}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <TypeBadge group={r.group} />
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500 max-w-sm">{r.description}</td>
+                      <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                        <RowMenu
+                          actions={[
+                            { label: "Preview Template", onClick: () => onPreviewTemplate(r) },
+                            { label: "Use Template", onClick: () => onOpenTemplate(r) },
+                          ]}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          ) : filteredSaved.length === 0 ? (
+            <div className="py-8 text-center text-xs text-gray-400">
+              {section.kind === "my-reports"
+                ? q
+                  ? "No saved reports match your search."
+                  : "No saved reports yet. Run a template and click “Save Report”."
+                : q
+                ? "No assigned reports match your search."
+                : "No reports have been assigned to you yet."}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b hairline bg-[color:var(--surface-sunken)]">
+                  <th className="px-4 py-3 text-left mono-label w-64">Report Name</th>
+                  <th className="px-4 py-3 text-left mono-label w-44">Report Type</th>
+                  <th className="px-4 py-3 text-left mono-label">Description</th>
+                  <th className="px-4 py-3 text-left mono-label w-32">Created By</th>
+                  <th className="px-4 py-3 text-left mono-label w-28">Date Created</th>
+                  <th className="px-4 py-3 text-left mono-label w-28">Last Modified</th>
+                  <th className="px-4 py-3 text-left mono-label w-20">Visuals</th>
+                  <th className="px-4 py-3 text-left mono-label w-36">Last Snapshot</th>
+                  <th className="px-4 py-3 text-left mono-label w-36">Company Level</th>
+                  <th className="w-10" />
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSaved.map((r, idx) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-gray-50 last:border-b-0 hover:bg-[color:var(--surface-sunken)] transition-colors cursor-pointer"
+                    onClick={() => onOpenSaved(r)}
+                  >
+                    <td className="px-4 py-3">
+                      <span className="idx-italic mr-2">{String(idx + 1).padStart(2, "0")}</span>
+                      <span className="font-medium text-gray-900">{r.name}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <SavedTypeBadge label={r.reportType} />
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{r.description}</td>
+                    <td className="px-4 py-3 text-gray-600">{r.createdBy}</td>
+                    <td className="px-4 py-3 text-gray-500 tabular-nums">{fmtDate(r.createdAt)}</td>
+                    <td className="px-4 py-3 text-gray-500 tabular-nums">{fmtDate(r.updatedAt)}</td>
+                    <td className="px-4 py-3 text-gray-500 tabular-nums">{Math.max(1, r.visualCards?.length ?? 0)}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">
+                      {r.lastDistributedAt ? `${fmtDate(r.lastDistributedAt)} (${r.distributionCount ?? 1})` : "Never"}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {r.promotedToCompanyAt ? (
+                        <span className="pill pill-open">Promoted {fmtDate(r.promotedToCompanyAt)}</span>
+                      ) : (
+                        <span className="text-gray-500">Project Only</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                      <RowMenu
+                        actions={[
+                          { label: "Run Report", onClick: () => onOpenSaved(r) },
+                          { label: "Edit (Visuals & Layout)", onClick: () => onOpenSaved(r) },
+                          { label: "Add Visual", onClick: () => onAddVisual(r) },
+                          { label: "Edit Report", onClick: () => onEditReport(r.id) },
+                          { label: "Share Report", onClick: () => onShareReport(r.id) },
+                          { label: "Distribute Snapshot", onClick: () => onDistribute(r.id) },
+                          { label: "Preview in Dashboard", onClick: () => onPreviewInDashboard(r.id) },
+                          { label: "Promote to Company", onClick: () => onPromote(r.id) },
+                          { label: "Make a Copy", onClick: () => onCloneReport(r) },
+                          { label: "Delete", onClick: () => onDeleteReport(r.id), danger: true },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -721,7 +925,411 @@ function ReportingSettingsModal({
   );
 }
 
+// ─── Filters ─────────────────────────────────────────────────────────────────
+
+function AddFilterDropdown({
+  categoryLabel,
+  columns,
+  onSelect,
+}: {
+  categoryLabel: string;
+  columns: { key: string; label: string }[];
+  onSelect: (columnKey: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<"categories" | "fields">("categories");
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setStep("categories");
+        setSearch("");
+      }
+    }
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const filteredCategories = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [{ label: categoryLabel }];
+    return categoryLabel.toLowerCase().includes(q) ? [{ label: categoryLabel }] : [];
+  }, [search, categoryLabel]);
+
+  const filteredFields = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return columns;
+    return columns.filter((c) => c.label.toLowerCase().includes(q));
+  }, [search, columns]);
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setStep("categories");
+          setSearch("");
+        }}
+        className="w-full flex items-center justify-between px-3 py-2 border border-gray-200 rounded-md text-sm text-gray-500 bg-white hover:border-gray-300"
+      >
+        Add Filters...
+        <span className="text-gray-400">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-30 max-h-80 overflow-hidden flex flex-col">
+          <div className="p-2 border-b border-gray-100">
+            <div className="relative">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={step === "categories" ? "Search Filters" : "Search Fields"}
+                className="w-full pl-2 pr-7 py-1.5 border-2 border-blue-500 rounded text-sm focus:outline-none"
+                autoFocus
+              />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+            </div>
+          </div>
+          <div className="overflow-y-auto">
+            {step === "categories" && (
+              <>
+                {filteredCategories.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-gray-400">No matches.</p>
+                ) : (
+                  filteredCategories.map((cat) => (
+                    <button
+                      key={cat.label}
+                      type="button"
+                      onClick={() => {
+                        setStep("fields");
+                        setSearch("");
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-gray-800 hover:bg-gray-50"
+                    >
+                      <span>{cat.label}</span>
+                      <span className="text-gray-400">›</span>
+                    </button>
+                  ))
+                )}
+              </>
+            )}
+            {step === "fields" && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep("categories");
+                    setSearch("");
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:bg-gray-50 border-b border-gray-100"
+                >
+                  ‹ Back to filters
+                </button>
+                <p className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wide text-gray-400">{categoryLabel}</p>
+                {filteredFields.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-gray-400">No matching fields.</p>
+                ) : (
+                  filteredFields.map((col) => (
+                    <button
+                      key={col.key}
+                      type="button"
+                      onClick={() => {
+                        onSelect(col.key);
+                        setOpen(false);
+                        setStep("categories");
+                        setSearch("");
+                      }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-800 hover:bg-gray-50"
+                    >
+                      {col.label}
+                    </button>
+                  ))
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterValuePicker({
+  mode,
+  values,
+  suggestions,
+  onChange,
+}: {
+  mode: FilterMode;
+  values: string[];
+  suggestions: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isFreeText = mode === "contains" || mode === "not_contains" || mode === "starts_with" || mode === "ends_with";
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch("");
+      }
+    }
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const filteredSuggestions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const base = suggestions.filter((s) => !values.includes(s));
+    if (!q) return base;
+    return base.filter((s) => (s === "" ? "(none)" : s.toLowerCase()).includes(q));
+  }, [search, suggestions, values]);
+
+  function toggleValue(v: string) {
+    if (values.includes(v)) onChange(values.filter((x) => x !== v));
+    else onChange([...values, v]);
+  }
+
+  function commitFreeText(text: string) {
+    const t = text.trim();
+    if (!t) return;
+    if (values.includes(t)) return;
+    onChange([...values, t]);
+    setSearch("");
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div
+        onClick={() => setOpen(true)}
+        className="w-full min-h-[36px] flex flex-wrap items-center gap-1 px-2 py-1.5 border border-gray-200 rounded-md text-sm bg-white cursor-text"
+      >
+        {values.map((v) => (
+          <span
+            key={v}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-600 text-white text-xs"
+          >
+            {v === "" ? "(None)" : v}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(values.filter((x) => x !== v));
+              }}
+              className="hover:text-blue-100"
+              aria-label="Remove value"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {(open || values.length === 0) && (
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (isFreeText && e.key === "Enter") {
+                e.preventDefault();
+                commitFreeText(search);
+              }
+              if (e.key === "Backspace" && !search && values.length > 0) {
+                onChange(values.slice(0, -1));
+              }
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder={values.length === 0 ? (isFreeText ? "Type a value..." : "Select values...") : ""}
+            className="flex-1 min-w-[80px] outline-none text-sm bg-transparent"
+          />
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (values.length > 0) onChange([]);
+            else setOpen((o) => !o);
+          }}
+          className="ml-auto text-gray-400 hover:text-gray-700"
+          aria-label={values.length > 0 ? "Clear values" : "Toggle dropdown"}
+        >
+          {values.length > 0 ? "×" : "▾"}
+        </button>
+      </div>
+      {open && (
+        <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-30 max-h-64 overflow-y-auto">
+          {isFreeText && search.trim() && !values.includes(search.trim()) && (
+            <button
+              type="button"
+              onClick={() => commitFreeText(search)}
+              className="w-full text-left px-3 py-2 text-sm text-blue-700 hover:bg-blue-50 border-b border-gray-100"
+            >
+              Use “{search.trim()}”
+            </button>
+          )}
+          {filteredSuggestions.length === 0 ? (
+            <p className="px-3 py-3 text-xs text-gray-400">
+              {suggestions.length === 0
+                ? "Run the report to see available values."
+                : "No matching values."}
+            </p>
+          ) : (
+            filteredSuggestions.map((s) => (
+              <button
+                key={s || "__empty__"}
+                type="button"
+                onClick={() => toggleValue(s)}
+                className="w-full text-left px-3 py-2 text-sm text-gray-800 hover:bg-gray-50"
+              >
+                {s === "" ? "(None)" : s}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterRow({
+  filter,
+  categoryLabel,
+  fieldLabel,
+  suggestions,
+  onUpdate,
+  onRemove,
+}: {
+  filter: ReportFilter;
+  categoryLabel: string;
+  fieldLabel: string;
+  suggestions: string[];
+  onUpdate: (patch: Partial<ReportFilter>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="border-t border-gray-100 pt-3 mt-3">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs text-gray-500">{categoryLabel}</p>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="text-gray-400 hover:text-red-600"
+          aria-label="Remove filter"
+        >
+          ×
+        </button>
+      </div>
+      <p className="text-sm font-semibold text-gray-900 mb-2">{fieldLabel}</p>
+      <select
+        value={filter.mode}
+        onChange={(e) => onUpdate({ mode: e.target.value as FilterMode })}
+        className="w-full mb-2 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm bg-white"
+      >
+        {FILTER_MODES.map((m) => (
+          <option key={m.value} value={m.value}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+      <FilterValuePicker
+        mode={filter.mode}
+        values={filter.values}
+        suggestions={suggestions}
+        onChange={(values) => onUpdate({ values })}
+      />
+    </div>
+  );
+}
+
 // ─── Run Report Modal ─────────────────────────────────────────────────────────
+
+function ColumnConfigurationPanel({
+  columns,
+  selectedColumnKeys,
+  calculatedColumns,
+  onChange,
+}: {
+  columns: { key: string; label: string }[];
+  selectedColumnKeys: string[];
+  calculatedColumns: CalculatedColumn[];
+  onChange: (keys: string[]) => void;
+}) {
+  const allColumnKeys = columns.map((column) => column.key);
+  const selectedSet = new Set(selectedColumnKeys.length > 0 ? selectedColumnKeys : allColumnKeys);
+  const selectedCount = selectedSet.size;
+
+  function toggleColumn(columnKey: string) {
+    const next = new Set(selectedSet);
+    if (next.has(columnKey)) {
+      if (next.size === 1) return;
+      next.delete(columnKey);
+    } else {
+      next.add(columnKey);
+    }
+    onChange(allColumnKeys.filter((key) => next.has(key)));
+  }
+
+  return (
+    <aside className="w-72 shrink-0 border-l border-gray-100 bg-white overflow-y-auto">
+      <div className="sticky top-0 bg-white px-4 py-4 border-b border-gray-100 z-10">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Configure Columns</h3>
+            <p className="text-[11px] text-gray-500 mt-1">
+              {selectedCount} of {columns.length} source columns in use.
+            </p>
+          </div>
+          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+            {selectedCount} checked
+          </span>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onChange(allColumnKeys)}
+            className="text-[11px] font-medium text-gray-600 hover:text-gray-900"
+          >
+            Check all
+          </button>
+          <span className="text-[11px] text-gray-400">At least one column is required.</span>
+        </div>
+      </div>
+      <div className="px-3 py-3 space-y-1.5">
+        {columns.map((column) => (
+          <label
+            key={column.key}
+            className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-xs transition-colors ${
+              selectedSet.has(column.key) ? "bg-blue-50 text-gray-900" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={selectedSet.has(column.key)}
+              onChange={() => toggleColumn(column.key)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="min-w-0 flex-1 truncate">{column.label}</span>
+          </label>
+        ))}
+        {calculatedColumns.length > 0 && (
+          <div className="pt-3">
+            <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Custom Columns</p>
+            {calculatedColumns.map((column) => (
+              <div key={column.id} className="flex items-center gap-2 rounded-md bg-gray-50 px-2.5 py-2 text-xs text-gray-500">
+                <input type="checkbox" checked readOnly className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                <span className="min-w-0 flex-1 truncate">{column.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
 
 function RunReportModal({
   reportDef,
@@ -731,6 +1339,8 @@ function RunReportModal({
   onClose,
   onSave,
   onUpdate,
+  fullscreen,
+  templateLaunchConfig,
 }: {
   reportDef: ReportDef;
   projectId: string;
@@ -739,6 +1349,8 @@ function RunReportModal({
   onClose: () => void;
   onSave: (report: SavedReport) => void;
   onUpdate?: (reportId: string, patch: Partial<SavedReport>) => void;
+  fullscreen?: boolean;
+  templateLaunchConfig?: TemplateLaunchConfig;
 }) {
   const today = new Date();
   const [reportName, setReportName] = useState(existingReport?.name ?? reportDef.label);
@@ -760,34 +1372,46 @@ function RunReportModal({
   const [newDecimals, setNewDecimals] = useState(2);
   const [newRounding, setNewRounding] = useState(true);
   const [loadDataManually, setLoadDataManually] = useState(true);
-  const [groupByKey, setGroupByKey] = useState("");
-  const [visualType, setVisualType] = useState<VisualType>(existingReport?.visualConfig?.visualType ?? "table");
-  const [xAxisKey, setXAxisKey] = useState(existingReport?.visualConfig?.xAxisKey ?? "");
-  const [yAxisKey, setYAxisKey] = useState(existingReport?.visualConfig?.yAxisKey ?? "");
-  const [secondaryMeasureKey, setSecondaryMeasureKey] = useState(existingReport?.visualConfig?.secondaryMeasureKey ?? "");
-  const [sortByKey, setSortByKey] = useState(existingReport?.visualConfig?.sortByKey ?? "");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(existingReport?.visualConfig?.sortDirection ?? "asc");
-  const [showLegend, setShowLegend] = useState(existingReport?.visualConfig?.showLegend ?? true);
-  const [showValueLabels, setShowValueLabels] = useState(existingReport?.visualConfig?.showValueLabels ?? false);
-  const [showPoints, setShowPoints] = useState(existingReport?.visualConfig?.showPoints ?? false);
-  const [maxBars, setMaxBars] = useState(existingReport?.visualConfig?.maxBars ?? 10);
-  const [useDualAxis, setUseDualAxis] = useState(existingReport?.visualConfig?.useDualAxis ?? false);
-  const [decimalPlaces, setDecimalPlaces] = useState(existingReport?.visualConfig?.decimalPlaces ?? 2);
-  const [displayUnits, setDisplayUnits] = useState<"none" | "thousands" | "millions">(existingReport?.visualConfig?.displayUnits ?? "none");
+  const initialVisualConfig = existingReport?.visualConfig ?? templateLaunchConfig?.visualConfig;
+  const [showConfig, setShowConfig] = useState(templateLaunchConfig?.showConfiguration ?? !existingReport);
+  const [groupByKey, setGroupByKey] = useState(initialVisualConfig?.groupByKey ?? "");
+  const [selectedColumnKeys, setSelectedColumnKeys] = useState<string[]>(
+    initialVisualConfig?.selectedColumnKeys ?? [],
+  );
+  const [visualType, setVisualType] = useState<VisualType>(initialVisualConfig?.visualType ?? "table");
+  const [xAxisKey, setXAxisKey] = useState(initialVisualConfig?.xAxisKey ?? "");
+  const [yAxisKey, setYAxisKey] = useState(initialVisualConfig?.yAxisKey ?? "");
+  const [secondaryMeasureKey, setSecondaryMeasureKey] = useState(initialVisualConfig?.secondaryMeasureKey ?? "");
+  const [sortByKey, setSortByKey] = useState(initialVisualConfig?.sortByKey ?? "");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(initialVisualConfig?.sortDirection ?? "asc");
+  const [showLegend, setShowLegend] = useState(initialVisualConfig?.showLegend ?? true);
+  const [showValueLabels, setShowValueLabels] = useState(initialVisualConfig?.showValueLabels ?? false);
+  const [showPoints, setShowPoints] = useState(initialVisualConfig?.showPoints ?? false);
+  const [maxBars, setMaxBars] = useState(initialVisualConfig?.maxBars ?? 10);
+  const [useDualAxis, setUseDualAxis] = useState(initialVisualConfig?.useDualAxis ?? false);
+  const [decimalPlaces, setDecimalPlaces] = useState(initialVisualConfig?.decimalPlaces ?? 2);
+  const [displayUnits, setDisplayUnits] = useState<"none" | "thousands" | "millions">(initialVisualConfig?.displayUnits ?? "none");
   const [actorEmailFilter, setActorEmailFilter] = useState("");
   const [eventTypeFilter, setEventTypeFilter] = useState("");
   const [aggregateByColumn, setAggregateByColumn] = useState<Record<string, AggregateFunction>>({});
+  const [filters, setFilters] = useState<ReportFilter[]>(existingReport?.filters ?? []);
+  const [allFetchedRows, setAllFetchedRows] = useState<Record<string, unknown>[]>([]);
 
-  const displayColumns = useMemo(
-    () => [
-      ...reportDef.columns,
+  const displayColumns = useMemo(() => {
+    const base =
+      selectedColumnKeys.length > 0
+        ? selectedColumnKeys
+            .map((key) => reportDef.columns.find((c) => c.key === key))
+            .filter((c): c is { key: string; label: string } => c !== undefined)
+        : reportDef.columns;
+    return [
+      ...base,
       ...calculatedColumns.map((c) => ({
         key: c.id,
         label: c.name,
       })),
-    ],
-    [reportDef.columns, calculatedColumns]
-  );
+    ];
+  }, [reportDef.columns, calculatedColumns, selectedColumnKeys]);
 
   async function runReport() {
     setLoading(true);
@@ -811,7 +1435,9 @@ function RunReportModal({
       setRows([]);
       return;
     }
-    let sourceRows = Array.isArray(data) ? data : [];
+    const fetched = Array.isArray(data) ? data : [];
+    setAllFetchedRows(fetched);
+    let sourceRows = applyReportFilters(fetched, filters);
     if (groupByKey) {
       sourceRows = [...sourceRows].sort((a, b) => String(a[groupByKey] ?? "").localeCompare(String(b[groupByKey] ?? "")));
     }
@@ -877,6 +1503,8 @@ function RunReportModal({
       useDualAxis,
       decimalPlaces,
       displayUnits,
+      selectedColumnKeys: selectedColumnKeys.length > 0 ? selectedColumnKeys : undefined,
+      groupByKey: groupByKey || undefined,
     };
 
     if (existingReport && onUpdate) {
@@ -884,6 +1512,7 @@ function RunReportModal({
         name: reportName,
         calculatedColumns,
         visualConfig,
+        filters,
         visualCards: existingReport.visualCards?.length
           ? existingReport.visualCards.map((card, idx) => (idx === 0 ? { ...card, title: reportName, config: visualConfig } : card))
           : [{ id: crypto.randomUUID(), title: reportName, description: reportDef.description, config: visualConfig }],
@@ -894,10 +1523,12 @@ function RunReportModal({
       return;
     }
 
+    const reportType = reportDef.group === "Daily Log" ? "Daily Log Report" : "Single Tool Report";
     const saved: SavedReport = {
       id: crypto.randomUUID(),
       name: reportName,
       reportType,
+      templateValue: reportDef.value,
       description: reportDef.description,
       createdBy: "Me",
       createdAt: new Date().toISOString(),
@@ -905,6 +1536,7 @@ function RunReportModal({
       sharedWith: [],
       calculatedColumns,
       visualConfig,
+      filters,
       visualCards: [{ id: crypto.randomUUID(), title: reportName, description: reportDef.description, config: visualConfig }],
       lastRunRecordCount: rows.length,
     };
@@ -942,9 +1574,17 @@ function RunReportModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadDataManually, startDate, endDate, actorEmailFilter, eventTypeFilter, groupByKey, calculatedColumns]);
 
+  // Auto-run on open when viewing an already-saved report so the user lands
+  // on the rendered results instead of an empty builder.
+  useEffect(() => {
+    if (!existingReport && !templateLaunchConfig?.autoRun) return;
+    void runReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingReport?.id, templateLaunchConfig?.autoRun]);
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4 py-8">
-      <div className="bg-white rounded-xl w-full max-w-4xl shadow-xl flex flex-col max-h-[90vh]">
+    <div className={fullscreen ? "fixed inset-0 bg-white z-50 flex flex-col overflow-hidden" : "fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4 py-8"}>
+      <div className={fullscreen ? "flex flex-col flex-1 overflow-hidden" : "bg-white rounded-xl w-full max-w-4xl shadow-xl flex flex-col max-h-[90vh]"}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
           <div>
             <input
@@ -957,13 +1597,53 @@ function RunReportModal({
               {reportDef.group} · {reportDef.description}
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors ml-4 shrink-0">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2 ml-4 shrink-0">
+            <button
+              onClick={() => setShowConfig((prev) => !prev)}
+              className="px-3 py-1.5 border border-gray-200 text-xs font-medium text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              {showConfig ? "Hide Configuration" : "Edit Configuration"}
+            </button>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
+        {!showConfig && (
+          <div className="px-6 py-3 border-b border-gray-100 bg-gray-50 shrink-0 flex flex-wrap items-center gap-2">
+            {loading && <span className="text-xs text-gray-500">Running report...</span>}
+            {ran && !error && rows.length > 0 && (
+              <>
+                <span className="text-xs text-gray-500 mr-2">
+                  {rows.length} {rows.length === 1 ? "record" : "records"}
+                </span>
+                <button
+                  onClick={() => void downloadXLSX(`${reportName.toLowerCase().replace(/\s+/g, "-")}.xlsx`, displayColumns, rows)}
+                  className="px-3 py-1.5 border border-gray-200 text-xs font-medium text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Export XLSX
+                </button>
+                <button
+                  onClick={handleExport}
+                  className="px-3 py-1.5 border border-gray-200 text-xs font-medium text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Export CSV
+                </button>
+                <button
+                  onClick={handleExportPDF}
+                  className="px-3 py-1.5 border border-gray-200 text-xs font-medium text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Export PDF
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {showConfig && (
         <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 shrink-0">
           <div className="mb-3 rounded-md border border-gray-200 bg-white p-3">
             <p className="text-xs font-medium text-gray-700 mb-2">Visual Type & Configuration</p>
@@ -1060,6 +1740,51 @@ function RunReportModal({
                 <option value="millions">Display Units: Millions</option>
               </select>
             </div>
+          </div>
+
+          <div className="mb-3 rounded-md border border-gray-200 bg-white p-3">
+            <p className="text-sm font-semibold text-gray-900 mb-1">Filters</p>
+            <p className="text-[11px] text-gray-500 mb-3">
+              Configure columns and filters for your report and click &ldquo;Run Report&rdquo; to review.
+            </p>
+            <AddFilterDropdown
+              categoryLabel={reportDef.label}
+              columns={reportDef.columns}
+              onSelect={(columnKey) => {
+                if (filters.some((f) => f.columnKey === columnKey)) return;
+                setFilters((prev) => [
+                  ...prev,
+                  { id: crypto.randomUUID(), columnKey, mode: "matches", values: [] },
+                ]);
+              }}
+            />
+            {filters.length > 0 && (
+              <div>
+                {filters.map((f) => {
+                  const col = reportDef.columns.find((c) => c.key === f.columnKey);
+                  if (!col) return null;
+                  return (
+                    <FilterRow
+                      key={f.id}
+                      filter={f}
+                      categoryLabel={reportDef.label}
+                      fieldLabel={col.label}
+                      suggestions={distinctColumnValues(allFetchedRows, f.columnKey)}
+                      onUpdate={(patch) =>
+                        setFilters((prev) =>
+                          prev.map((x) => (x.id === f.id ? { ...x, ...patch } : x)),
+                        )
+                      }
+                      onRemove={() => setFilters((prev) => prev.filter((x) => x.id !== f.id))}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-900">
+            Visible columns are checked in the Configure Columns panel on the right. Uncheck any column to remove it from the report table and exports.
           </div>
 
           <div className="mb-3 rounded-md border border-gray-200 bg-white p-3">
@@ -1303,9 +2028,11 @@ function RunReportModal({
             </p>
           )}
         </div>
+        )}
 
-        <div className="overflow-auto flex-1">
-          {error && <p className="text-sm text-red-600 px-6 py-4">{error}</p>}
+        <div className="flex flex-1 min-h-0">
+          <div className="overflow-auto flex-1">
+            {error && <p className="text-sm text-red-600 px-6 py-4">{error}</p>}
           {ran && !error && rows.length === 0 && (
             <div className="py-16 text-center">
               <p className="text-sm text-gray-400">No records found for the selected criteria.</p>
@@ -1363,12 +2090,21 @@ function RunReportModal({
               </table>
             </>
           )}
-          {!ran && (
-            <div className="py-16 text-center">
-              <p className="text-sm text-gray-400">
-                Configure the filters above and click <span className="font-medium text-gray-600">Run Report</span> to view results.
-              </p>
-            </div>
+            {!ran && (
+              <div className="py-16 text-center">
+                <p className="text-sm text-gray-400">
+                  Configure the filters above and click <span className="font-medium text-gray-600">Run Report</span> to view results.
+                </p>
+              </div>
+            )}
+          </div>
+          {showConfig && (
+            <ColumnConfigurationPanel
+              columns={reportDef.columns}
+              selectedColumnKeys={selectedColumnKeys}
+              calculatedColumns={calculatedColumns}
+              onChange={setSelectedColumnKeys}
+            />
           )}
         </div>
       </div>
@@ -1738,51 +2474,173 @@ function PromoteReportModal({
   );
 }
 
+type AssistCalculatedColumn = {
+  name: string;
+  output: CalculatedOutput;
+  leftSource: string;
+  operator: "+" | "-" | "*" | "/";
+  rightSource: string;
+  leftConstant?: number;
+  rightConstant?: number;
+  decimals: number;
+  rounding: boolean;
+};
+
+type AssistRecommendation = {
+  reportType: string;
+  columns: string[];
+  sortByKey?: string;
+  sortDirection?: "asc" | "desc";
+  groupByKey?: string;
+  calculatedColumns: AssistCalculatedColumn[];
+  filters: ReportFilter[];
+  name: string;
+  description: string;
+  reasoning?: string;
+  def: ReportDef;
+};
+
 function AssistReportModal({
+  projectId,
   onClose,
   onCreate,
 }: {
+  projectId: string;
   onClose: () => void;
-  onCreate: (reportDef: ReportDef) => void;
+  onCreate: (rec: AssistRecommendation) => void;
 }) {
   const [prompt, setPrompt] = useState("");
-  const [recommendation, setRecommendation] = useState<ReportDef | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function suggest() {
-    const q = prompt.toLowerCase();
-    const match =
-      REPORT_TYPES.find((r) => q.includes("rfi") && r.value === "rfis") ||
-      REPORT_TYPES.find((r) => q.includes("submittal") && r.value === "submittals") ||
-      REPORT_TYPES.find((r) => q.includes("task") && r.value === "tasks") ||
-      REPORT_TYPES.find((r) => q.includes("user") && r.value === "user-activity") ||
-      REPORT_TYPES[0];
-    setRecommendation(match ?? null);
+  async function suggest() {
+    const trimmed = prompt.trim();
+    if (!trimmed) {
+      setError("Enter a prompt describing the report you want.");
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/reports/assist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: trimmed }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(typeof payload.error === "string" ? payload.error : "Assist failed to generate a report.");
+        return;
+      }
+      const def = REPORT_TYPES.find((r) => r.value === payload.reportType);
+      if (!def) {
+        setError("Assist returned an unrecognized report type.");
+        return;
+      }
+      const calcOutputs: CalculatedOutput[] = ["number", "currency", "percent", "date-variance"];
+      const rawCalcs: AssistCalculatedColumn[] = Array.isArray(payload.calculatedColumns)
+        ? (payload.calculatedColumns as Array<Record<string, unknown>>).flatMap((c) => {
+            const name = typeof c.name === "string" ? c.name : "";
+            const output = calcOutputs.includes(c.output as CalculatedOutput)
+              ? (c.output as CalculatedOutput)
+              : "number";
+            const operator = ["+", "-", "*", "/"].includes(c.operator as string)
+              ? (c.operator as "+" | "-" | "*" | "/")
+              : "+";
+            const leftSource = typeof c.leftSource === "string" ? c.leftSource : "constant";
+            const rightSource = typeof c.rightSource === "string" ? c.rightSource : "constant";
+            if (!name) return [];
+            return [
+              {
+                name,
+                output,
+                leftSource,
+                operator,
+                rightSource,
+                leftConstant: typeof c.leftConstant === "number" ? c.leftConstant : undefined,
+                rightConstant: typeof c.rightConstant === "number" ? c.rightConstant : undefined,
+                decimals: typeof c.decimals === "number" ? c.decimals : 2,
+                rounding: typeof c.rounding === "boolean" ? c.rounding : true,
+              },
+            ];
+          })
+        : [];
+
+      const validKeys = new Set(def.columns.map((c) => c.key));
+      const validFilterModes: FilterMode[] = [
+        "matches",
+        "not_matches",
+        "contains",
+        "not_contains",
+        "starts_with",
+        "ends_with",
+      ];
+      const rawFilters: ReportFilter[] = Array.isArray(payload.filters)
+        ? (payload.filters as Array<Record<string, unknown>>).flatMap((f) => {
+            const columnKey = typeof f.columnKey === "string" && validKeys.has(f.columnKey) ? f.columnKey : "";
+            const mode = validFilterModes.includes(f.mode as FilterMode)
+              ? (f.mode as FilterMode)
+              : "matches";
+            const values = Array.isArray(f.values)
+              ? (f.values as unknown[])
+                  .map((v) => (typeof v === "string" ? v : v == null ? "" : String(v)))
+                  .filter((v) => v.length > 0)
+              : [];
+            if (!columnKey || values.length === 0) return [];
+            return [{ id: crypto.randomUUID(), columnKey, mode, values }];
+          })
+        : [];
+
+      onCreate({
+        reportType: payload.reportType,
+        columns: Array.isArray(payload.columns) ? payload.columns : [],
+        sortByKey: typeof payload.sortByKey === "string" ? payload.sortByKey : undefined,
+        sortDirection:
+          payload.sortDirection === "desc" ? "desc" : payload.sortDirection === "asc" ? "asc" : undefined,
+        groupByKey: typeof payload.groupByKey === "string" ? payload.groupByKey : undefined,
+        calculatedColumns: rawCalcs,
+        filters: rawFilters,
+        name: typeof payload.name === "string" ? payload.name : def.label,
+        description: typeof payload.description === "string" ? payload.description : def.description,
+        reasoning: typeof payload.reasoning === "string" ? payload.reasoning : "",
+        def,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Assist failed to generate a report.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-        <h2 className="text-base font-semibold text-gray-900">Get a Custom 360 Report from Assist</h2>
-        <p className="text-xs text-gray-500 mt-1">Describe the outcome you want and Assist will recommend a starting report.</p>
+        <h2 className="text-base font-semibold text-gray-900">Get a Custom Report from Assist</h2>
+        <p className="text-xs text-gray-500 mt-1">
+          Describe the report you want in plain language. Assist (powered by Gemini) will pick the right tool and
+          columns and create the report automatically.
+        </p>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={4}
-          placeholder="Example: Show overdue RFIs by status and responsible team..."
+          placeholder="Example: Can you generate a report that shows all of the manpower logs and who created them"
           className="mt-4 w-full px-3 py-2 border border-gray-200 rounded-md text-sm"
         />
         <div className="flex gap-2 mt-4">
-          <button onClick={suggest} className="px-4 py-2 bg-gray-900 text-white rounded-md text-sm">Generate Recommendation</button>
-          <button onClick={onClose} className="px-4 py-2 border border-gray-200 text-gray-600 rounded-md text-sm">Close</button>
+          <button
+            onClick={suggest}
+            disabled={loading}
+            className="px-4 py-2 bg-gray-900 text-white rounded-md text-sm disabled:opacity-50"
+          >
+            {loading ? "Generating…" : "Generate Report"}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 border border-gray-200 text-gray-600 rounded-md text-sm">
+            Close
+          </button>
         </div>
-        {recommendation && (
-          <div className="mt-4 rounded border border-gray-200 p-3">
-            <p className="text-sm font-medium text-gray-900">Recommended: {recommendation.label}</p>
-            <p className="text-xs text-gray-500 mt-1">{recommendation.description}</p>
-            <button onClick={() => onCreate(recommendation)} className="mt-3 px-3 py-1.5 bg-gray-900 text-white rounded text-xs">
-              Create from Assist Suggestion
-            </button>
-          </div>
+        {error && (
+          <div className="mt-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
         )}
       </div>
     </div>
@@ -2003,13 +2861,21 @@ function Create360CategoryModal({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ReportingClient({ projectId }: { projectId: string }) {
+export default function ReportingClient({
+  projectId,
+  currentUserName,
+}: {
+  projectId: string;
+  currentUserName?: string;
+}) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"reports" | "dashboards">("reports");
+  const [activeTab, setActiveTab] = useState<"reports" | "templates" | "dashboards">("reports");
   const [search, setSearch] = useState("");
   const [myReports, setMyReports] = useState<SavedReport[]>([]);
-  const [myReportsOpen, setMyReportsOpen] = useState(true);
-  const [templatesOpen, setTemplatesOpen] = useState(true);
+  const [selectedSectionId, setSelectedSectionId] = useState<SectionId>("my-reports");
+  const [openSectionIds, setOpenSectionIds] = useState<Set<SectionId>>(
+    () => new Set<SectionId>(REPORT_SECTIONS.map((s) => s.id))
+  );
 
   const [dashboards, setDashboards] = useState<SavedDashboard[]>([]);
   const [showCreateDashboardModal, setShowCreateDashboardModal] = useState(false);
@@ -2035,6 +2901,8 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
   const [activeReport, setActiveReport] = useState<ReportDef | null>(null);
   const [activeCalculatedColumns, setActiveCalculatedColumns] = useState<CalculatedColumn[]>([]);
   const [activeSavedReport, setActiveSavedReport] = useState<SavedReport | null>(null);
+  const [activeReportFullscreen, setActiveReportFullscreen] = useState(false);
+  const [activeTemplateLaunchConfig, setActiveTemplateLaunchConfig] = useState<TemplateLaunchConfig | undefined>();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createType, setCreateType] = useState("");
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -2047,6 +2915,8 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
     setActiveReport(def);
     setActiveSavedReport(null);
     setActiveCalculatedColumns([]);
+    setActiveReportFullscreen(true);
+    setActiveTemplateLaunchConfig(getTemplateLaunchConfig(def));
   }
 
   function openFromSaved(saved: SavedReport) {
@@ -2055,25 +2925,58 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
       return;
     }
 
+    // Reports created via the drag-and-drop Single Tool builder persist their
+    // tabs/datasets/columns to localStorage and have no templateValue. Route
+    // those back to the builder; template-based "Single Tool Report" saves
+    // (including Assist-generated reports) fall through to RunReportModal.
+    if (saved.hasSingleToolTabs || (saved.reportType === "Single Tool Report" && !saved.templateValue)) {
+      router.push(`/projects/${projectId}/reporting/single-tool/${saved.id}`);
+      return;
+    }
+
+    // Otherwise it's a template-based saved report — look up the exact
+    // template by its stored value or by an exact label prefix match on the
+    // saved name. Anything looser was silently swapping templates.
     const def =
+      (saved.templateValue ? REPORT_TYPES.find((r) => r.value === saved.templateValue) : undefined) ??
       REPORT_TYPES.find((r) => {
         const expectedType = r.group === "Daily Log" ? "Daily Log Report" : "Single Tool Report";
         return expectedType === saved.reportType && r.label === saved.name.split(" - ")[0];
-      }) ??
-      REPORT_TYPES.find((r) => {
-        const expectedType = r.group === "Daily Log" ? "Daily Log Report" : "Single Tool Report";
-        return expectedType === saved.reportType;
       });
 
     if (def) {
       setActiveReport(def);
       setActiveSavedReport(saved);
       setActiveCalculatedColumns(saved.calculatedColumns ?? []);
+      setActiveTemplateLaunchConfig(undefined);
+      return;
     }
+
+    router.push(`/projects/${projectId}/reporting/360/${saved.id}`);
+  }
+
+  function persistSavedReport(report: SavedReport) {
+    if (typeof window === "undefined") return;
+    saveReport(projectId, {
+      id: report.id,
+      name: report.name,
+      reportType: report.reportType,
+      templateValue: report.templateValue,
+      description: report.description,
+      createdBy: report.createdBy,
+      createdAt: report.createdAt,
+      updatedAt: report.updatedAt,
+      sharedWith: report.sharedWith,
+      lastRunRecordCount: report.lastRunRecordCount,
+      visualConfig: report.visualConfig as unknown as Record<string, unknown> | undefined,
+      calculatedColumns: report.calculatedColumns as unknown as Record<string, unknown>[] | undefined,
+      filters: report.filters as unknown as Record<string, unknown>[] | undefined,
+    });
   }
 
   function handleSaveReport(report: SavedReport) {
     setMyReports((prev) => [report, ...prev]);
+    persistSavedReport(report);
   }
 
   function deleteReport(id: string) {
@@ -2094,19 +2997,31 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
           id: p.id,
           name: p.name,
           reportType: p.reportType,
+          templateValue: p.templateValue,
           description: p.description,
           createdBy: p.createdBy,
           createdAt: p.createdAt,
           updatedAt: p.updatedAt,
           sharedWith: p.sharedWith ?? [],
           lastRunRecordCount: p.lastRunRecordCount,
+          hasSingleToolTabs: (p.singleToolTabs?.length ?? 0) > 0,
+          visualConfig: p.visualConfig as unknown as VisualConfig | undefined,
+          calculatedColumns: p.calculatedColumns as unknown as CalculatedColumn[] | undefined,
+          filters: p.filters as unknown as ReportFilter[] | undefined,
         }));
       return [...additions, ...prev];
     });
   }, [projectId]);
 
   function updateSavedReport(reportId: string, patch: Partial<SavedReport>) {
-    setMyReports((prev) => prev.map((r) => (r.id === reportId ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r)));
+    setMyReports((prev) =>
+      prev.map((r) => {
+        if (r.id !== reportId) return r;
+        const next = { ...r, ...patch, updatedAt: new Date().toISOString() };
+        persistSavedReport(next);
+        return next;
+      })
+    );
   }
 
   function distributeSnapshot(payload: { reportId: string; recipients: string[]; format: "pdf" | "csv" | "xlsx"; schedule: SnapshotSchedule }) {
@@ -2148,6 +3063,7 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
       calculatedColumns: report.calculatedColumns,
     };
     setMyReports((prev) => [clone, ...prev]);
+    persistSavedReport(clone);
     setStatusBanner(`Copy created: ${clone.name}`);
   }
 
@@ -2263,39 +3179,47 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
   }, [statusBanner]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F9FAFB]">
       <ProjectNav projectId={projectId} />
 
-      <main className="max-w-7xl mx-auto px-6 py-6">
-        <div className="mb-5">
-          <h1 className="font-display text-[28px] leading-tight text-[color:var(--ink)] mb-1">Reporting</h1>
-          <p className="text-sm text-gray-500">360 Reporting — create reports, clone reports, then build and share dashboards from your visual library.</p>
-        </div>
-        <div className="flex items-start justify-between mb-5 rounded-xl border border-[var(--border-base)] bg-white p-4">
+      <main className="max-w-[1400px] mx-auto px-6 py-8">
+        <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
           <div>
-            <p className="text-xs text-gray-500 mt-2">Create reports, clone reports, then build and share dashboards from your visual library.</p>
+            <h1 className="font-display text-[32px] leading-[1.05] tracking-[-0.012em] text-[color:var(--ink)]">Reporting</h1>
+            <p className="sub mt-1.5">
+              <em>360 Reporting across this project</em>
+              <span className="sep">·</span>
+              <span className="num">{myReports.length}</span> {myReports.length === 1 ? "report" : "reports"}
+              <span className="sep">·</span>
+              <span className="num">{REPORT_TYPES.length}</span> templates
+              <span className="sep">·</span>
+              <span className="num">{dashboards.length}</span> {dashboards.length === 1 ? "dashboard" : "dashboards"}
+            </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Pill className="pill-open">{activeTab === "reports" ? "reports" : "dashboards"}</Pill>
-            <TabButton active={activeTab === "reports"} label="Reports" onClick={() => setActiveTab("reports")} />
-            <TabButton active={activeTab === "dashboards"} label="Dashboards" onClick={() => setActiveTab("dashboards")} />
+            <a
+              href={`/projects/${projectId}/report-records`}
+              className="btn-secondary"
+            >
+              Report Records
+            </a>
             <button
               onClick={() => setShowSettingsModal(true)}
-              className="px-3 py-2 border border-gray-200 text-sm text-gray-600 rounded-md hover:bg-gray-50"
+              className="btn-secondary"
             >
               Configure Settings
             </button>
             <button
               onClick={() => setShowAssistModal(true)}
-              className="px-3 py-2 border border-gray-200 text-sm text-gray-600 rounded-md hover:bg-gray-50"
+              className="btn-secondary"
             >
               Assist
             </button>
-            {activeTab === "reports" ? (
+            {activeTab !== "dashboards" ? (
               <div className="relative">
                 <button
                   onClick={() => setCreateMenuOpen((v) => !v)}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"
+                  className="btn-primary flex items-center gap-1.5"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -2323,7 +3247,7 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
                       <button
                         onClick={() => {
                           setCreateMenuOpen(false);
-                          setShowCreateModal(true);
+                          router.push(`/projects/${projectId}/reporting/single-tool/new`);
                         }}
                         className="w-full text-left px-4 py-2.5 hover:bg-gray-50"
                       >
@@ -2337,7 +3261,7 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
             ) : (
               <button
                 onClick={() => setShowCreateDashboardModal(true)}
-                className="flex items-center gap-1.5 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"
+                className="btn-primary flex items-center gap-1.5"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -2348,92 +3272,165 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        <div className="relative mb-6 max-w-xs">
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-          </svg>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={activeTab === "reports" ? "Search reports/templates" : "Search dashboards"}
-            className="w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-1 focus:ring-gray-900"
-          />
+        <div className="flex items-center gap-3 mb-5 flex-wrap">
+          <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden bg-white">
+            <button onClick={() => setActiveTab("reports")} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "reports" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Reports</button>
+            <button onClick={() => setActiveTab("templates")} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "templates" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>All Templates</button>
+            <button onClick={() => setActiveTab("dashboards")} className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeTab === "dashboards" ? "bg-[color:var(--ink)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>Dashboards</button>
+          </div>
+          <div className="relative max-w-xs ml-auto">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={activeTab === "reports" ? "Search reports" : activeTab === "templates" ? "Search templates" : "Search dashboards"}
+              className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[color:var(--ink)]"
+            />
+          </div>
         </div>
         {statusBanner && (
-          <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
             {statusBanner}
           </div>
         )}
 
         {activeTab === "reports" && (
-          <>
-            <div className="mb-6">
-              <SectionHeader
-                title="My Reports"
-                count={filteredMyReports.length}
-                subtitle="Edit reports, distribute snapshots, clone copies, or permanently delete when no longer needed."
-                open={myReportsOpen}
-                onToggle={() => setMyReportsOpen((v) => !v)}
-              />
+          <div className="flex gap-6 items-start">
+            <aside className="w-56 shrink-0">
+              <p className="mono-label mb-2 px-1">Report Library</p>
+              <nav className="bg-white border hairline rounded-xl overflow-hidden">
+                <ul>
+                  {REPORT_SECTIONS.map((section) => {
+                    const selected = selectedSectionId === section.id;
+                    return (
+                      <li key={section.id}>
+                        <button
+                          onClick={() => {
+                            setSelectedSectionId(section.id);
+                            setOpenSectionIds((prev) => {
+                              const next = new Set(prev);
+                              next.add(section.id);
+                              return next;
+                            });
+                            if (typeof document !== "undefined") {
+                              const el = document.getElementById(`section-${section.id}`);
+                              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }
+                          }}
+                          className={`w-full text-left px-3 py-2 text-sm border-l-2 transition-colors ${
+                            selected
+                              ? "border-[color:var(--brand-500)] bg-[color:var(--surface-sunken)] text-[color:var(--ink)] font-semibold"
+                              : "border-transparent text-gray-600 hover:bg-[color:var(--surface-sunken)]"
+                          }`}
+                        >
+                          {section.title}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </nav>
+            </aside>
 
-              {myReportsOpen && (
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mt-3">
-                  {filteredMyReports.length === 0 ? (
-                    <div className="py-10 text-center">
-                      <p className="text-sm text-gray-400">
-                        {search ? "No saved reports match your search." : "No saved reports yet. Run a template and click “Save Report”."}
-                      </p>
-                    </div>
-                  ) : (
+            <div className="flex-1 min-w-0 space-y-4">
+              {REPORT_SECTIONS.map((section) => (
+                <SectionCard
+                  key={section.id}
+                  section={section}
+                  open={openSectionIds.has(section.id)}
+                  search={search}
+                  onToggle={() =>
+                    setOpenSectionIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(section.id)) next.delete(section.id);
+                      else next.add(section.id);
+                      return next;
+                    })
+                  }
+                  onViewAll={() => {
+                    setSelectedSectionId(section.id);
+                    setOpenSectionIds((prev) => {
+                      const next = new Set(prev);
+                      next.add(section.id);
+                      return next;
+                    });
+                  }}
+                  myReports={filteredMyReports}
+                  templates={REPORT_TYPES}
+                  onOpenSaved={openFromSaved}
+                  onOpenTemplate={openTemplate}
+                  onPreviewTemplate={setPreviewTemplate}
+                  onAddVisual={addVisualToReport}
+                  onEditReport={(id) => setEditReportId(id)}
+                  onShareReport={(id) => setShareReportId(id)}
+                  onDistribute={(id) => setDistributeReportId(id)}
+                  onPreviewInDashboard={(id) => setPreviewInDashboardReportId(id)}
+                  onPromote={(id) => setPromoteReportId(id)}
+                  onCloneReport={cloneReport}
+                  onDeleteReport={(id) => setDeleteReportId(id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "templates" && (
+          <div>
+            <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-900">
+              Templates are customizable, industry-standard reports. Preview a template, then save it as a new report in My Reports.
+            </div>
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-500">Filter Data Sets</label>
+                <select
+                  value={templateDatasetFilter}
+                  onChange={(e) => setTemplateDatasetFilter(e.target.value)}
+                  className="px-2.5 py-1.5 border border-gray-200 rounded text-xs bg-white"
+                >
+                  <option value="all">All</option>
+                  {GROUPS.map((group) => (
+                    <option key={group} value={group}>
+                      {group}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-gray-400">{filteredTemplates.length} templates</span>
+              </div>
+              {groupedTemplates.map(({ group, items }) => (
+                <div key={group}>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5 px-1">{group}</p>
+                  <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-gray-100">
                           <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-64">Report Name</th>
                           <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-44">Report Type</th>
                           <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500">Description</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-32">Created By</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-28">Date Created</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-28">Last Modified</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-20">Visuals</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-36">Last Snapshot</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-36">Company Level</th>
                           <th className="w-10" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {filteredMyReports.map((r) => (
-                          <tr key={r.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openFromSaved(r)}>
-                            <td className="px-4 py-3 font-medium text-gray-900">{r.name}</td>
+                        {items.map((r) => (
+                          <tr key={r.value} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openTemplate(r)}>
+                            <td className="px-4 py-3 font-medium text-gray-900">{r.label}</td>
                             <td className="px-4 py-3">
-                              <SavedTypeBadge label={r.reportType} />
+                              <TypeBadge group={r.group} />
                             </td>
-                            <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{r.description}</td>
-                            <td className="px-4 py-3 text-gray-600">{r.createdBy}</td>
-                            <td className="px-4 py-3 text-gray-500">{fmtDate(r.createdAt)}</td>
-                            <td className="px-4 py-3 text-gray-500">{fmtDate(r.updatedAt)}</td>
-                            <td className="px-4 py-3 text-gray-500">{Math.max(1, r.visualCards?.length ?? 0)}</td>
-                            <td className="px-4 py-3 text-xs text-gray-500">{r.lastDistributedAt ? `${fmtDate(r.lastDistributedAt)} (${r.distributionCount ?? 1})` : "Never"}</td>
-                            <td className="px-4 py-3 text-xs text-gray-500">{r.promotedToCompanyAt ? `Promoted ${fmtDate(r.promotedToCompanyAt)}` : "Project Only"}</td>
+                            <td className="px-4 py-3 text-xs text-gray-500 max-w-sm">{r.description}</td>
                             <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
                               <RowMenu
                                 actions={[
-                                  { label: "Run Report", onClick: () => openFromSaved(r) },
-                                  { label: "Edit (Visuals & Layout)", onClick: () => openFromSaved(r) },
-                                  { label: "Add Visual", onClick: () => addVisualToReport(r) },
-                                  { label: "Edit Report", onClick: () => setEditReportId(r.id) },
-                                  { label: "Share Report", onClick: () => setShareReportId(r.id) },
-                                  { label: "Distribute Snapshot", onClick: () => setDistributeReportId(r.id) },
-                                  { label: "Preview in Dashboard", onClick: () => setPreviewInDashboardReportId(r.id) },
-                                  { label: "Promote to Company", onClick: () => setPromoteReportId(r.id) },
-                                  { label: "Make a Copy", onClick: () => cloneReport(r) },
-                                  { label: "Delete", onClick: () => setDeleteReportId(r.id), danger: true },
+                                  { label: "Preview Template", onClick: () => setPreviewTemplate(r) },
+                                  { label: "Use Template", onClick: () => openTemplate(r) },
                                 ]}
                               />
                             </td>
@@ -2441,82 +3438,16 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
                         ))}
                       </tbody>
                     </table>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <SectionHeader
-                title="All Templates"
-                count={filteredTemplates.length}
-                subtitle="Search, filter, preview, and then save a template as a new report in My Reports."
-                open={templatesOpen}
-                onToggle={() => setTemplatesOpen((v) => !v)}
-              />
-
-              {templatesOpen && (
-                <div className="space-y-4 mt-3">
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-gray-500">Filter Data Sets</label>
-                    <select
-                      value={templateDatasetFilter}
-                      onChange={(e) => setTemplateDatasetFilter(e.target.value)}
-                      className="px-2.5 py-1.5 border border-gray-200 rounded text-xs bg-white"
-                    >
-                      <option value="all">All</option>
-                      {GROUPS.map((group) => (
-                        <option key={group} value={group}>
-                          {group}
-                        </option>
-                      ))}
-                    </select>
                   </div>
-                  {groupedTemplates.map(({ group, items }) => (
-                    <div key={group}>
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5 px-1">{group}</p>
-                      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-gray-100">
-                              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-64">Report Name</th>
-                              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 w-44">Report Type</th>
-                              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500">Description</th>
-                              <th className="w-10" />
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {items.map((r) => (
-                              <tr key={r.value} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openTemplate(r)}>
-                                <td className="px-4 py-3 font-medium text-gray-900">{r.label}</td>
-                                <td className="px-4 py-3">
-                                  <TypeBadge group={r.group} />
-                                </td>
-                                <td className="px-4 py-3 text-xs text-gray-500 max-w-sm">{r.description}</td>
-                                <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
-                                  <RowMenu
-                                    actions={[
-                                      { label: "Preview Template", onClick: () => setPreviewTemplate(r) },
-                                      { label: "Use Template", onClick: () => openTemplate(r) },
-                                    ]}
-                                  />
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ))}
-                  {groupedTemplates.length === 0 && (
-                    <div className="bg-white border border-gray-200 rounded-lg py-10 text-center">
-                      <p className="text-sm text-gray-400">No templates match your search.</p>
-                    </div>
-                  )}
+                </div>
+              ))}
+              {groupedTemplates.length === 0 && (
+                <div className="bg-white border border-gray-200 rounded-lg py-10 text-center">
+                  <p className="text-sm text-gray-400">No templates match your search.</p>
                 </div>
               )}
             </div>
-          </>
+          </div>
         )}
 
         {activeTab === "dashboards" && (
@@ -2623,10 +3554,14 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
           projectId={projectId}
           existingReport={activeSavedReport}
           initialCalculatedColumns={activeCalculatedColumns}
+          fullscreen={activeReportFullscreen}
+          templateLaunchConfig={activeTemplateLaunchConfig}
           onClose={() => {
             setActiveReport(null);
             setActiveSavedReport(null);
             setActiveCalculatedColumns([]);
+            setActiveReportFullscreen(false);
+            setActiveTemplateLaunchConfig(undefined);
           }}
           onSave={handleSaveReport}
           onUpdate={updateSavedReport}
@@ -2689,6 +3624,7 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
                     setActiveReport(def);
                     setActiveSavedReport(null);
                     setActiveCalculatedColumns([]);
+                    setActiveTemplateLaunchConfig(undefined);
                   }
                 }}
                 className="flex-1 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors disabled:opacity-40"
@@ -2729,10 +3665,79 @@ export default function ReportingClient({ projectId }: { projectId: string }) {
 
       {showAssistModal && (
         <AssistReportModal
+          projectId={projectId}
           onClose={() => setShowAssistModal(false)}
-          onCreate={(reportDef) => {
+          onCreate={(rec) => {
             setShowAssistModal(false);
-            openTemplate(reportDef);
+            const now = new Date().toISOString();
+            const isDailyLog = rec.def.group === "Daily Log";
+            const calculatedColumns: CalculatedColumn[] = rec.calculatedColumns.map((c) => ({
+              id: `calc_${crypto.randomUUID()}`,
+              name: c.name,
+              type: c.output === "date-variance" ? "date-variance" : "basic",
+              output: c.output,
+              leftSource: c.leftSource,
+              operator: c.operator,
+              rightSource: c.rightSource,
+              leftConstant: c.leftConstant,
+              rightConstant: c.rightConstant,
+              decimals: c.decimals,
+              rounding: c.rounding,
+            }));
+            const visualConfig: VisualConfig = {
+              visualType: "table",
+              sortByKey: rec.sortByKey,
+              sortDirection: rec.sortDirection ?? "asc",
+              selectedColumnKeys: rec.columns.length > 0 ? rec.columns : undefined,
+              groupByKey: rec.groupByKey,
+            };
+            const stored: StoredReport = {
+              id: crypto.randomUUID(),
+              name: rec.name,
+              reportType: isDailyLog ? "Daily Log Report" : "Single Tool Report",
+              templateValue: rec.def.value,
+              description: rec.description,
+              createdBy: currentUserName || "Assist",
+              createdAt: now,
+              updatedAt: now,
+              sharedWith: [],
+              category: rec.def.group,
+              selectedColumns: rec.columns.map((key) => {
+                const col = rec.def.columns.find((c) => c.key === key);
+                return {
+                  id: key,
+                  categoryLabel: rec.def.group,
+                  source: rec.def.label,
+                  fieldKey: key,
+                  fieldLabel: col?.label ?? key,
+                };
+              }),
+              visualConfig: visualConfig as unknown as Record<string, unknown>,
+              calculatedColumns: calculatedColumns as unknown as Record<string, unknown>[],
+              filters: rec.filters as unknown as Record<string, unknown>[],
+            };
+            saveReport(projectId, stored);
+            const savedReport: SavedReport = {
+              id: stored.id,
+              name: stored.name,
+              reportType: stored.reportType,
+              templateValue: stored.templateValue,
+              description: stored.description,
+              createdBy: stored.createdBy,
+              createdAt: stored.createdAt,
+              updatedAt: stored.updatedAt,
+              sharedWith: stored.sharedWith,
+              calculatedColumns,
+              visualConfig,
+              filters: rec.filters,
+            };
+            handleSaveReport(savedReport);
+            setActiveReport(rec.def);
+            setActiveSavedReport(savedReport);
+            setActiveTemplateLaunchConfig(undefined);
+            setActiveCalculatedColumns(calculatedColumns);
+            setActiveReportFullscreen(true);
+            setStatusBanner(`Assist created “${stored.name}”. Review and adjust as needed.`);
           }}
         />
       )}

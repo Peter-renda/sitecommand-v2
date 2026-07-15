@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import ProjectNav from "@/components/ProjectNav";
+import ReportFieldsSection, { type ReportFieldValues } from "@/components/ReportFieldsSection";
+import { PUNCH_ITEM_REPORT_FIELDS } from "@/lib/report-fields";
 
 type DirContact = { id: string; name: string; email: string | null };
 type DirectoryContact = {
@@ -145,6 +147,7 @@ export default function PunchListDetailClient({ projectId, itemId, role, usernam
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
+  const [editReportFields, setEditReportFields] = useState<ReportFieldValues>({});
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -185,6 +188,7 @@ export default function PunchListDetailClient({ projectId, itemId, role, usernam
       due_date: item.due_date ?? "",
       description: item.description ?? "",
     });
+    setEditReportFields((item as { report_fields?: ReportFieldValues }).report_fields ?? {});
     setFormError(null);
     setShowEditModal(true);
     setShowActions(false);
@@ -210,6 +214,7 @@ export default function PunchListDetailClient({ projectId, itemId, role, usernam
         location: editForm.location || null,
         due_date: editForm.due_date || null,
         description: editForm.description || null,
+        report_fields: editReportFields,
       }),
     });
 
@@ -263,9 +268,9 @@ export default function PunchListDetailClient({ projectId, itemId, role, usernam
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-          <a href="/dashboard" className="text-sm font-semibold text-gray-900">SiteCommand</a>
+      <div className="min-h-screen bg-[#F9FAFB]">
+        <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+          <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)]">SiteCommand</a>
           <span className="text-sm text-gray-400">{username}</span>
         </header>
         <main className="max-w-4xl mx-auto px-6 py-8"><p className="text-sm text-gray-400">Loading...</p></main>
@@ -275,9 +280,9 @@ export default function PunchListDetailClient({ projectId, itemId, role, usernam
 
   if (notFound || !item) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-          <a href="/dashboard" className="text-sm font-semibold text-gray-900">SiteCommand</a>
+      <div className="min-h-screen bg-[#F9FAFB]">
+        <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+          <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)]">SiteCommand</a>
         </header>
         <main className="max-w-4xl mx-auto px-6 py-8"><p className="text-sm text-gray-500">Item not found.</p></main>
       </div>
@@ -285,9 +290,9 @@ export default function PunchListDetailClient({ projectId, itemId, role, usernam
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-        <a href="/dashboard" className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors">SiteCommand</a>
+    <div className="min-h-screen bg-[#F9FAFB]">
+      <header className="bg-[#F9FAFB] border-b border-black/[0.06] px-6 h-14 flex items-center justify-between">
+        <a href="/dashboard" className="text-[15px] font-semibold text-[color:var(--ink)] hover:text-gray-600 transition-colors">SiteCommand</a>
         <div className="flex items-center gap-5">
           <span className="text-sm text-gray-400">{username}</span>
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-gray-900 transition-colors">Logout</button>
@@ -525,6 +530,14 @@ export default function PunchListDetailClient({ projectId, itemId, role, usernam
                   className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 resize-none"
                 />
               </div>
+              <ReportFieldsSection
+                title="Report Fields"
+                description="Extra punch item attributes surfaced as columns in 360 Reports."
+                fields={PUNCH_ITEM_REPORT_FIELDS}
+                values={editReportFields}
+                onChange={(key, value) => setEditReportFields((prev) => ({ ...prev, [key]: value }))}
+                columns={2}
+              />
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
                 {formError && <p className="mr-auto text-sm text-red-600">{formError}</p>}
                 <button type="button" onClick={() => setShowEditModal(false)} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors">Cancel</button>

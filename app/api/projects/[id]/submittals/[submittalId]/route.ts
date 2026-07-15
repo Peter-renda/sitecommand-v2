@@ -45,6 +45,7 @@ export async function PATCH(
     "planned_return_date", "planned_internal_review_completed_date", "planned_submit_by_date", "submitter_due_date", "approver_due_date",
     "owners_manual", "package_notes", "confirmed_delivery_date", "actual_delivery_date",
     "workflow_steps", "related_items", "closed_at", "closed_by", "distributed_at", "distributed_by",
+    "report_fields",
   ];
   const update: Record<string, unknown> = {};
   for (const key of allowed) {

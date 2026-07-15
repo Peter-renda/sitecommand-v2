@@ -35,7 +35,11 @@ export async function GET(req: NextRequest) {
     const { data } = await supabase
       .from("projects")
       .select("id, name, description, address, status, project_number")
-      .eq("company_id", session.company_id);
+      .eq("company_id", session.company_id)
+      // Never surface training sandboxes here: they carry a company_id, so an
+      // org admin would otherwise see every user's private sandbox in search.
+      .eq("is_training", false)
+      .is("archived_at", null);
     projectsList = data || [];
   } else {
     const { data: memberships } = await supabase
@@ -48,7 +52,9 @@ export async function GET(req: NextRequest) {
       let pq = supabase
         .from("projects")
         .select("id, name, description, address, status, project_number")
-        .in("id", projectIds);
+        .in("id", projectIds)
+        .eq("is_training", false)
+        .is("archived_at", null);
       if (session.company_id) pq = pq.eq("company_id", session.company_id);
       const { data } = await pq;
       projectsList = data || [];
